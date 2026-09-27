@@ -1,0 +1,28 @@
+{
+  "name": "browser-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal browser agent: drives a dedicated Chrome profile and the macOS desktop with any model provider.",
+  "type": "module",
+  "bin": {
+    "browser-agent": "bin/browser-agent.js"
+  },
+  "scripts": {
+    "start": "node bin/browser-agent.js serve",
+    "check": "node --check bin/browser-agent.js && for f in src/*.js src/providers/*.js ui/*.js extension/*.js scripts/*.js; do node --check $f || exit 1; done && node scripts/agent-check.js",
+    "build:extension": "node scripts/build-extension.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
+    "@google/genai": "^2.24.0",
+    "ollama": "^0.6.3",
+    "openai": "^7.22.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Browser Agent</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span>
+    <span id="model" class="model">connecting…</span>
+    <button id="toggle-ghost" class="icon-btn" data-icon="ghost" aria-pressed="false" title="Ghost mode" aria-label="Ghost mode"></button>
+    <button id="open-menu" class="icon-btn" data-icon="menu" title="Menu" aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu"></button>
+  </header>
+
+  <main id="log"></main>
+
+  <div id="permission" hidden>
+    <div id="perm-text"></div>
+    <div class="row">
+      <button data-decision="once" class="primary">Allow once</button>
+      <button data-decision="always">Always allow site</button>
+      <button data-decision="deny">Deny</button>
+    </div>
+  </div>
+
+  <div id="activity" hidden>
+    <span id="spinner" aria-hidden="true">✢</span>
+    <span id="activity-verb">Thinking…</span>
+    <span id="activity-meta"></span>
+  </div>
+
+  <form id="composer">
+    <textarea id="input" rows="3" placeholder="What should it do?"></textarea>
+    <button id="send" type="submit" class="primary">Send</button>
+  </form>
+
+  <div id="menu-scrim" hidden></div>
+  <aside id="menu" class="menu" hidden aria-label="Menu">
+    <nav class="menu-top" aria-label="Settings">
+      <div class="menu-label menu-label-row">
+        <span>Settings</span>
+        <button id="close-menu" class="icon-btn" data-icon="close" title="Close" aria-label="Close menu"></button>
+      </div>
+      <button data-settings-page="general" data-icon="general"><span>General</span></button>
+      <button data-settings-page="models" data-icon="models"><span>Models</span></button>
+      <button data-settings-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
+      <button data-settings-page="browser" data-icon="window"><span>Browser</span></button>
+      <button data-settings-page="data" data-icon="lock"><span>Data and privacy</span></button>
+      <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
+    </nav>
+    <section class="menu-bottom" aria-label="Sessions">
+      <div class="menu-label">Sessions</div>
+      <button id="new-chat" class="menu-new" data-icon="compose"><span>New session</span></button>
+      <input id="history-search" type="search" placeholder="Search sessions" autocomplete="off" />
+      <div id="history-list"></div>
+    </section>
+  </aside>
+
+  <aside id="settings" class="settings" hidden aria-label="Settings">
+    <div class="settings-head">
+      <button id="settings-back" class="icon-btn" data-icon="back" title="All settings" aria-label="All settings"></button>
+      <h2 id="settings-title">Settings</h2>
+      <button id="close-settings" class="icon-btn" data-icon="close" title="Close" aria-label="Close settings"></button>
+    </div>
+
+    <div class="settings-main">
+      <nav class="settings-nav" aria-label="Settings sections">
+        <button data-page="general" data-icon="general"><span>General</span></button>
+        <button data-page="models" data-icon="models"><span>Models</span></button>
+        <button data-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
+        <button data-page="browser" data-icon="window"><span>Browser</span></button>
+        <button data-page="data" data-icon="lock"><span>Data and privacy</span></button>
+      </nav>
+
+      <div class="settings-pages">
+        <section class="settings-page" data-page="general" data-title="General" hidden>
+          <div class="setting-group">
+            <div class="setting stack">
+              <div class="setting-text">
+                <label class="setting-title" for="customInstructions">Standing instructions</label>
+                <p class="setting-desc">Sent with every task. Use it for facts about you and preferences the agent should always follow.</p>
+              </div>
+              <textarea id="customInstructions" rows="5" data-setting="customInstructions"
+                placeholder="For example: Prefer English results. My city is Austin, TX. Use my work account for Google Docs."></textarea>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="autoConfirmAge">Confirm age gates for me</label>
+                <p class="setting-desc">You are 18 or older, so the agent confirms simple "Are you 18?" prompts without asking. It never submits ID or payment details for age checks.</p>
+              </div>
+              <input id="autoConfirmAge" type="checkbox" role="switch" class="switch" data-setting="autoConfirmAge" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="maxSteps">Step limit</label>
+                <p class="setting-desc">The most model turns one task can take before the agent stops. Raise it for long tasks.</p>
+              </div>
+              <input id="maxSteps" type="number" min="1" max="1000" class="narrow-input" data-setting="maxSteps" data-kind="int" data-min="1" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Reset</h3>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Reset settings to defaults</span>
+                <p class="setting-desc">Restores every setting to its default. API keys, saved sessions, and Ghost mode are kept.</p>
+              </div>
+              <button id="reset-settings" type="button" class="danger-outline">Reset</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-page" data-page="models" data-title="Models" hidden>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="provider">Provider</label>
+                <p class="setting-desc">The service that runs the agent. You can switch in the middle of a session.</p>
+              </div>
+              <select id="provider">
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="mistral">Mistral</option>
+                <option value="ollama">Ollama (local)</option>
+              </select>
+            </div>
+            <div class="setting stack">
+              <div class="setting-text">
+                <label class="setting-title" for="model-input">Model</label>
+                <p class="setting-desc">The model id for this provider. Load the list to pick from the models your key can use.</p>
+              </div>
+              <div class="control-row">
+                <input id="model-input" list="model-list" placeholder="Model id" autocomplete="off" spellcheck="false" />
+                <button id="refresh-models" type="button">Load list</button>
+              </div>
+              <datalist id="model-list"></datalist>
+              <p class="field-note" id="models-hint" aria-live="polite"></p>
+            </div>
+          </div>
+
+          <h3 class="group-label">Reasoning</h3>
+          <div class="setting-group">
+            <div class="setting" data-for-provider="openai">
+              <div class="setting-text">
+                <label class="setting-title" for="openaiEffort">Reasoning effort</label>
+                <p class="setting-desc">How long OpenAI reasoning models think before acting. Higher is more reliable on long tasks, but slower and uses more tokens.</p>
+              </div>
+              <select id="openaiEffort" data-setting="openaiEffort">
+                <option value="default">Model default</option>
+                <option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option>
+                <option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option>
+              </select>
+            </div>
+            <div class="setting" data-for-provider="anthropic">
+              <div class="setting-text">
+                <label class="setting-title" for="effort">Effort</label>
+                <p class="setting-desc">How much Claude models that support effort think and check their work. Higher is more thorough, but slower.</p>
+              </div>
+              <select id="effort" data-setting="effort">
+                <option value="default">Model default</option>
+                <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                <option value="xhigh">Extra high</option><option value="max">Max</option>
+              </select>
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="thinking">Show model thinking</label>
+                <p class="setting-desc">Shows the model's reasoning summaries in the session when the provider offers them.</p>
+              </div>
+              <input id="thinking" type="checkbox" role="switch" class="switch" data-setting="thinking" />
+            </div>
+          </div>
+
+          <h3 class="group-label">API keys and endpoints</h3>
+          <p class="group-desc" data-local-only>Keys are stored in ~/.browser-agent/config.json, readable only by you. When none is saved here, a key from the environment or the project's .env file is used.</p>
+          <p class="group-desc" data-extension-only>You use your own API key. It is stored only in this browser profile, never synced, and sent only to the provider it belongs to. Usage is billed to your account with that provider.</p>
+          <div id="provider-cards"></div>
+        </section>
+
+        <section class="settings-page" data-page="safety" data-title="Permissions and safety" hidden>
+          <h3 class="group-label">Safety mode</h3>
+          <div class="setting-group" role="radiogroup" aria-label="Safety mode">
+            <label class="choice">
+              <input type="radio" name="permissionMode" value="guarded" />
+              <span class="choice-text">
+                <span class="setting-title">Guarded <span class="tag">Recommended</span></span>
+                <span class="setting-desc">A small model checks each action against your request and scans pages for instructions aimed at the agent. You are asked only when something looks off.</span>
+              </span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="permissionMode" value="ask" />
+              <span class="choice-text">
+                <span class="setting-title">Guarded, and ask for each new site</span>
+                <span class="setting-desc">Everything in Guarded, and the agent also asks before it acts on a site for the first time.</span>
+              </span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="permissionMode" value="auto" />
+              <span class="choice-text">
+                <span class="setting-title">Auto</span>
+                <span class="setting-desc">No safety checks or site prompts. Fastest, but nothing stops the agent from following instructions planted in a page. Sensitive sites and password fields still ask.</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="setting-group">
+            <div class="setting stack">
+              <div class="setting-text">
+                <label class="setting-title" for="guard-model">Safety check model</label>
+                <p class="setting-desc">The small model that runs the checks for the current provider. Leave blank for the default. Each check adds about a second.</p>
+              </div>
+              <input id="guard-model" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Usage limits</h3>
+          <p class="group-desc">Protect your API account from runaway tasks. Set a limit to 0 to turn it off. <span id="tokens-today"></span></p>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="limit-requestsPerMinute">Model requests per minute</label>
+                <p class="setting-desc">Above this, the agent pauses until the minute passes.</p>
+              </div>
+              <input id="limit-requestsPerMinute" type="number" min="0" step="1" class="narrow-input" data-setting="limits.requestsPerMinute" data-kind="int" data-min="0" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="limit-actionsPerMinute">Browser actions per minute</label>
+                <p class="setting-desc">Clicks, typing, navigation and other page actions. Above this, the agent pauses.</p>
+              </div>
+              <input id="limit-actionsPerMinute" type="number" min="0" step="1" class="narrow-input" data-setting="limits.actionsPerMinute" data-kind="int" data-min="0" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="limit-taskTokens">Tokens per task</label>
+                <p class="setting-desc">A task stops when it has used this many input and output tokens.</p>
+              </div>
+              <input id="limit-taskTokens" type="number" min="0" step="100000" class="narrow-input" data-setting="limits.taskTokens" data-kind="int" data-min="0" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="limit-dailyTokens">Tokens per day</label>
+                <p class="setting-desc">Across all tasks. Once reached, new tasks wait until tomorrow.</p>
+              </div>
+              <input id="limit-dailyTokens" type="number" min="0" step="1000000" class="narrow-input" data-setting="limits.dailyTokens" data-kind="int" data-min="0" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Sensitive sites</h3>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="confirmSensitiveSites">Always ask on sensitive sites</label>
+                <p class="setting-desc">Banks, payments, password managers, account security pages, and crypto exchanges. The agent asks before every click, typing, or form change there, in every safety mode. Typing into password fields always asks.</p>
+              </div>
+              <input id="confirmSensitiveSites" type="checkbox" role="switch" class="switch" data-setting="confirmSensitiveSites" />
+            </div>
+            <div class="setting stack">
+              <div class="setting-text">
+                <label class="setting-title" for="sensitiveSites">Your own sensitive sites</label>
+                <p class="setting-desc">One domain per line, for example mybank.example or payroll.company.com. Subdomains are included.</p>
+              </div>
+              <textarea id="sensitiveSites" rows="3" spellcheck="false" placeholder="mybank.example"></textarea>
+            </div>
+          </div>
+
+          <h3 class="group-label">Developer tools</h3>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="developerTools">Let the agent run JavaScript and edit page HTML</label>
+                <p class="setting-desc">Useful for debugging pages. Code runs with your signed-in access to the page, so leave this off unless you need it.</p>
+              </div>
+              <input id="developerTools" type="checkbox" role="switch" class="switch" data-setting="developerTools" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Sites you always allow</h3>
+          <p class="group-desc">In "ask for each new site" mode, these sites never prompt. Add one by choosing "Always allow site" when asked.</p>
+          <div class="setting-group" id="origins"></div>
+
+          <h3 class="group-label" data-local-only>Desktop control</h3>
+          <div class="setting-group" data-local-only>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="desktopControl">Let the agent use the mouse, keyboard, and screen</label>
+                <p class="setting-desc">For what page tools cannot reach: browser menus, extension popups, DevTools, permission prompts, and native dialogs. Clicks inside this panel are always refused.</p>
+              </div>
+              <input id="desktopControl" type="checkbox" role="switch" class="switch" data-setting="desktopControl" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">macOS permissions</span>
+                <p class="setting-desc" id="desktop-status">Checking…</p>
+              </div>
+              <button id="grant-desktop" type="button">Request</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-page" data-page="browser" data-title="Browser" hidden>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="highlightTab">Mark the agent's tab</label>
+                <p class="setting-desc">While a task runs, the tab the agent is working in sits in a blue tab group labeled "Agent" that follows it from tab to tab.</p>
+              </div>
+              <input id="highlightTab" type="checkbox" role="switch" class="switch" data-setting="highlightTab" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="skipYoutubeAds">Skip YouTube ads</label>
+                <p class="setting-desc">Fast-forwards video ads (muted), clicks Skip, and removes full-screen ad overlays in the agent's tabs.</p>
+              </div>
+              <input id="skipYoutubeAds" type="checkbox" role="switch" class="switch" data-setting="skipYoutubeAds" />
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="showActions">Show the agent's actions</label>
+                <p class="setting-desc">A pointer glides to each button, link, and field before the agent clicks, and typing appears one character at a time, so you can follow along. Tasks take a little longer.</p>
+              </div>
+              <input id="showActions" type="checkbox" role="switch" class="switch" data-setting="showActions" />
+            </div>
+          </div>
+
+          <h3 class="group-label" data-local-only>Agent browser</h3>
+          <div class="setting-group" data-local-only>
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Show the agent browser</span>
+                <p class="setting-desc">Brings the agent's Chrome window to the front. It uses its own profile; sign in to sites and install extensions there once and they persist.</p>
+              </div>
+              <button id="settings-show-browser" type="button">Show</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-page" data-page="data" data-title="Data and privacy" hidden>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="ghostMode">Ghost mode</label>
+                <p class="setting-desc">Sessions are not saved and nothing is written to the activity log. Switching starts a new session. Chrome still keeps its own browsing history.</p>
+                <p class="setting-desc locked-note" id="ghost-locked-note" hidden>Ghost mode is on during incognito mode</p>
+              </div>
+              <input id="ghostMode" type="checkbox" role="switch" class="switch" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Stored on this device</h3>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Saved sessions</span>
+                <p class="setting-desc"><span id="sessions-count">…</span><span data-local-only> in <span class="path" data-path="sessions"></span></span><span data-extension-only>, kept only in this browser profile</span>. Screenshots are not saved.</p>
+              </div>
+              <button id="delete-all-sessions" type="button" class="danger-outline">Delete all</button>
+            </div>
+            <div class="setting" data-local-only>
+              <div class="setting-text">
+                <span class="setting-title">Activity log</span>
+                <p class="setting-desc">Tasks, actions, and safety-check decisions (<span id="activity-size">…</span>), shown by <code>browser-agent activity</code>.</p>
+              </div>
+              <button id="clear-activity" type="button" class="danger-outline">Clear</button>
+            </div>
+            <div class="setting" data-local-only>
+              <div class="setting-text">
+                <span class="setting-title">Data folder</span>
+                <p class="setting-desc"><span class="path" data-path=""></span> holds settings, history, the log, and the agent's Chrome profile.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </aside>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
