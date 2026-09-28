@@ -163,7 +163,7 @@ When turned on, the agent can run JavaScript in a page and edit its HTML, which 
 Browser Agent is free. Your provider bills you for what the agent uses, at its normal API rates. Local models through Ollama have no API cost. The usage limits above keep a runaway task from spending much.
 
 **Which models can I use?**
-Any model your key can use at Anthropic, OpenAI, Google Gemini, or Mistral, or a local model through Ollama. Settings > Models can load the list for your key. For best results, pick a model that supports tool use and can read images. The OpenAI option also takes a base URL for OpenAI-compatible servers such as LM Studio, vLLM, or OpenRouter.
+Any model your key can use at Anthropic, OpenAI, Google Gemini, or Mistral, or a local model through Ollama. Settings > Models can load the list for your key. For best results, pick a model that supports tool use and can read images. In the Mac app, the OpenAI option also takes a base URL for OpenAI-compatible servers such as LM Studio, vLLM, or OpenRouter. The Chrome extension can only reach the four providers above and servers on your own computer, so hosted services such as OpenRouter work only in the Mac app.
 
 **Why does it pause, or say it is rate limited?**
 Either you hit one of your own limits, or your provider asked it to slow down. It waits and continues. Raise the limits in Settings if they are too tight for you.
