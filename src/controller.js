@@ -149,6 +149,18 @@ export function createController(host) {
     }
   }
 
+  // Microsoft sign-in in the browser, for the Outlook preset; restarts the server so it
+  // loads the new session.
+  async function mcpBrowserSignIn(id) {
+    const server = (await host.loadConfig()).mcpServers?.find((s) => s.id === id && s.preset === "microsoft365");
+    if (!server) return "Outlook is not set up.";
+    const text = await host.mcp.servers.signInWithBrowser(server);
+    try {
+      if (JSON.parse(text).success) await host.mcp.servers.restart(server);
+    } catch {}
+    return text;
+  }
+
   const permissionRequest = () => ({
     type: "permission_request",
     id: pendingPermission.id,
@@ -292,8 +304,9 @@ export function createController(host) {
         return;
       }
       case "mcp_account": {
-        if (!host.mcp || !["login", "verify-login", "logout"].includes(msg.action)) return;
-        reply({ type: "mcp_account", id: msg.id, action: msg.action, text: await mcpAccount(msg.id, msg.action) });
+        if (!host.mcp || !["login", "verify-login", "logout", "browser-login"].includes(msg.action)) return;
+        const text = msg.action === "browser-login" ? await mcpBrowserSignIn(msg.id) : await mcpAccount(msg.id, msg.action);
+        reply({ type: "mcp_account", id: msg.id, action: msg.action, text });
         return;
       }
       case "reset":

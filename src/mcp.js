@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -10,6 +11,8 @@ const CONNECT_TIMEOUT_MS = 60000;
 const CALL_TIMEOUT_MS = 120000;
 const LOG_LINES = 200;
 const RESULT_MAX_CHARS = 30000;
+// How long a browser sign-in waits for the user to finish on Microsoft's page.
+const SIGN_IN_TIMEOUT_MS = 300000;
 
 // Settings > MCP presets. Versions are pinned so a server only changes when this list does.
 export const MCP_PRESETS = {
@@ -24,6 +27,13 @@ export const MCP_PRESETS = {
     hiddenTools: ["login", "logout", "verify-login", "list-accounts", "select-account", "remove-account"],
   },
 };
+
+// A server's environment: the minimal default one, the configured values, and a PATH that
+// starts with this Node install's bin folder.
+function serverEnv(config) {
+  const env = getDefaultEnvironment();
+  return { ...env, PATH: `${dirname(process.execPath)}:${env.PATH ?? "/usr/bin:/bin"}`, ...config.env };
+}
 
 // Tool names must match ^[a-zA-Z0-9_-]{1,64}$ for every provider.
 const slug = (text) => text.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 20);
@@ -84,12 +94,10 @@ export class McpServers {
       if (s.log.length > LOG_LINES) s.log.shift();
     };
     try {
-      const bin = dirname(process.execPath);
-      const env = getDefaultEnvironment();
       const transport = new StdioClientTransport({
         command: resolveCommand(config.command),
         args: config.args ?? [],
-        env: { ...env, PATH: `${bin}:${env.PATH ?? "/usr/bin:/bin"}`, ...config.env },
+        env: serverEnv(config),
         stderr: "pipe",
       });
       s.transport = transport;
@@ -144,6 +152,7 @@ export class McpServers {
   // For process exit, when there is no time to close sessions: ends every server process
   // so none outlives the app.
   killAll() {
+    this.#signIn?.kill();
     for (const s of this.servers.values()) {
       const pid = s.transport?.pid;
       if (pid) {
@@ -152,6 +161,33 @@ export class McpServers {
         } catch {}
       }
     }
+  }
+
+  // The running browser sign-in, if any.
+  #signIn = null;
+
+  // One-step sign-in for the Microsoft 365 preset: runs the server's own command once with
+  // --auth-browser --login, which opens Microsoft's sign-in page in the default browser
+  // and takes the answer on a localhost redirect (authorization code with PKCE, on the
+  // server's own app registration). The tokens go straight into the server's cache, an
+  // encrypted file whose key is kept in the macOS Keychain; this process never sees them.
+  // Resolves to the sign-in check the command prints (account name, no tokens). The
+  // running server has to be restarted to load the new session.
+  signInWithBrowser(config) {
+    this.#signIn?.kill();
+    return new Promise((resolve) => {
+      const child = execFile(
+        resolveCommand(config.command),
+        [...(config.args ?? []), "--auth-browser", "--login"],
+        { env: serverEnv(config), timeout: SIGN_IN_TIMEOUT_MS },
+        (err, stdout) => {
+          if (this.#signIn === child) this.#signIn = null;
+          const result = String(stdout).trim().split("\n").reverse().find((line) => line.startsWith("{"));
+          resolve(result ?? JSON.stringify({ success: false, message: err?.killed ? "Sign-in was not finished in time." : "Sign-in did not finish." }));
+        },
+      );
+      this.#signIn = child;
+    });
   }
 
   // Rebuilds the model-facing names; a server's tools keep their names while it runs.

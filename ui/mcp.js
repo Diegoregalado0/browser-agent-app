@@ -160,7 +160,7 @@ export function createMcpPanel({ $, el, send, toast }) {
 
   function showStep(name, { title, body, primary, secondary, cancel = "Cancel" }) {
     step = name;
-    const index = STEPS.indexOf(name);
+    const index = STEPS.indexOf(name === "browser" ? "signin" : name);
     $("connect-step").textContent = index >= 0 ? `Step ${index + 1} of ${STEPS.length}` : "";
     $("connect-title").textContent = title;
     $("connect-body").replaceChildren(...body);
@@ -203,7 +203,7 @@ export function createMcpPanel({ $, el, send, toast }) {
     $("connect-logo").innerHTML = OUTLOOK_LOGO;
     if (name === "intro") return introStep();
     if (name === "setup") return setupStep();
-    if (name === "signin") return requestCode();
+    if (name === "signin") return browserStep();
     if (name === "manage") return manageStep();
   }
 
@@ -236,6 +236,28 @@ export function createMcpPanel({ $, el, send, toast }) {
         : [el("p", null, "Starting the Outlook connection. The first time downloads it, which can take about a minute."), el("div", "progress")],
       primary: problem ? { label: "Try again", onClick: () => setupStep() } : { label: "Continue", disabled: true },
     });
+  }
+
+  // One-step sign-in: Microsoft's page opens in the default browser, where the user is
+  // often signed in already. A device code is the fallback.
+  function browserStep(note = "") {
+    const body = [el("p", null, "Microsoft's sign-in page opens in your web browser. Sign in with your Microsoft account (your UC Merced email) and accept.")];
+    if (note) body.push(el("p", "field-note error", note));
+    showStep("signin", {
+      title: "Sign in to Microsoft",
+      body,
+      primary: { label: "Sign in", onClick: startBrowserSignIn },
+      secondary: { label: "Use a code", onClick: requestCode },
+    });
+  }
+
+  function startBrowserSignIn() {
+    showStep("browser", {
+      title: "Sign in to Microsoft",
+      body: [el("p", null, "Finish signing in on the Microsoft page in your browser. This updates when you are done."), el("div", "progress")],
+      secondary: { label: "Use a code", onClick: requestCode },
+    });
+    account("browser-login");
   }
 
   function requestCode() {
@@ -364,10 +386,19 @@ export function createMcpPanel({ $, el, send, toast }) {
           checking = false;
           outlook = parseVerify(msg.text);
           if (config) render(config);
-          if (step === "setup") outlook.signedIn ? doneStep() : requestCode();
+          if (step === "setup") outlook.signedIn ? doneStep() : browserStep();
           else if (step === "signin" && signinStep.device) {
             outlook.signedIn ? doneStep() : signinStep(signinStep.device, "Not signed in yet. Finish on Microsoft's page, then click I've signed in.");
           }
+          return;
+        }
+        if (msg.action === "browser-login") {
+          if (step !== "browser") return;
+          const result = parseVerify(msg.text);
+          if (!result.signedIn) return browserStep(result.message || "Sign-in did not finish.");
+          outlook = result;
+          if (config) render(config);
+          doneStep();
           return;
         }
         if (msg.action === "login" && step === "signin") {
