@@ -103,6 +103,17 @@ async function serve() {
   if (!args.includes("--no-open")) openWindow(url);
 }
 
+// Polls check() every 50 ms until it returns true or timeoutMs passes; returns the last result.
+async function waitFor(check, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  let ok = await check();
+  while (!ok && Date.now() < end) {
+    await sleep(50);
+    ok = await check();
+  }
+  return ok;
+}
+
 // Brings the agent's Chrome to the front and opens the chat side panel by pressing its
 // shortcut (⌘⇧Y). Chrome only opens side panels on a real user gesture, which the native
 // helper's keystroke provides; without Accessibility permission, the pinned icon does it.
@@ -123,10 +134,10 @@ async function focusAgentBrowser() {
   if (pid && existsSync(helper)) {
     execFileSync(helper, ["activate", String(pid)]);
     if (!opened && JSON.parse(execFileSync(helper, ["status"], { encoding: "utf8" })).accessibility) {
+      // Give the activation time to land so the keystroke reaches Chrome.
       await sleep(600);
       execFileSync(helper, ["key", "cmd+shift+y"]);
-      await sleep(1200);
-      opened = await panelOpen();
+      opened = await waitFor(panelOpen, 1500);
     }
   }
   cdp.close();
@@ -158,8 +169,8 @@ async function open(mode) {
       cwd: PROJECT_DIR,
     });
     child.unref();
-    for (let i = 0; i < 50 && !url; i++) {
-      await sleep(200);
+    for (let i = 0; i < 200 && !url; i++) {
+      await sleep(50);
       url = await serverUrl();
     }
     if (!url) {
