@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Browsby: a lowercase b whose stem is a browser tab and whose bowl is a round window -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#E9E2D3"/>
+  <path d="M34 24 L50 24 L50 96 L34 96 Z" fill="#1F3A5F"/>
+  <circle cx="70" cy="76" r="26" fill="none" stroke="#1F3A5F" stroke-width="16"/>
+  <circle cx="70" cy="76" r="7" fill="#E0A23B"/>
+</svg>

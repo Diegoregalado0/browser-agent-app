@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Wayhand: a pointer arriving at the end of a winding path -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#1F4E5A"/>
+  <path d="M26 100 C 44 100, 40 72, 58 70 S 70 52, 70 46" fill="none" stroke="#F6F1E7" stroke-width="6" stroke-linecap="round" stroke-dasharray="0.1 13" opacity="0.8"/>
+  <path d="M62 24 L62 86 L76 73 L86 96 L96 91 L86 69 L104 69 Z" fill="#F6F1E7" stroke="#F6F1E7" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="26" cy="100" r="6" fill="#E0A23B"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Tabhand: a browser tab with the task marked done -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#F6F1E7"/>
+  <path d="M18 100 L32 100 L40 42 Q42 32 52 32 L76 32 Q86 32 88 42 L96 100 L110 100" fill="#2F7D6D" stroke="#1F4E5A" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M50 68 L60 79 L80 55" fill="none" stroke="#F6F1E7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
