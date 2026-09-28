@@ -2,7 +2,8 @@
 // Each one must be fully self-contained: no imports, no closures over module scope.
 
 // Builds a compact, indented outline of the page. Elements that can be acted on get a
-// stable ref id (ref_N) that the other tools accept in place of coordinates.
+// stable ref id (ref_N) that the other tools accept in place of coordinates. Same-origin
+// iframes are walked in place; cross-origin ones are listed but their contents are not.
 export function readPageScript(interactiveOnly, maxChars) {
   const store = (window.__agentRefStore ||= { seq: 0, map: new Map() });
   const refFor = (el) => {
@@ -31,7 +32,7 @@ export function readPageScript(interactiveOnly, maxChars) {
   };
 
   const isVisible = (el) => {
-    const s = getComputedStyle(el);
+    const s = el.ownerDocument.defaultView.getComputedStyle(el);
     if (s.display === "none" || s.visibility === "hidden" || s.opacity === "0") return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 || r.height > 0 || s.display === "contents";
@@ -59,7 +60,7 @@ export function readPageScript(interactiveOnly, maxChars) {
     if (aria) return clean(aria);
     const labelledBy = el.getAttribute("aria-labelledby");
     if (labelledBy) {
-      const text = labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.innerText || "").join(" ");
+      const text = labelledBy.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)?.innerText || "").join(" ");
       if (clean(text)) return clean(text);
     }
     if (el.labels && el.labels.length) return clean(el.labels[0].innerText);
@@ -107,6 +108,20 @@ export function readPageScript(interactiveOnly, maxChars) {
       if (truncated) return;
       if (["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "HEAD"].includes(el.tagName.toUpperCase())) continue;
       if (!isVisible(el)) continue;
+      if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+        let body = null;
+        try {
+          body = el.contentDocument?.body;
+        } catch {}
+        const name = clip(clean(el.getAttribute("title") || el.getAttribute("name")), 100);
+        const src = clip(el.getAttribute("src") || "", 120);
+        push(
+          "  ".repeat(depth) + "iframe" + (name ? ` "${name.replace(/"/g, "'")}"` : "") + (src ? ` src="${src}"` : "") +
+            (body ? "" : " (cross-origin: its contents are not in this outline; use a screenshot and coordinates)"),
+        );
+        if (body) walk(body, depth + 1);
+        continue;
+      }
 
       const interactive = el.matches(INTERACTIVE_SELECTOR);
       const structural = !interactiveOnly && STRUCTURAL[el.tagName] !== undefined;
@@ -145,7 +160,17 @@ export function refCenterScript(ref) {
   if (!el || !el.isConnected) return { error: `${ref} not found; call read_page again to refresh refs` };
   el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
   const r = el.getBoundingClientRect();
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  let x = r.left + r.width / 2;
+  let y = r.top + r.height / 2;
+  // An element in a same-origin iframe: add each frame's content-box offset.
+  for (let w = el.ownerDocument.defaultView; w.frameElement; w = w.parent) {
+    const f = w.frameElement;
+    const fr = f.getBoundingClientRect();
+    const s = w.parent.getComputedStyle(f);
+    x += fr.left + f.clientLeft + parseFloat(s.paddingLeft);
+    y += fr.top + f.clientTop + parseFloat(s.paddingTop);
+  }
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 export function formInputScript(ref, value) {
@@ -178,7 +203,8 @@ export function formInputScript(ref, value) {
   }
   if ("value" in el) {
     // Use the native setter so frameworks (React etc.) observe the change.
-    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const view = el.ownerDocument.defaultView;
+    const proto = el.tagName === "TEXTAREA" ? view.HTMLTextAreaElement.prototype : view.HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(value));
     fire();
     return { ok: `Set value to "${String(value).slice(0, 80)}"` };
@@ -283,12 +309,13 @@ export function adOverlayRemoverScript() {
 }
 
 // Reports what actually sits on top of a ref'd element's center, so a click that would
-// land on an overlay fails loudly instead of hitting the overlay.
+// land on an overlay fails loudly instead of hitting the overlay. For an element in an
+// iframe only that iframe's document is tested.
 export function hitTestScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const top = el.ownerDocument.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
   if (!top || el === top || el.contains(top) || top.contains(el)) return null;
   if (el.labels && [...el.labels].some((l) => l === top || l.contains(top))) return null;
   const desc = top.tagName.toLowerCase() + (top.id ? `#${top.id}` : "") + (top.src ? ` src=${String(top.src).slice(0, 80)}` : "");
@@ -306,7 +333,9 @@ export function resolveElementScript(ref, selector) {
 
 // Whether typing would go into a password field: the ref'd element, or the focused one.
 export function passwordTargetScript(ref) {
-  const el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : document.activeElement;
+  let el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : document.activeElement;
+  // Focus inside a same-origin iframe.
+  while (!ref && el?.contentDocument?.activeElement) el = el.contentDocument.activeElement;
   return Boolean(el && el.tagName === "INPUT" && el.type === "password");
 }
 
