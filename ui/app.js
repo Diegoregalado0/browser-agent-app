@@ -100,11 +100,25 @@ function resetLog() {
 
 function append(node) {
   log.querySelector(".empty")?.remove();
-  const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
   log.append(node);
-  if (nearBottom) log.scrollTop = log.scrollHeight;
   return node;
 }
+
+// The log follows new output until the user scrolls up (wheel, touch, keys, or the
+// scrollbar); scrolling back to the bottom, or sending a message, resumes following.
+let follow = true;
+const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+function scrollToBottom() {
+  follow = true;
+  log.scrollTop = log.scrollHeight;
+}
+new MutationObserver(() => follow && (log.scrollTop = log.scrollHeight)).observe(log, { childList: true, subtree: true, characterData: true });
+log.addEventListener("wheel", (e) => e.deltaY < 0 && (follow = false), { passive: true });
+log.addEventListener("touchmove", () => (follow = false), { passive: true });
+log.addEventListener("keydown", (e) => ["ArrowUp", "PageUp", "Home"].includes(e.key) && (follow = false));
+// A press on the scrollbar, which sits right of the content box.
+log.addEventListener("pointerdown", (e) => e.offsetX > log.clientWidth && (follow = false));
+log.addEventListener("scroll", () => atBottom() && (follow = true), { passive: true });
 
 function send(msg) {
   link?.send(msg);
@@ -241,7 +255,7 @@ function renderTranscript(items) {
   closeGroup();
   textNode = null;
   if (!running) activity.stop();
-  log.scrollTop = log.scrollHeight;
+  scrollToBottom();
 }
 
 // Groups the history list by age, like Today / Yesterday / Previous 7 days / Older.
@@ -444,7 +458,6 @@ const handlers = {
     }
     textNode.raw += msg.delta;
     textNode.innerHTML = renderMarkdown(textNode.raw);
-    log.scrollTop = log.scrollHeight;
     activity.addChars(msg.delta.length);
     activity.set("Writing…");
   },
@@ -544,6 +557,7 @@ $("composer").addEventListener("submit", (e) => {
   if (!text) return;
   $("input").value = "";
   append(el("div", "msg user", text));
+  scrollToBottom();
   closeGroup();
   textNode = null;
   send({ type: "run", text });
