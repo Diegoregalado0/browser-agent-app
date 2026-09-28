@@ -158,17 +158,17 @@ const loopConfig = { ...config, developerTools: true, permissionMode: "auto" };
 requests = [];
 replies = Array.from({ length: 30 }, (_, n) => ({ content: [probe(n)], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
 await looping.run("read the quiz", loopConfig);
-const resultText = (i) => looping.messages.filter((m) => m.role === "user" && m.content[0].type === "tool_result")[i].content[0].content[0].text;
-assert.match(resultText(0), /selector matched no element.*iframe itself/s, "javascript_exec null errors explain the cause");
-assert.doesNotMatch(resultText(0), /Loop check/, "a single failure gets no loop note");
-assert.match(resultText(1), /Loop check.*already failed/s, "a repeated failing call gets a loop note");
+const loopResult = (i) => looping.messages.filter((m) => m.role === "user" && m.content[0].type === "tool_result")[i].content[0].content[0].text;
+assert.match(loopResult(0), /selector matched no element.*iframe itself/s, "javascript_exec null errors explain the cause");
+assert.doesNotMatch(loopResult(0), /Loop check/, "a single failure gets no loop note");
+assert.match(loopResult(1), /Loop check.*already failed/s, "a repeated failing call gets a loop note");
 assert.equal(requests.length, 5, `the stuck task made ${requests.length} model requests, expected it to stop after 5`);
 assert.ok(notices.some((t) => /seems stuck/.test(t)), "the user is told the task stopped");
 
 // A page read that keeps returning the same thing between actions gets a note too.
-const read = { type: "tool_call", id: "call_read", name: "read_page", input: {} };
+const readCall = { type: "tool_call", id: "call_read", name: "read_page", input: {} };
 looping.browser.run = async () => "same outline";
-replies = [read, click, read, click, read].map((c) => ({ content: [c], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+replies = [readCall, click, readCall, click, readCall].map((c) => ({ content: [c], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
 replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
 await looping.run("next page", loopConfig);
 const reads = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "read_page");
