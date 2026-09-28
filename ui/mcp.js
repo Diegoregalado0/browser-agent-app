@@ -42,6 +42,8 @@ export function createMcpPanel({ $, el, send, toast }) {
   let checking = false;
   // The connect flow's current step, or null when it is closed.
   let step = null;
+  // Called with whether Outlook is signed in when the flow closes (first-run setup).
+  let onFlowClosed = null;
 
   const outlookServer = () => config?.mcpServers?.find((s) => s.id === OUTLOOK_ID);
   const statusOf = (id) => status.find((s) => s.id === id);
@@ -79,7 +81,7 @@ export function createMcpPanel({ $, el, send, toast }) {
     const action = el("button", connected ? null : "primary", connected ? "Manage" : state === "connected" ? "Sign in" : state === "off" ? "Turn on" : state === "error" || state === "stopped" ? "Try again" : "Connect");
     action.type = "button";
     action.disabled = state === "starting";
-    action.onclick = () => openFlow(connected ? "manage" : state === "connected" ? "signin" : state === "absent" ? "intro" : "setup");
+    action.onclick = startOutlook;
     card.append(logo, text, action);
     if (config.debugMode && statusOf(OUTLOOK_ID)) card.append(debugDetail(statusOf(OUTLOOK_ID)));
     $("mcp-integrations").replaceChildren(card);
@@ -176,8 +178,22 @@ export function createMcpPanel({ $, el, send, toast }) {
   function closeFlow() {
     flow.hidden = true;
     step = null;
+    const done = onFlowClosed;
+    onFlowClosed = null;
+    done?.(outlookState() === "connected" && Boolean(outlook?.signedIn));
   }
   $("connect-cancel").onclick = closeFlow;
+  flow.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    closeFlow();
+  });
+
+  // The flow step that fits Outlook's current state.
+  function startOutlook() {
+    const state = outlookState();
+    openFlow(state === "connected" && outlook?.signedIn ? "manage" : state === "connected" ? "signin" : state === "absent" ? "intro" : "setup");
+  }
 
   function openFlow(name) {
     $("connect-logo").innerHTML = OUTLOOK_LOGO;
@@ -315,6 +331,16 @@ export function createMcpPanel({ $, el, send, toast }) {
     },
     get status() {
       return status;
+    },
+    // Outlook's sign-in, or null when it is not running or not checked yet.
+    get outlook() {
+      return outlookState() === "connected" ? outlook : null;
+    },
+    // Runs the Outlook connect flow on its own, over whatever is on screen; onClosed(signedIn)
+    // runs when the user finishes or leaves it.
+    connectOutlook(onClosed) {
+      onFlowClosed = onClosed;
+      startOutlook();
     },
     render,
     handlers: {
