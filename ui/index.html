@@ -110,6 +110,16 @@
             </div>
           </div>
 
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Setup</span>
+                <p class="setting-desc">Walks through choosing a model provider and API key<span data-local-only>, and connecting Outlook</span>, as on first launch.</p>
+              </div>
+              <button id="run-setup" type="button">Run setup</button>
+            </div>
+          </div>
+
           <h3 class="group-label">Reset</h3>
           <div class="setting-group">
             <div class="setting">
@@ -498,6 +508,50 @@
         <span class="spacer"></span>
         <button type="button" id="connect-secondary" hidden></button>
         <button type="button" id="connect-primary" class="primary"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="wizard" class="wizard" hidden role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+    <div class="wizard-card">
+      <p class="wizard-step" id="wizard-step"></p>
+      <h2 id="wizard-title"></h2>
+      <div id="wizard-body">
+        <section data-step="provider" data-title="Choose your AI model">
+          <p>Browser Agent runs on the AI provider you choose, with your own API key. The key stays on this device and is sent only to that provider, which bills you for what the agent uses.</p>
+          <div class="card-field">
+            <label class="card-label" for="wizard-provider">Provider</label>
+            <select id="wizard-provider">
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="mistral">Mistral</option>
+              <option value="ollama">Ollama (local)</option>
+            </select>
+          </div>
+          <div class="card-field" id="wizard-key-field">
+            <label class="card-label" for="wizard-key">API key</label>
+            <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" />
+            <p class="field-note" id="wizard-key-note"></p>
+          </div>
+          <p class="field-note" id="wizard-ollama-note">Ollama runs models on this computer and needs no key. Start it with <code>ollama serve</code> first.</p>
+          <p class="pc-result" id="wizard-result" aria-live="polite"></p>
+        </section>
+        <section data-step="outlook" data-title="Connect Microsoft Outlook" data-local-only>
+          <div class="connect-head"><span id="wizard-outlook-logo"></span><p>Optional: let the agent read, search and draft email, and see your calendar. It asks you before sending, deleting or changing anything.</p></div>
+          <p class="field-note" id="wizard-outlook-status" aria-live="polite"></p>
+        </section>
+        <section data-step="done" data-title="You're all set">
+          <p id="wizard-done-text"></p>
+          <p class="field-note">Try one of these, or type your own task:</p>
+          <div class="wizard-examples" id="wizard-examples"></div>
+        </section>
+      </div>
+      <div class="row wizard-actions">
+        <button type="button" id="wizard-skip" class="link"></button>
+        <span class="spacer"></span>
+        <button type="button" id="wizard-back">Back</button>
+        <button type="button" id="wizard-next" class="primary"></button>
       </div>
     </div>
   </div>

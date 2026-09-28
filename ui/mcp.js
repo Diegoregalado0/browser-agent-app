@@ -6,7 +6,7 @@ const OUTLOOK_ID = "microsoft365";
 
 // Outlook's mark drawn in the app's own style: an "O" tile over a mail envelope, in the
 // accent color, so it follows the light and dark themes.
-const OUTLOOK_LOGO = `<svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+export const OUTLOOK_LOGO = `<svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
 <rect x="1" y="1" width="38" height="38" rx="10" class="logo-bg"/>
 <rect x="15" y="12" width="17" height="16" rx="2.5" class="logo-line"/>
 <path d="M15.5 13.5 23.5 20l8-6.5" class="logo-line"/>

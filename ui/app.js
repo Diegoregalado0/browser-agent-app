@@ -1,5 +1,6 @@
 import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
+import { createWizard } from "./wizard.js";
 
 const $ = (id) => document.getElementById(id);
 const log = $("log");
@@ -62,6 +63,18 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 const debugLines = [];
 const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines, getMcpStatus: () => mcpPanel.status });
 const mcpPanel = createMcpPanel({ $, el, send, toast: (text, kind) => settings.toast(text, kind) });
+const wizard = createWizard({
+  $,
+  el,
+  icon,
+  send,
+  mcp: mcpPanel,
+  useExample: (text) => {
+    $("input").value = text;
+    $("input").focus();
+  },
+  openModels: () => settings.open("models"),
+});
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -426,6 +439,7 @@ const handlers = {
     renderHeader();
     settings.render(config);
     mcpPanel.render(config);
+    wizard.render(config);
   },
   conversation(msg) {
     currentSession = msg.id;
@@ -544,7 +558,7 @@ const handlers = {
 };
 
 function receive(msg) {
-  (handlers[msg.type] || settings.handlers[msg.type] || mcpPanel.handlers[msg.type])?.(msg);
+  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers]) group[msg.type]?.(msg);
 }
 
 function connect() {
@@ -649,6 +663,10 @@ $("show-browser").onclick = () => {
   send({ type: "open_browser" });
 };
 $("close-settings").onclick = () => settings.close();
+$("run-setup").onclick = () => {
+  settings.close();
+  wizard.open();
+};
 
 resetLog();
 connect();
