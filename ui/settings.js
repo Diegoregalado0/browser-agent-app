@@ -6,15 +6,9 @@ const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Goog
 const KEYED_PROVIDERS = ["anthropic", "openai", "gemini", "mistral"];
 const WIDE = window.matchMedia("(min-width: 640px)");
 
-// The sign-in link and code in the Microsoft 365 server's device-code message.
-function parseDeviceCode(text) {
-  const url = /https:\/\/[^\s"',]+/.exec(text)?.[0];
-  const code = /\bcode\s+([A-Z0-9-]{6,})/i.exec(text)?.[1];
-  return url && code ? { url, code } : null;
-}
-
-// getDebugLines(): the chat's recent debug lines, for Copy diagnostics.
-export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) {
+// getDebugLines() and getMcpStatus(): the chat's recent debug lines and what the MCP
+// servers report, for Copy diagnostics.
+export function createSettings({ $, el, icon, send, getDebugLines = () => [], getMcpStatus = () => [] }) {
   const sheet = $("settings");
   let config = null;
   let page = "general";
@@ -74,7 +68,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     $("settings-title").textContent = sheet.querySelector(`.settings-page[data-page="${name}"]`).dataset.title;
     sheet.querySelector(".settings-pages").scrollTop = 0;
     if (name === "data") send({ type: "data_info" });
-    if (name === "mcp") send({ type: "mcp_status" });
     if (name === "safety") {
       send({ type: "desktop_status" });
       send({ type: "data_info" });
@@ -344,7 +337,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     for (const row of sheet.querySelectorAll("[data-for-provider]")) row.hidden = row.dataset.forProvider !== config.provider;
     renderCards();
     renderOrigins();
-    renderMcp();
     if (pendingToast) {
       toast(pendingToast);
       pendingToast = null;
@@ -370,115 +362,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     }
   }
 
-  // MCP page. config.mcpServers is the saved list; mcpStatus what the running servers report.
-
-  let mcpStatus = [];
-  const MS_ID = "microsoft365";
-  const STATUS_TEXT = { connected: "connected", starting: "starting", error: "error", stopped: "stopped" };
-
-  function renderMcp() {
-    if (!config || config.edition !== "local") return;
-    const servers = config.mcpServers ?? [];
-    const statusOf = (id) => mcpStatus.find((s) => s.id === id);
-
-    // Microsoft 365.
-    const ms = servers.find((s) => s.id === MS_ID);
-    const msState = ms?.enabled ? statusOf(MS_ID)?.status ?? "starting" : null;
-    $("ms-connect").hidden = Boolean(ms?.enabled);
-    $("ms-connect").textContent = ms ? "Turn on" : "Connect";
-    for (const id of ["ms-login", "ms-verify", "ms-logout"]) $(id).hidden = msState !== "connected";
-    $("ms-status").textContent = !ms
-      ? "Not connected."
-      : !ms.enabled
-        ? "Turned off."
-        : msState === "connected"
-          ? "Server running. Sign in once with your Microsoft account; Check sign-in shows which account it uses."
-          : msState === "error"
-            ? `The server could not start: ${statusOf(MS_ID)?.error ?? "unknown error"}`
-            : "Starting. The first start downloads the server and can take about a minute.";
-
-    // All servers.
-    const list = $("mcp-list");
-    list.replaceChildren();
-    if (!servers.length) {
-      list.append(el("p", "setting-empty", "No servers yet. Connect Microsoft 365 above or add one below."));
-      return;
-    }
-    for (const server of servers) {
-      const status = server.enabled ? statusOf(server.id) : null;
-      const row = el("div", "setting stack mcp-server");
-      const head = el("div", "mcp-head");
-      const state = server.enabled ? status?.status ?? "starting" : "off";
-      head.append(el("span", "mcp-name", server.name), el("span", `badge-status ${state}`, STATUS_TEXT[state] ?? state));
-      const toggle = Object.assign(el("input"), { type: "checkbox", role: "switch", className: "switch", checked: server.enabled });
-      toggle.setAttribute("aria-label", `Use ${server.name}`);
-      toggle.onchange = () => send({ type: "mcp_toggle", id: server.id, enabled: toggle.checked });
-      head.append(toggle);
-      row.append(head);
-      const detail = el("p", "setting-desc");
-      detail.textContent =
-        state === "connected"
-          ? `${status.tools.length} tool${status.tools.length === 1 ? "" : "s"} available to the agent.`
-          : state === "error"
-            ? status.error
-            : `${server.command} ${(server.args ?? []).join(" ")}`;
-      row.append(detail);
-      if (server.envKeys?.length) row.append(el("p", "field-note", `Environment: ${server.envKeys.join(", ")} (values hidden)`));
-      const actions = el("div", "row");
-      const restart = el("button", null, "Restart");
-      restart.type = "button";
-      restart.disabled = !server.enabled;
-      restart.onclick = () => send({ type: "mcp_restart", id: server.id });
-      const remove = el("button", "link-danger", "Remove");
-      remove.type = "button";
-      remove.onclick = () =>
-        confirmInline(remove, {
-          question: `Remove ${server.name}?`,
-          confirmLabel: "Remove",
-          onConfirm: () => send({ type: "mcp_remove", id: server.id }),
-        });
-      actions.append(restart, remove);
-      row.append(actions);
-      if (config.debugMode && status) {
-        const more = el("details", "mcp-detail");
-        more.append(el("summary", null, "Tools and log"), el("pre", null, `Tools: ${status.tools.join(", ") || "none"}\n\n${status.log.join("\n")}`));
-        row.append(more);
-      }
-      list.append(row);
-    }
-  }
-
-  $("ms-connect").onclick = () => {
-    const ms = config?.mcpServers?.find((s) => s.id === MS_ID);
-    if (ms) send({ type: "mcp_toggle", id: MS_ID, enabled: true });
-    else send({ type: "mcp_add_preset", preset: MS_ID });
-  };
-  const account = (action, busy) => {
-    $("ms-result").textContent = busy;
-    send({ type: "mcp_account", id: MS_ID, action });
-  };
-  $("ms-login").onclick = () => account("login", "Asking Microsoft for a sign-in code…");
-  $("ms-verify").onclick = () => account("verify-login", "Checking…");
-  $("ms-logout").onclick = () =>
-    confirmInline($("ms-logout"), {
-      question: "Sign out of Microsoft 365?",
-      confirmLabel: "Sign out",
-      onConfirm: () => account("logout", "Signing out…"),
-    });
-  $("ms-code-copy").onclick = () => navigator.clipboard?.writeText($("ms-code-value").textContent).then(() => toast("Code copied"));
-
-  $("mcp-add").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const env = {};
-    for (const line of $("mcp-env").value.split("\n")) {
-      const at = line.indexOf("=");
-      if (at > 0) env[line.slice(0, at).trim()] = line.slice(at + 1).trim();
-    }
-    send({ type: "mcp_save", server: { name: $("mcp-name").value, command: $("mcp-command").value, args: $("mcp-args").value, env } });
-    for (const id of ["mcp-name", "mcp-command", "mcp-args", "mcp-env"]) $(id).value = "";
-    pendingToast = "Server added";
-  });
-
   // Debug page.
   $("run-checks").onclick = () => {
     $("check-results").replaceChildren(el("li", null, "Running…"));
@@ -492,7 +375,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       settings,
       keys: Object.fromEntries(Object.entries(keyInfo ?? {}).map(([p, k]) => [p, k.source])),
       mcpServers: (mcpServers ?? []).map(({ id, name, command, args, enabled }) => ({ id, name, command, args, enabled })),
-      mcpStatus: mcpStatus.map(({ log, ...s }) => ({ ...s, log: log.slice(-20) })),
+      mcpStatus: getMcpStatus().map(({ log, ...s }) => ({ ...s, log: log.slice(-20) })),
       debugLines: getDebugLines().slice(-50),
     };
     navigator.clipboard?.writeText(JSON.stringify(report, null, 2)).then(
@@ -554,29 +437,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       config_reset() {
         pendingToast = null;
         toast("Settings reset to defaults");
-      },
-      mcp_status(msg) {
-        mcpStatus = msg.servers;
-        renderMcp();
-      },
-      mcp_account(msg) {
-        if (msg.id !== MS_ID) return;
-        const device = msg.action === "login" && parseDeviceCode(msg.text);
-        $("ms-code").hidden = !device;
-        if (device) {
-          $("ms-code-link").href = $("ms-code-link").textContent = device.url;
-          $("ms-code-value").textContent = device.code;
-          $("ms-result").textContent = "";
-          return;
-        }
-        if (msg.action === "verify-login") $("ms-code").hidden = true;
-        let text = msg.text;
-        try {
-          const data = JSON.parse(msg.text);
-          if (data.success === true) text = `Signed in${data.userData?.userPrincipalName ? ` as ${data.userData.userPrincipalName}` : ""}.`;
-          else if (data.message) text = data.message;
-        } catch {}
-        $("ms-result").textContent = text;
       },
       self_test(msg) {
         $("check-results").replaceChildren(

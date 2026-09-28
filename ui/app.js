@@ -1,4 +1,5 @@
 import { createSettings } from "./settings.js";
+import { createMcpPanel } from "./mcp.js";
 
 const $ = (id) => document.getElementById(id);
 const log = $("log");
@@ -58,7 +59,8 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines });
+const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines, getMcpStatus: () => mcpPanel.status });
+const mcpPanel = createMcpPanel({ $, el, send, toast: (text, kind) => settings.toast(text, kind) });
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -422,6 +424,7 @@ const handlers = {
     config = msg.config;
     renderHeader();
     settings.render(config);
+    mcpPanel.render(config);
   },
   conversation(msg) {
     currentSession = msg.id;
@@ -539,7 +542,7 @@ const handlers = {
 };
 
 function receive(msg) {
-  (handlers[msg.type] || settings.handlers[msg.type])?.(msg);
+  (handlers[msg.type] || settings.handlers[msg.type] || mcpPanel.handlers[msg.type])?.(msg);
 }
 
 function connect() {
@@ -627,7 +630,17 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("menu").hidden) closeMenu();
   else if (settings.isOpen) settings.close();
+  else if (mcpPanel.isOpen) mcpPanel.close();
 });
+
+function openMcp() {
+  closeMenu();
+  settings.close();
+  mcpPanel.open();
+}
+$("open-mcp").onclick = openMcp;
+$("menu-open-mcp").onclick = openMcp;
+$("close-mcp").onclick = () => mcpPanel.close();
 
 $("show-browser").onclick = () => {
   closeMenu();

@@ -370,3 +370,28 @@ button.link:hover { color: var(--fg); text-decoration: underline; }
 #wizard-body p { margin: 0; }
 #wizard-body input, #wizard-body select { font-size: 14px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
 .wizard-actions { margin-top: 6px; }
+
+/* MCP connections panel. */
+.mcp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 32px; max-width: 660px; width: 100%; margin: 0 auto; }
+.integration { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.integration .setting-text { flex: 1; min-width: 160px; }
+.integration-logo, #connect-logo { display: inline-flex; flex: none; }
+.logo { width: 40px; height: 40px; }
+.logo-bg { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
+.logo-line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.logo-tile { fill: var(--accent); }
+.logo-o { fill: none; stroke: var(--accent-fg); stroke-width: 2; }
+.integration .mcp-detail { flex-basis: 100%; }
+.mcp-add { margin-top: 20px; }
+.mcp-add summary { cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 2px 8px; color: var(--fg); }
+.connect-head { display: flex; align-items: center; gap: 10px; }
+.connect-list, .connect-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.connect-steps li { display: list-item; }
+.connect-steps .code-row { margin-top: 6px; }
+.big-code { font-size: 22px; letter-spacing: 3px; padding: 6px 12px; border: 1px dashed var(--border); border-radius: 8px; user-select: all; }
+a.button-link { display: inline-block; margin-top: 4px; padding: 5px 12px; border-radius: 6px; background: var(--accent); color: var(--accent-fg); text-decoration: none; font-size: 13px; }
+a.button-link:hover { filter: brightness(1.08); }
+.progress { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; position: relative; }
+.progress::after { content: ""; position: absolute; inset: 0 60% 0 0; background: var(--accent); animation: progress 1.2s ease-in-out infinite; }
+@keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+@media (prefers-reduced-motion: reduce) { .progress::after { animation: none; inset: 0; opacity: 0.5; } }
