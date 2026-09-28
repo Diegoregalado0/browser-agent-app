@@ -7,6 +7,7 @@ import { RateLimiter, isSensitiveSite, sleep } from "./limits.js";
 import { passwordTargetScript } from "./page-scripts.js";
 import { CURRENT_TAB_TAG } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
+import { LoopGuard } from "./loop-guard.js";
 
 // Tools that run code or rewrite pages where the user is signed in; off unless the
 // developer tools setting is on.
@@ -213,6 +214,7 @@ export class Agent {
     const browserTools = config.developerTools ? BROWSER_TOOL_DEFS : BROWSER_TOOL_DEFS.filter((t) => !DEVELOPER_TOOLS.has(t.name));
     const tools = config.desktopControl && this.desktop ? [...browserTools, this.desktop.def] : browserTools;
     this.taskTokens = 0;
+    this.loopGuard = new LoopGuard();
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
     const outputAtStart = this.usage.output;
@@ -304,6 +306,10 @@ export class Agent {
           this.emit({ type: "notice", text: "Stopped." });
           return;
         }
+        if (this.loopGuard.stopReason) {
+          this.emit({ type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
+          return;
+        }
       }
       this.emit({ type: "notice", text: `Stopped after ${config.maxSteps} steps (raise the limit in Settings).` });
     } finally {
@@ -330,11 +336,14 @@ export class Agent {
     const results = [];
     for (const call of calls) {
       const base = { type: "tool_result", id: call.id, nativeId: call.nativeId, name: call.name };
-      if (signal.aborted) {
-        results.push({ ...base, isError: true, content: [{ type: "text", text: "Cancelled by the user." }] });
+      if (signal.aborted || this.loopGuard.stopReason) {
+        const text = signal.aborted ? "Cancelled by the user." : "Not run: the task was stopped after repeated failures.";
+        results.push({ ...base, isError: true, content: [{ type: "text", text }] });
         continue;
       }
       this.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input });
+      // Declined or blocked actions are the user's and the safety check's decisions, not loops.
+      let authorizing = false;
       try {
         if (call.input?.__invalid_json !== undefined) throw new Error("Tool arguments were not valid JSON.");
         if (DEVELOPER_TOOLS.has(call.name) && !config.developerTools) throw new Error(`${call.name} is turned off in Settings.`);
@@ -342,7 +351,9 @@ export class Agent {
           this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
         );
         if (signal.aborted) throw new Error("Cancelled by the user.");
+        authorizing = true;
         await this.#authorize(call, config, signal);
+        authorizing = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
         let output = toBlocks(
           call.name === "desktop" ? await this.desktop.tool.run(call.input) : await this.browser.run(call.name, call.input),
@@ -362,11 +373,16 @@ export class Agent {
             ];
           }
         }
+        const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+        const note = this.loopGuard.record(call.name, call.input, false, text);
+        if (note) output = [...output, { type: "text", text: note }];
         this.emit({ type: "tool_result", id: call.id, content: output });
         results.push({ ...base, content: output });
       } catch (err) {
-        this.emit({ type: "tool_result", id: call.id, isError: true, content: [{ type: "text", text: err.message }] });
-        results.push({ ...base, isError: true, content: [{ type: "text", text: err.message }] });
+        const note = authorizing || signal.aborted ? null : this.loopGuard.record(call.name, call.input, true, err.message);
+        const content = [{ type: "text", text: note ? `${err.message}\n\n${note}` : err.message }];
+        this.emit({ type: "tool_result", id: call.id, isError: true, content });
+        results.push({ ...base, isError: true, content });
       }
     }
     return results;
