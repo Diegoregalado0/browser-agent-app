@@ -90,6 +90,24 @@ assert.equal(resultText(requests[3].at(-1)), 20000, "the latest tool output was 
 // in request 4 stays exactly the same and remains cacheable.
 assert.deepEqual(requests[5].slice(0, requests[3].length), requests[3], "compaction ran again too soon");
 
+// Site notes ride along with the first tool result on a matching site, once per conversation.
+agent.reset();
+agent.browser.run = async () => "done";
+agent.browser.currentUrl = async () => "https://catcourses.ucmerced.edu/courses/1";
+providers.openai.turn = async ({ messages }) => {
+  requests.push(structuredClone(messages));
+  return replies.shift();
+};
+requests = [];
+replies = [
+  { content: [read("g1")], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [read("g2")], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await agent.run("check my courses", config);
+const notes = JSON.stringify(requests.at(-1)).match(/Site notes for CatCourses/g) ?? [];
+assert.equal(notes.length, 1, "CatCourses notes were not given exactly once");
+
 // OpenAI pacing, against a local server that answers like the API: after a response
 // reports an empty token budget, the next request waits for it to refill, and a 429 is
 // not retried instantly by the SDK.

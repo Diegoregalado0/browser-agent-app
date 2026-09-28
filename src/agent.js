@@ -6,6 +6,7 @@ import { Guard, isStateChanging } from "./guard.js";
 import { RateLimiter, isSensitiveSite, sleep } from "./limits.js";
 import { passwordTargetScript } from "./page-scripts.js";
 import { CURRENT_TAB_TAG } from "./session-format.js";
+import { siteGuide } from "./site-guides.js";
 
 // Tools that run code or rewrite pages where the user is signed in; off unless the
 // developer tools setting is on.
@@ -114,6 +115,8 @@ export class Agent {
     // Input tokens of the latest request, and of the request that triggered the last compaction.
     this.lastInput = 0;
     this.compactedAt = 0;
+    // Sites whose notes this conversation already has.
+    this.guidesGiven = new Set();
   }
 
   get running() {
@@ -138,6 +141,15 @@ export class Agent {
     if (trimmed) this.compactedAt = lastInput;
   }
 
+  // The first time a conversation reaches a site with notes (site-guides.js), they ride
+  // along with the tool result, once.
+  async #addSiteGuide(results) {
+    const guide = siteGuide(await this.browser.currentUrl().catch(() => ""));
+    if (!guide || this.guidesGiven.has(guide.key) || !results.length) return;
+    this.guidesGiven.add(guide.key);
+    results.at(-1).content = [...results.at(-1).content, { type: "text", text: guide.text }];
+  }
+
   reset() {
     this.stop();
     this.messages = [];
@@ -146,6 +158,8 @@ export class Agent {
     this.usage = { input: 0, cachedInput: 0, output: 0 };
     this.lastInput = 0;
     this.compactedAt = 0;
+    // Sites whose notes this conversation already has.
+    this.guidesGiven = new Set();
   }
 
   // Adds tokens to this task's count and to today's ledger.
@@ -282,7 +296,9 @@ export class Agent {
           throw new Error("The reply hit the output limit in the middle of a tool call.");
         }
 
-        this.messages.push({ role: "user", content: await this.#runTools(calls, config, signal) });
+        const results = await this.#runTools(calls, config, signal);
+        await this.#addSiteGuide(results);
+        this.messages.push({ role: "user", content: results });
         this.onHistory();
         if (signal.aborted) {
           this.emit({ type: "notice", text: "Stopped." });
