@@ -448,6 +448,7 @@ export class Agent {
     const decision = await this.askPermission({
       text: `Safety check: ${reason} Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
       allowAlways: false,
+      kind: "safety",
     });
     if (decision === "deny") throw new Error(`The user declined this action (${reason}).`);
   }
@@ -477,6 +478,7 @@ export class Agent {
         const decision = await this.askPermission({
           text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}?`,
           allowAlways: false,
+          kind: "sensitive",
         });
         if (decision === "deny") throw new Error(`The user declined acting on ${site}.`);
         return;
@@ -485,7 +487,7 @@ export class Agent {
     // Typing, single keys (a password can be typed a key at a time) and pasting all count.
     const typing = (call.name === "browser" && ["type", "key"].includes(call.input.action)) || call.name === "form_input";
     if (typing && (await this.browser.callInPage(passwordTargetScript, call.input.ref || null).catch(() => false))) {
-      const decision = await this.askPermission({ text: "The agent wants to type into a password field. Allow it?", allowAlways: false });
+      const decision = await this.askPermission({ text: "The agent wants to type into a password field. Allow it?", allowAlways: false, kind: "password" });
       if (decision === "deny") throw new Error("The user declined entering a password. Ask them to sign in themselves.");
     }
   }
@@ -502,7 +504,7 @@ export class Agent {
     if (!origin || !/^https?:/.test(origin)) return;
     if (this.sessionOrigins.has(origin) || config.approvedOrigins.includes(origin)) return;
 
-    const decision = await this.askPermission({ text: `Allow the agent to use ${call.name} on ${origin}?`, allowAlways: true, origin });
+    const decision = await this.askPermission({ text: `Allow the agent to use ${call.name} on ${origin}?`, allowAlways: true, origin, kind: "site" });
     if (decision === "deny") throw new Error(`The user did not allow acting on ${origin}.`);
     this.sessionOrigins.add(origin);
   }

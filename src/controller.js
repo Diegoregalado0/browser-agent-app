@@ -6,6 +6,12 @@ import { today } from "./limits.js";
 
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
 
+// What a remote client (a chat bridge such as Discord) may send: start a task, stop it, and
+// answer a permission prompt. Settings, MCP servers, keys and data change only at the Mac.
+const REMOTE_MESSAGES = new Set(["run", "stop", "permission"]);
+// Prompts only the person at the Mac can approve.
+const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
+
 
 // The conversation behind every UI: runs tasks, keeps the saved session in step, applies
 // Ghost mode, and answers the UI's messages. Both editions use it; the host supplies
@@ -22,6 +28,9 @@ const CONNECTION_TEST_TIMEOUT_MS = 15000;
 export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
+  let permissionCount = 0;
+  // Per client: { remote, source } from connect(); local UIs are not remote.
+  const clientInfo = new WeakMap();
   // The saved conversation the agent's history belongs to: { id, title, created }, or
   // null until the first request of a new conversation is saved.
   let session = null;
@@ -111,10 +120,12 @@ export function createController(host) {
     ledger,
     emit: broadcast,
     onHistory: () => persistSession(),
-    askPermission: ({ text, allowAlways, origin }) =>
+    // Each prompt has an id, and an answer counts only for the prompt it was given for, so
+    // a late answer (an old notification, a second window) cannot approve a newer prompt.
+    askPermission: ({ text, allowAlways, origin, kind = "safety" }) =>
       new Promise((resolve) => {
-        pendingPermission = { resolve, origin, text, allowAlways };
-        broadcast({ type: "permission_request", text, allowAlways });
+        pendingPermission = { id: `p${++permissionCount}`, resolve, origin, text, allowAlways, kind };
+        broadcast(permissionRequest());
       }),
   });
   agent.mcp = host.mcp?.servers ?? null;
@@ -138,11 +149,21 @@ export function createController(host) {
     }
   }
 
-  async function resolvePermission(decision) {
+  const permissionRequest = () => ({
+    type: "permission_request",
+    id: pendingPermission.id,
+    text: pendingPermission.text,
+    allowAlways: pendingPermission.allowAlways,
+    kind: pendingPermission.kind,
+  });
+
+  // source: where the answer came from ("local", a remote bridge's name, or "agent" when a
+  // stop or reset ends the prompt).
+  async function resolvePermission(decision, source = "agent") {
     if (!pendingPermission) return;
     const { resolve, origin } = pendingPermission;
     pendingPermission = null;
-    record({ type: "permission_answer", decision });
+    record({ type: "permission_answer", decision, source });
     if (decision === "always" && origin) {
       const config = await host.loadConfig();
       if (!config.approvedOrigins.includes(origin)) config.approvedOrigins.push(origin);
@@ -158,6 +179,8 @@ export function createController(host) {
   async function handle(client, msg) {
     await ready;
     const reply = (event) => client.send(event);
+    const { remote = false, source = "local" } = clientInfo.get(client) ?? {};
+    if (remote && !REMOTE_MESSAGES.has(msg.type)) return;
     switch (msg.type) {
       case "hello": {
         if (msg.incognito && !incognitoClients.has(client)) {
@@ -166,9 +189,7 @@ export function createController(host) {
         }
         reply({ type: "config", config: clientConfig(await host.loadConfig()) });
         reply({ type: "status", running: agent.running });
-        if (pendingPermission) {
-          reply({ type: "permission_request", text: pendingPermission.text, allowAlways: pendingPermission.allowAlways });
-        }
+        if (pendingPermission) reply(permissionRequest());
         if (host.mcp) reply(mcpStatus());
         if (agent.messages.length) {
           reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
@@ -349,9 +370,16 @@ export function createController(host) {
         }
         return;
       }
-      case "permission":
-        resolvePermission(msg.decision);
+      case "permission": {
+        if (!pendingPermission || msg.id !== pendingPermission.id) return reply({ type: "permission_stale" });
+        if (!["once", "always", "deny"].includes(msg.decision)) return;
+        if (remote && msg.decision !== "deny" && LOCAL_ONLY_PROMPTS.has(pendingPermission.kind)) {
+          return reply({ type: "error", text: "This one can only be approved at the Mac." });
+        }
+        // "Always" changes settings, which only the Mac does.
+        resolvePermission(remote && msg.decision === "always" ? "once" : msg.decision, source);
         return;
+      }
       case "save_config": {
         const config = await host.loadConfig();
         // Ghost mode changes only through set_ghost, which also starts a new conversation, and
@@ -411,8 +439,11 @@ export function createController(host) {
     // Tells every UI that an MCP server's status or tools changed.
     mcpChanged: () => host.mcp && broadcast(mcpStatus()),
     // client: { send(event) }. Returns the function that takes the client's messages.
-    connect(client) {
+    // options.remote: a bridge that may only send REMOTE_MESSAGES; options.source names it in
+    // the activity log.
+    connect(client, { remote = false, source = "local" } = {}) {
       clients.add(client);
+      clientInfo.set(client, { remote, source });
       return (msg) => handle(client, msg).catch((err) => client.send({ type: "error", text: err.message }));
     },
     disconnect(client) {

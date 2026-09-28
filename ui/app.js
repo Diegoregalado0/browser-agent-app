@@ -521,6 +521,7 @@ const handlers = {
     append(el("div", "msg error", msg.text));
   },
   permission_request(msg) {
+    $("permission").dataset.id = msg.id;
     $("perm-text").textContent = msg.text;
     document.querySelector('#permission [data-decision="always"]').hidden = !msg.allowAlways;
     $("permission").hidden = false;
@@ -584,7 +585,7 @@ $("input").addEventListener("keydown", (e) => {
 
 $("permission").addEventListener("click", (e) => {
   const decision = e.target.dataset?.decision;
-  if (decision) send({ type: "permission", decision });
+  if (decision) send({ type: "permission", decision, id: $("permission").dataset.id });
 });
 
 // The side menu: settings sections on top, past conversations below.

@@ -10,6 +10,7 @@ import * as openai from "../src/providers/openai.js";
 import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
 import { McpServers } from "../src/mcp.js";
+import { createController } from "../src/controller.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -232,5 +233,45 @@ assert.equal(checked.length, 1, `expected one safety check (send_note), got ${ch
 assert.match(checked[0], /mcp__Test__send_note/);
 agent.mcp = null;
 await mcp.stopAll();
+
+// Controller: permission prompts carry ids, and remote clients are limited.
+let hostConfig = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
+const controller = createController({
+  edition: "local",
+  env: {},
+  loadConfig: async () => structuredClone(hostConfig),
+  saveConfig: async (c) => (hostConfig = structuredClone(c)),
+  loadUsage: async () => null,
+  saveUsage: async () => {},
+  sessions: { save: async () => {}, list: async () => [], load: async () => ({}), remove: async () => {}, removeAll: async () => {} },
+  ensureBrowser: async () => {},
+  desktop: null,
+});
+const localEvents = [];
+const remoteEvents = [];
+const fromLocal = controller.connect({ send: (e) => localEvents.push(e) });
+const fromRemote = controller.connect({ send: (e) => remoteEvents.push(e) }, { remote: true, source: "discord" });
+const lastPrompt = () => localEvents.filter((e) => e.type === "permission_request").at(-1);
+const settled = (promise) => Promise.race([promise, new Promise((r) => setTimeout(() => r("pending"), 50))]);
+
+await fromRemote({ type: "save_config", patch: { maxSteps: 3 } });
+await fromRemote({ type: "mcp_save", server: { name: "x", command: "touch", args: "/tmp/pwned" } });
+assert.notEqual(hostConfig.maxSteps, 3, "a remote client changed settings");
+assert.equal(hostConfig.mcpServers.length, 0, "a remote client added an MCP server");
+
+const site = controller.agent.askPermission({ text: "Use a.test?", allowAlways: true, origin: "https://a.test", kind: "site" });
+const siteId = lastPrompt().id;
+await fromLocal({ type: "permission", decision: "once", id: "p999" });
+assert.equal(await settled(site), "pending", "an answer for another prompt was accepted");
+await fromRemote({ type: "permission", decision: "always", id: siteId });
+assert.equal(await site, "once", "remote always was not reduced to once");
+assert.ok(!hostConfig.approvedOrigins.includes("https://a.test"), "a remote answer changed the approved sites");
+
+const password = controller.agent.askPermission({ text: "Type a password?", allowAlways: false, kind: "password" });
+const passwordId = lastPrompt().id;
+await fromRemote({ type: "permission", decision: "once", id: passwordId });
+assert.equal(await settled(password), "pending", "a password prompt was approved remotely");
+await fromLocal({ type: "permission", decision: "once", id: passwordId });
+assert.equal(await password, "once");
 
 console.log("agent checks passed");
