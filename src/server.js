@@ -14,6 +14,7 @@ import { createController } from "./controller.js";
 import { writeSidebarExtension, sidebarExtensionId, updateRunningSidebar } from "./sidebar.js";
 import * as sessions from "./sessions.js";
 import { McpServers, MCP_PRESETS } from "./mcp.js";
+import { DiscordBridge } from "./remote-discord.js";
 
 const UI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "ui");
 const ACTIVITY_LOG = join(HOME_DIR, "activity.log");
@@ -49,7 +50,7 @@ export async function startServer({ port, token = randomBytes(24).toString("hex"
   // MCP servers start with the app and follow Settings > MCP from then on.
   const mcpServers = new McpServers({ onChange: () => controller?.mcpChanged() });
   let controller = null;
-  controller = createController({
+  const host = {
     mcp: { servers: mcpServers, presets: MCP_PRESETS },
     edition: "local",
     env: process.env,
@@ -84,6 +85,14 @@ export async function startServer({ port, token = randomBytes(24).toString("hex"
       agent.desktop = { tool: new Desktop(agent.browser), def: DESKTOP_TOOL_DEF };
     },
     desktop: { status: () => helper("status"), requestAccess: () => helper("request-access") },
+  };
+  controller = createController(host);
+  // Remote control over the owner's Discord bot, connected as a remote client.
+  host.discord = new DiscordBridge({
+    controller,
+    loadConfig: async () => loadConfig(),
+    saveConfig: async (config) => saveConfig(config),
+    onChange: () => controller.discordChanged(),
   });
 
   const server = createServer(async (req, res) => {
@@ -137,6 +146,7 @@ export async function startServer({ port, token = randomBytes(24).toString("hex"
   const url = `${origin}/?t=${token}`;
   writeSidebarExtension(url);
   mcpServers.sync(loadConfig().mcpServers).catch((err) => console.error(`MCP: ${err.message}`));
+  host.discord.start().catch((err) => console.error(`Discord: ${err.message}`));
   process.on("exit", () => mcpServers.killAll());
   if (!updateRunningSidebar(PROFILE_DIR)) console.error("Restart the agent browser to load the updated side panel extension.");
   controller.ensureBrowser().catch((err) => console.error(`Agent browser: ${err.message}`));

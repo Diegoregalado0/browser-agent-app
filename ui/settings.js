@@ -68,6 +68,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
     $("settings-title").textContent = sheet.querySelector(`.settings-page[data-page="${name}"]`).dataset.title;
     sheet.querySelector(".settings-pages").scrollTop = 0;
     if (name === "data") send({ type: "data_info" });
+    if (name === "remote") send({ type: "discord_status" });
     if (name === "safety") {
       send({ type: "desktop_status" });
       send({ type: "data_info" });
@@ -362,6 +363,20 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
     }
   }
 
+  // Remote (Discord) page.
+  $("discord-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const token = $("discord-token").value.trim();
+    if (!token) return;
+    $("discord-token").value = "";
+    $("discord-status").textContent = "Connecting…";
+    send({ type: "discord_save", token });
+  });
+  $("discord-unpair").onclick = () => send({ type: "discord_unpair" });
+  $("discord-remove").onclick = (e) =>
+    confirmInline(e.currentTarget, { question: "Remove the Discord bot from the agent?", confirmLabel: "Remove", onConfirm: () => send({ type: "discord_remove" }) });
+  $("discord-code-copy").onclick = () => navigator.clipboard?.writeText($("discord-code").textContent).then(() => toast("Code copied"));
+
   // Debug page.
   $("run-checks").onclick = () => {
     $("check-results").replaceChildren(el("li", null, "Running…"));
@@ -437,6 +452,21 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
       config_reset() {
         pendingToast = null;
         toast("Settings reset to defaults");
+      },
+      discord_status(msg) {
+        const set = msg.state !== "off";
+        $("discord-status").textContent =
+          msg.state === "off" ? "Not set up."
+          : msg.state === "connecting" ? "Connecting to Discord…"
+          : msg.state === "error" ? msg.error
+          : msg.paired ? `Connected as ${msg.botName}, paired with ${msg.userName}. Message the bot to give it a task.`
+          : `Connected as ${msg.botName}. Not paired yet.`;
+        $("discord-pair").hidden = !(set && msg.pairCode);
+        $("discord-code").textContent = msg.pairCode ?? "";
+        $("discord-invite").hidden = !msg.inviteUrl || msg.paired;
+        if (msg.inviteUrl) $("discord-invite").href = msg.inviteUrl;
+        $("discord-unpair").hidden = !msg.paired;
+        $("discord-remove").hidden = !set;
       },
       self_test(msg) {
         $("check-results").replaceChildren(

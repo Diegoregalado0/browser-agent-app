@@ -11,6 +11,8 @@ import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
 import { McpServers } from "../src/mcp.js";
 import { createController } from "../src/controller.js";
+import { DiscordBridge } from "../src/remote-discord.js";
+import { WebSocketServer } from "ws";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -273,5 +275,85 @@ await fromRemote({ type: "permission", decision: "once", id: passwordId });
 assert.equal(await settled(password), "pending", "a password prompt was approved remotely");
 await fromLocal({ type: "permission", decision: "once", id: passwordId });
 assert.equal(await password, "once");
+
+// Discord bridge against a local stand-in for Discord's gateway and API: pairing only with
+// the code, only the owner's messages and button presses count, a task started from
+// Discord reports its prompt and reply there, and the token never reaches the UI.
+const discordCalls = [];
+let messageIds = 0;
+const discordApi = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    discordCalls.push({ method: req.method, path: req.url, body: body ? JSON.parse(body) : null, auth: req.headers.authorization });
+    const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+    if (req.url === "/users/@me/channels") return json({ id: "dm1" });
+    if (req.url.startsWith("/channels/dm1/messages") && req.method === "POST") return json({ id: `m${++messageIds}` });
+    if (req.url.startsWith("/interactions/")) return res.writeHead(204).end();
+    json({});
+  });
+});
+await new Promise((r) => discordApi.listen(0, "127.0.0.1", r));
+const gateway = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+await new Promise((r) => gateway.once("listening", r));
+let gatewaySocket;
+gateway.on("connection", (socket) => {
+  gatewaySocket = socket;
+  socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 45000 } }));
+  socket.on("message", (data) => {
+    const msg = JSON.parse(data);
+    if (msg.op === 2 && msg.d.token === "bot-token") socket.send(JSON.stringify({ op: 0, s: 1, t: "READY", d: { user: { id: "b1", username: "duomo-bot" } } }));
+  });
+});
+const dispatch = (t, d) => gatewaySocket.send(JSON.stringify({ op: 0, s: 2, t, d }));
+const dm = (userId, content) => dispatch("MESSAGE_CREATE", { channel_id: "dm1", author: { id: userId, username: userId }, content });
+const press = (userId, customId) =>
+  dispatch("INTERACTION_CREATE", { type: 3, id: `i${Math.random()}`, token: "t", user: { id: userId }, data: { custom_id: customId }, message: { content: "prompt" } });
+const until = async (test, what) => {
+  for (let i = 0; i < 100 && !test(); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(test(), what);
+};
+const sentTexts = () => discordCalls.filter((c) => c.path === "/channels/dm1/messages" && c.method === "POST").map((c) => c.body.content);
+
+const bridge = new DiscordBridge({
+  controller,
+  loadConfig: async () => structuredClone(hostConfig),
+  saveConfig: async (c) => (hostConfig = structuredClone(c)),
+  api: `http://127.0.0.1:${discordApi.address().port}`,
+  gateway: `ws://127.0.0.1:${gateway.address().port}`,
+});
+await bridge.configure("bot-token");
+await until(() => bridge.state === "connected", "the bridge did not connect");
+const code = hostConfig.discord.pairCode;
+assert.ok(!JSON.stringify(await bridge.status()).includes("bot-token"), "the bot token reached the UI status");
+
+dm("stranger", "WRONGCODE");
+dm("owner", code);
+await until(() => hostConfig.discord.userId === "owner", "the pairing code did not pair the owner");
+assert.match(sentTexts().at(-1), /Paired/);
+
+controller.agent.browser = agent.browser;
+agent.browser.currentUrl = async () => "https://example.com/";
+agent.browser.run = async () => "clicked";
+providers.openai.classify = async () => ({ verdict: "ask", reason: "check with the user" });
+providers.openai.turn = async () => replies.shift();
+replies = [
+  { content: [{ type: "tool_call", id: "d1", name: "browser", input: { action: "left_click", coordinate: [1, 1] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "all done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+dm("stranger", "delete everything");
+dm("owner", "click the button");
+await until(() => discordCalls.some((c) => c.body?.components), "no prompt with buttons reached Discord");
+const promptCall = discordCalls.find((c) => c.body?.components);
+const allow = promptCall.body.components[0].components.find((b) => b.label === "Allow").custom_id;
+press("stranger", allow);
+await until(() => discordCalls.some((c) => c.body?.data?.content === "Not for you."), "a stranger's button press was not refused");
+press("owner", allow);
+await until(() => sentTexts().includes("all done"), "the final reply did not reach Discord");
+assert.ok(!sentTexts().some((t) => /delete everything/.test(t)), "a stranger's message was acted on");
+assert.ok(discordCalls.every((c) => c.auth === "Bot bot-token"), "a request went out without the bot token");
+bridge.stop();
+gateway.close();
+discordApi.close();
 
 console.log("agent checks passed");

@@ -49,6 +49,7 @@
       <button data-settings-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
       <button data-settings-page="browser" data-icon="window"><span>Browser</span></button>
       <button data-settings-page="data" data-icon="lock"><span>Data and privacy</span></button>
+      <button data-settings-page="remote" data-icon="phone" data-local-only><span>Remote (Discord)</span></button>
       <button data-settings-page="debug" data-icon="bug"><span>Debug</span></button>
       <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
       <button id="menu-open-mcp" data-icon="plug" data-local-only><span>MCP connections</span></button>
@@ -75,6 +76,7 @@
         <button data-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
         <button data-page="browser" data-icon="window"><span>Browser</span></button>
         <button data-page="data" data-icon="lock"><span>Data and privacy</span></button>
+        <button data-page="remote" data-icon="phone" data-local-only><span>Remote (Discord)</span></button>
         <button data-page="debug" data-icon="bug"><span>Debug</span></button>
       </nav>
 
@@ -383,6 +385,43 @@
           </div>
         </section>
 
+
+        <section class="settings-page" data-page="remote" data-title="Remote (Discord)" hidden>
+          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this Mac, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
+
+          <div class="setting-group">
+            <div class="setting stack">
+              <div class="setting-text">
+                <span class="setting-title">Status</span>
+                <p class="setting-desc" id="discord-status">Not set up.</p>
+              </div>
+              <div class="device-code" id="discord-pair" hidden>
+                <p class="setting-desc">Send the bot a direct message with this code to pair your Discord account:</p>
+                <div class="code-row"><code id="discord-code"></code><button type="button" id="discord-code-copy">Copy</button></div>
+              </div>
+              <div class="row">
+                <a id="discord-invite" class="button-link" target="_blank" rel="noopener noreferrer" hidden>Add the bot to your server</a>
+                <button type="button" id="discord-unpair" hidden>Unpair</button>
+                <button type="button" id="discord-remove" class="link-danger" hidden>Remove bot</button>
+              </div>
+            </div>
+          </div>
+
+          <h3 class="group-label">Set up</h3>
+          <form class="setting-group" id="discord-form">
+            <div class="setting stack">
+              <ol class="connect-steps">
+                <li>Open <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">discord.com/developers/applications</a>, click New Application and name it (for example Duomo).</li>
+                <li>Open Bot, click Reset Token, and copy the token.</li>
+                <li>Paste it below and save. Then use "Add the bot to your server" with a server of your own (a private one works), since Discord only lets you message bots you share a server with.</li>
+                <li>Send the bot the pairing code shown above as a direct message.</li>
+              </ol>
+              <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
+              <p class="field-note">The token stays in the settings file on this Mac, readable only by you, and is never shown again.</p>
+              <div class="row"><button type="submit" class="primary">Save and connect</button></div>
+            </div>
+          </form>
+        </section>
 
         <section class="settings-page" data-page="debug" data-title="Debug" hidden>
           <div class="setting-group">

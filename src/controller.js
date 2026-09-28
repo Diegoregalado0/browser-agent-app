@@ -215,6 +215,18 @@ export function createController(host) {
       case "mcp_status":
         if (host.mcp) reply(mcpStatus());
         return;
+      case "discord_status":
+        if (host.discord) reply(await host.discord.status());
+        return;
+      case "discord_save":
+        if (host.discord && String(msg.token ?? "").trim()) await host.discord.configure(msg.token);
+        return;
+      case "discord_unpair":
+        await host.discord?.unpair();
+        return;
+      case "discord_remove":
+        await host.discord?.remove();
+        return;
       case "self_test": {
         const results = [];
         const check = async (name, run) => {
@@ -382,9 +394,10 @@ export function createController(host) {
       }
       case "save_config": {
         const config = await host.loadConfig();
-        // Ghost mode changes only through set_ghost, which also starts a new conversation, and
-        // MCP servers only through the mcp_* messages, which keep their hidden values.
-        const { keys, models, ghostMode: _ghost, mcpServers: _mcp, ...rest } = msg.patch || {};
+        // Ghost mode changes only through set_ghost, which also starts a new conversation, MCP
+        // servers only through the mcp_* messages, which keep their hidden values, and the
+        // Discord bot only through the discord_* messages.
+        const { keys, models, ghostMode: _ghost, mcpServers: _mcp, discord: _discord, ...rest } = msg.patch || {};
         Object.assign(config, rest);
         if (models) Object.assign(config.models, models);
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
@@ -438,6 +451,8 @@ export function createController(host) {
     refreshConfig: async () => broadcastConfig(await host.loadConfig()),
     // Tells every UI that an MCP server's status or tools changed.
     mcpChanged: () => host.mcp && broadcast(mcpStatus()),
+    // Tells every UI that the Discord bridge's status changed.
+    discordChanged: async () => host.discord && broadcast(await host.discord.status()),
     // client: { send(event) }. Returns the function that takes the client's messages.
     // options.remote: a bridge that may only send REMOTE_MESSAGES; options.source names it in
     // the activity log.
