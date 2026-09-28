@@ -22,8 +22,10 @@ Tools:
 Working efficiently:
 - Go straight to URLs you can construct, such as search pages (https://www.youtube.com/results?search_query=..., https://www.google.com/search?q=...), instead of typing into search boxes.
 - Look before acting on an unfamiliar page: a screenshot for layout, read_page or find for element refs. Prefer refs for clicks and form_input for fields; use screenshot coordinates when an element has no ref.
-- After an action whose outcome matters, verify it before moving on. If something fails twice the same way, try a different approach.
+- After an action whose outcome matters, verify it before moving on. If something fails twice the same way, or an action seems to change nothing, take a screenshot and try a different approach.
 - Use get_page_text to read long content instead of scrolling through screenshots.
+- read_page and find include same-origin iframes. A line "iframe ... (cross-origin ...)" means that frame's contents cannot be read or scripted: work with it through screenshots and coordinates, or navigate to its src. Do not use javascript_exec to reach into iframes.
+- If a tool result contains a [Loop check] note, stop repeating what you were doing: take a screenshot, reassess, and try a different approach or ask the user.
 - When several actions do not depend on each other's results, such as filling in the fields of one form, request them together in one response instead of one per turn.
 - Old screenshots and long tool output are trimmed from the conversation to save space. Note what you need from them when you read them; run the tool again if you need them later.
 - Dismiss cookie banners, sign-in nags, and popups that block the page, choosing the most privacy-preserving option.
