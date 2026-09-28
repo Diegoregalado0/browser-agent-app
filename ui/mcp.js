@@ -5,7 +5,11 @@
 const OUTLOOK_ID = "microsoft365";
 
 // Outlook's mark drawn in the app's own style: an "O" tile over a mail envelope, in the
-// accent color, so it follows the light and dark themes.
+// accent color, so it follows the light and dark themes. Microsoft's official Outlook
+// icon is not used: its Trademark and Brand Guidelines
+// (https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks) require an
+// express license for app and product icons, and its Microsoft 365 icon set is licensed
+// only for architectural diagrams, training materials and documentation.
 export const OUTLOOK_LOGO = `<svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
 <rect x="1" y="1" width="38" height="38" rx="10" class="logo-bg"/>
 <rect x="15" y="12" width="17" height="16" rx="2.5" class="logo-line"/>
