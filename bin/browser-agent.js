@@ -111,6 +111,11 @@ async function focusAgentBrowser() {
   const cdp = await connectChrome();
   const panelOpen = async () =>
     (await cdp.send("Target.getTargets")).targetInfos.some((t) => t.url.startsWith("chrome-extension://") && t.url.endsWith("/sidepanel.html"));
+  // Chrome on macOS keeps running after its last window closes; open one so there is
+  // something to show, and bring it forward (this works without the desktop helper).
+  const pages = (await cdp.send("Target.getTargets")).targetInfos.filter((t) => t.type === "page" && !t.url.startsWith("chrome-extension://"));
+  const targetId = pages[0]?.targetId ?? (await cdp.send("Target.createTarget", { url: "chrome://newtab/", newWindow: true })).targetId;
+  await cdp.send("Target.activateTarget", { targetId });
   const { processInfo } = await cdp.send("SystemInfo.getProcessInfo");
   const pid = processInfo.find((p) => p.type === "browser")?.id;
   const helper = join(HOME_DIR, "bin", "oshelper");
