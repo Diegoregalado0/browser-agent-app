@@ -21,6 +21,25 @@ const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ?
 
 const MAX_RATE_LIMIT_WAITS = 8;
 
+// Screenshots and long tool output stay in the history and are sent again with every
+// request, which is what makes long tasks large. Once a request passes COMPACT_MIN_TOKENS
+// and has grown by half since the last pass, one pass trims them in all but the latest
+// messages. Passes are rare, so the prompt prefix stays cacheable between them.
+const COMPACT_MIN_TOKENS = 12000;
+const COMPACT_GROWTH = 1.5;
+const COMPACT_KEEP_MESSAGES = 4;
+const COMPACT_TEXT_CHARS = 1500;
+
+function compactBlocks(blocks) {
+  return blocks.map((b) => {
+    if (b.type === "image") return { type: "text", text: "[earlier screenshot removed to save space]" };
+    if (b.type === "text" && b.text.length > COMPACT_TEXT_CHARS) {
+      return { ...b, text: `${b.text.slice(0, COMPACT_TEXT_CHARS)}\n[trimmed to save space; run the tool again for the full output]` };
+    }
+    return b;
+  });
+}
+
 // Milliseconds to wait before retrying a rate-limited (429) request, or null if the
 // error is not a retryable rate limit. Out-of-credit 429s are not retryable.
 function rateLimitDelay(err) {
@@ -92,10 +111,31 @@ export class Agent {
     this.taskTokens = 0;
     this.abortController = null;
     this.usage = { input: 0, cachedInput: 0, output: 0 };
+    // Input tokens of the latest request, and of the request that triggered the last compaction.
+    this.lastInput = 0;
+    this.compactedAt = 0;
   }
 
   get running() {
     return this.abortController !== null;
+  }
+
+  // Trims old screenshots and long tool output when the last request was large (see
+  // COMPACT_MIN_TOKENS). The user's own messages are never trimmed.
+  #compact(lastInput) {
+    if (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH) return;
+    let trimmed = false;
+    const end = this.messages.length - COMPACT_KEEP_MESSAGES;
+    for (let i = 0; i < end; i++) {
+      const m = this.messages[i];
+      if (m.role !== "user" || !m.content.some((b) => b.type === "tool_result")) continue;
+      const content = m.content.map((b) => (b.type === "tool_result" ? { ...b, content: compactBlocks(b.content) } : b));
+      if (JSON.stringify(content) === JSON.stringify(m.content)) continue;
+      this.messages[i] = { ...m, content };
+      trimmed = true;
+    }
+    // A pass that found nothing old enough to trim does not count, so the next step tries again.
+    if (trimmed) this.compactedAt = lastInput;
   }
 
   reset() {
@@ -104,6 +144,8 @@ export class Agent {
     this.sessionOrigins.clear();
     this.guard.reset();
     this.usage = { input: 0, cachedInput: 0, output: 0 };
+    this.lastInput = 0;
+    this.compactedAt = 0;
   }
 
   // Adds tokens to this task's count and to today's ledger.
@@ -172,6 +214,7 @@ export class Agent {
             this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
           );
           if (signal.aborted) throw new DOMException("Stopped", "AbortError");
+          this.#compact(this.lastInput);
           for (;;) {
             try {
               result = await provider.turn({
@@ -206,6 +249,7 @@ export class Agent {
         }
 
         this.messages.push({ role: "assistant", content: result.content, raw: result.raw });
+        if (result.usage?.input) this.lastInput = result.usage.input;
         this.onHistory();
         if (result.usage) {
           for (const k of Object.keys(this.usage)) this.usage[k] += result.usage[k] ?? 0;

@@ -61,6 +61,35 @@ const sent = requests[0];
 assert.ok(!sent.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool_call" && b.id === "call_click")), "unanswered call was sent");
 assert.equal(sent.at(-1).role, "user");
 
+// Compaction: once requests grow large, older long tool output and screenshots are trimmed
+// in one pass, the latest messages are kept whole, and no pass runs again until the
+// request has grown by half.
+const read = (id) => ({ type: "tool_call", id, name: "get_page_text", input: {} });
+const longText = "x".repeat(20000);
+let sizes = [5000, 13000, 14000, 16000, 20000, 1000];
+replies = ["a", "b", "c", "d", "e"].map((id) => ({ content: [read(id)], raw: null, stop: "tool_use", usage: { input: sizes.shift(), output: 1 } }));
+replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: sizes.shift(), output: 1 } });
+agent.reset();
+agent.browser.run = async () => [{ type: "text", text: longText }, { type: "image", mediaType: "image/jpeg", data: "AAAA" }];
+requests = [];
+const lengths = [];
+providers.openai.turn = async ({ messages }) => {
+  lengths.push(JSON.stringify(messages).length);
+  requests.push(structuredClone(messages));
+  return replies.shift();
+};
+await agent.run("read them", config);
+const resultText = (m) => m.content.find((b) => b.type === "tool_result")?.content[0].text.length;
+// Request 3 follows a 13000-token request, but every result is still recent: nothing changes.
+assert.equal(resultText(requests[2][2]), 20000, "recent tool output was trimmed");
+// Request 4 follows 14000: the oldest result is trimmed, the latest ones are kept whole.
+assert.ok(resultText(requests[3][2]) < 2000, "old tool output was not trimmed");
+assert.ok(requests[3][2].content[0].content.every((b) => b.type !== "image"), "old screenshot was kept");
+assert.equal(resultText(requests[3].at(-1)), 20000, "the latest tool output was trimmed");
+// Requests 5 and 6 follow 16000 and 20000 (< 14000 * 1.5): no new pass, so the prefix sent
+// in request 4 stays exactly the same and remains cacheable.
+assert.deepEqual(requests[5].slice(0, requests[3].length), requests[3], "compaction ran again too soon");
+
 // OpenAI pacing, against a local server that answers like the API: after a response
 // reports an empty token budget, the next request waits for it to refill, and a 429 is
 // not retried instantly by the SDK.
