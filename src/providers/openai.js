@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { sleep } from "../limits.js";
 
 // Official OpenAI uses the Responses API: current reasoning models reject function tools
 // on Chat Completions unless reasoning is off, and Responses carries encrypted reasoning
@@ -66,10 +67,55 @@ function toMessages(system, messages) {
   return out;
 }
 
+// Token budget per model, from the x-ratelimit-*-tokens headers of the latest response:
+// { limit, remaining, resetMs, at, lastInput }. OpenAI counts rejected requests against
+// the limit too, so requests wait for enough budget instead of failing and retrying.
+const budgets = new Map();
+
+// "6m0s", "1.5s", "20ms" -> milliseconds.
+function durationMs(text) {
+  let ms = 0;
+  for (const [, n, unit] of String(text).matchAll(/([\d.]+)(ms|s|m|h)/g)) ms += Number(n) * { ms: 1, s: 1000, m: 60000, h: 3600000 }[unit];
+  return ms;
+}
+
+async function recordingFetch(url, init) {
+  const res = await fetch(url, init);
+  const limit = Number(res.headers.get("x-ratelimit-limit-tokens"));
+  const model = /"model":"([^"]+)"/.exec(typeof init?.body === "string" ? init.body.slice(0, 300) : "")?.[1];
+  if (limit && model) {
+    budgets.set(model, {
+      ...budgets.get(model),
+      limit,
+      remaining: Number(res.headers.get("x-ratelimit-remaining-tokens")) || 0,
+      resetMs: durationMs(res.headers.get("x-ratelimit-reset-tokens")),
+      at: Date.now(),
+    });
+  }
+  if (res.status !== 429) return res;
+  // The agent retries 429s itself after the wait OpenAI suggests; the SDK would retry at once.
+  const headers = new Headers(res.headers);
+  headers.set("x-should-retry", "false");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+// Waits until the model's token budget covers a request of about `estimate` tokens. The
+// budget refills steadily, reaching the full limit after resetMs.
+async function paceFor(model, estimate, signal, onWait) {
+  const b = budgets.get(model);
+  if (!b?.limit || b.remaining >= estimate) return;
+  const perMs = b.resetMs > 0 ? (b.limit - b.remaining) / b.resetMs : b.limit / 60000;
+  const available = Math.min(b.limit, b.remaining + (Date.now() - b.at) * perMs);
+  if (available >= estimate) return;
+  const ms = Math.min(60000, Math.ceil((Math.min(estimate, b.limit) - available) / perMs) + 250);
+  onWait?.(Math.ceil(ms / 1000));
+  await sleep(ms, signal);
+}
+
 // dangerouslyAllowBrowser: in the extension edition the user's own key calls the API
 // from their browser, which the SDK allows only with this opt-in.
 function client({ apiKey, config }) {
-  return new OpenAI({ apiKey, baseURL: config.openaiBaseUrl || undefined, dangerouslyAllowBrowser: true });
+  return new OpenAI({ apiKey, baseURL: config.openaiBaseUrl || undefined, dangerouslyAllowBrowser: true, fetch: recordingFetch });
 }
 
 export async function listModels(opts) {
@@ -78,7 +124,15 @@ export async function listModels(opts) {
   return ids.sort();
 }
 
-async function chatTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking }) {
+// About how many tokens the next request will count: the last one plus a new step.
+const nextEstimate = (model) => Math.round((budgets.get(model)?.lastInput ?? 0) * 1.1) + 2000;
+
+function recordInput(model, usage) {
+  if (usage) budgets.set(model, { ...budgets.get(model), lastInput: usage.input });
+}
+
+async function chatTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking, onWait }) {
+  await paceFor(model, nextEstimate(model), signal, onWait);
   const stream = await client({ apiKey, config }).chat.completions.create(
     {
       model,
@@ -131,6 +185,7 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
   }
   const hasCalls = content.some((b) => b.type === "tool_call");
   const stop = finish === "length" ? "max_tokens" : finish === "content_filter" ? "refusal" : hasCalls ? "tool_use" : "end";
+  recordInput(model, usage);
   return { content, raw: null, stop, usage };
 }
 
@@ -177,7 +232,7 @@ function toResponsesInput(messages, model) {
   return input;
 }
 
-async function responsesTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking }) {
+async function responsesTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking, onWait }) {
   const params = {
     model,
     instructions: system,
@@ -196,6 +251,7 @@ async function responsesTurn({ apiKey, model, config, system, tools, messages, s
     params.include = ["reasoning.encrypted_content"];
   }
 
+  await paceFor(model, nextEstimate(model), signal, onWait);
   const stream = client({ apiKey, config }).responses.stream(params, { signal });
   stream.on("response.output_text.delta", (e) => onText(e.delta));
   stream.on("response.reasoning_summary_text.delta", (e) => onThinking(e.delta));
@@ -219,6 +275,7 @@ async function responsesTurn({ apiKey, model, config, system, tools, messages, s
     cachedInput: response.usage.input_tokens_details?.cached_tokens ?? 0,
     output: response.usage.output_tokens,
   };
+  recordInput(model, usage);
   return { content, raw: { provider: "openai-responses", model, data: response.output.map(sanitizeItem) }, stop, usage };
 }
 
@@ -244,6 +301,7 @@ export function describeError(err) {
 // onUsage(tokens) reports what the call used, so safety checks count toward usage limits.
 export async function classify({ apiKey, model, config, system, text, images = [], schema, signal, onUsage }) {
   const openai = client({ apiKey, config });
+  await paceFor(model, Math.round(text.length / 4) + images.length * 1000 + 500, signal);
   if (config.openaiBaseUrl) {
     const res = await openai.chat.completions.create(
       {

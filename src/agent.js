@@ -184,6 +184,7 @@ export class Agent {
                 signal,
                 onText: (delta) => this.emit({ type: "text", delta }),
                 onThinking: (delta) => this.emit({ type: "thinking", delta }),
+                onWait: (secs) => this.emit({ type: "notice", text: `Pacing for ${config.provider}'s token rate limit; waiting ${secs}s.` }),
               });
               break;
             } catch (err) {
