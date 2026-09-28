@@ -363,23 +363,13 @@ button.link { border: none; background: none; color: var(--muted); padding: 4px 
 button.link:hover { color: var(--fg); text-decoration: underline; }
 .spacer { flex: 1; }
 
-/* First-run setup. */
+/* Dialog cards (Outlook connect flow). */
 .wizard { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.35); }
 .wizard[hidden] { display: none; }
 .wizard-card { width: 100%; max-width: 440px; max-height: 100%; overflow: auto; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
 .wizard-card h2 { margin: 0; font-size: 18px; }
 .wizard-step { margin: 0; font-size: 12px; color: var(--muted); }
-#wizard-body { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
-#wizard-body p { margin: 0; }
-#wizard-body input, #wizard-body select { font-size: 14px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
 .wizard-actions { margin-top: 6px; }
-#wizard-body section { display: flex; flex-direction: column; gap: 10px; }
-#wizard-body [hidden] { display: none; }
-#wizard-body code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
-#wizard-body a { color: var(--accent); }
-.wizard-examples { display: flex; flex-direction: column; gap: 6px; }
-.wizard-examples button { text-align: left; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
-.wizard-examples button:hover { background: var(--hover); }
 
 /* MCP connections panel. */
 .mcp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 32px; max-width: 660px; width: 100%; margin: 0 auto; }
@@ -405,3 +395,31 @@ a.button-link:hover { filter: brightness(1.08); }
 .progress::after { content: ""; position: absolute; inset: 0 60% 0 0; background: var(--accent); animation: progress 1.2s ease-in-out infinite; }
 @keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 @media (prefers-reduced-motion: reduce) { .progress::after { animation: none; inset: 0; opacity: 0.5; } }
+
+/* First-run setup: a full-screen surface over the whole app. The Outlook connect flow
+   (z-index 20) opens on top of it. */
+.onboard { position: fixed; inset: 0; z-index: 15; overflow-y: auto; display: flex; background: var(--bg); color: var(--fg); }
+.onboard-screen { margin: auto; width: 100%; max-width: 420px; padding: 40px 20px; display: flex; flex-direction: column; gap: 16px; }
+.onboard h1 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.3; }
+.onboard h1:focus { outline: none; }
+.onboard-lead { margin: 0; color: var(--muted); }
+.onboard-lead:empty { display: none; }
+.onboard.welcome .onboard-screen { text-align: center; align-items: center; }
+.onboard.welcome h1 { font-size: 28px; }
+.onboard-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; margin: -8px 0 0 -6px; }
+.onboard-back .icon { width: 16px; height: 16px; }
+.onboard-providers { display: flex; flex-direction: column; gap: 10px; }
+.onboard-providers button {
+  min-height: 64px; padding: 12px 18px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: var(--panel); border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  font-size: 20px; font-weight: 600; letter-spacing: -0.01em;
+}
+.onboard-providers button:hover { border-color: var(--muted); background: color-mix(in srgb, var(--panel) 92%, var(--fg)); }
+.onboard-providers .icon { width: 24px; height: 24px; }
+.onboard input { font-size: 14px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--muted); background: var(--panel); color: var(--fg); }
+.onboard a { color: var(--accent); }
+.onboard code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.onboard-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 4px; }
+.onboard-actions .primary { padding: 9px 16px; font-size: 14px; border-radius: 8px; }
+.onboard.welcome .onboard-actions { align-self: stretch; }
+#wizard-outlook-logo .logo { width: 56px; height: 56px; }

@@ -69,10 +69,6 @@ const wizard = createWizard({
   icon,
   send,
   mcp: mcpPanel,
-  useExample: (text) => {
-    $("input").value = text;
-    $("input").focus();
-  },
   openModels: () => settings.open("models"),
 });
 

@@ -1,29 +1,38 @@
 import { OUTLOOK_LOGO } from "./mcp.js";
 
-// First-run setup: the model provider and its key, Outlook (local edition), then a few
-// example tasks. It opens once while config.setupDone is false, and again from Settings >
-// General. Finishing or skipping it saves setupDone.
+// First-run setup, full screen over the app: welcome, provider, its key (or a local server
+// check), then Outlook in the local edition. It opens once while config.setupDone is false,
+// and again from Settings > General. The first run cannot be skipped until a provider
+// works; setupDone is saved only after that (and after the Outlook screen is answered).
 
-const KEY_PAGES = {
-  anthropic: "https://console.anthropic.com/settings/keys",
-  openai: "https://platform.openai.com/api-keys",
-  gemini: "https://aistudio.google.com/apikey",
-  mistral: "https://console.mistral.ai/api-keys",
-};
+// The product name on the welcome screen. It changes with the rebrand.
+const PRODUCT_NAME = "Browser Agent";
 
-// mcp: the MCP panel, whose Outlook connect flow the Outlook step runs. useExample(text)
-// puts an example task in the composer; openModels() opens Settings > Models.
-export function createWizard({ $, el, icon, send, mcp, useExample, openModels }) {
+// Provider buttons, in order. Each shows the provider's name as a wordmark in the app's own
+// type: the providers' trademark rules do not allow their logos without written permission
+// (https://www.anthropic.com/legal/trademark-guidelines, https://openai.com/brand).
+// glyph: an app icon shown before the name.
+const PROVIDERS = [
+  { id: "openai", name: "OpenAI", keyPage: "https://platform.openai.com/api-keys" },
+  { id: "anthropic", name: "Anthropic", keyPage: "https://console.anthropic.com/settings/keys" },
+  { id: "gemini", name: "Google Gemini", keyPage: "https://aistudio.google.com/apikey" },
+  { id: "mistral", name: "Mistral", keyPage: "https://console.mistral.ai/api-keys" },
+  { id: "ollama", name: "Local", label: "Local models on this computer, with Ollama", glyph: "models" },
+];
+
+// mcp: the MCP panel, whose Outlook connect flow the Outlook screen runs. openModels()
+// opens Settings > Models, for a provider that has no model chosen yet.
+export function createWizard({ $, el, icon, send, mcp, openModels }) {
   const root = $("wizard");
   let config = null;
-  let step = null;
+  let screen = null;
   // Opened automatically at most once per page load.
   let autoOpened = false;
+  // Reopened after setup was finished, so it may be closed without finishing.
+  let closable = false;
+  let provider = null;
   // The provider whose connection test is running.
   let testing = null;
-  let returnFocus = null;
-
-  const steps = () => (config.edition === "local" ? ["provider", "outlook", "done"] : ["provider", "done"]);
 
   function setButton(id, label, onClick) {
     const button = $(id);
@@ -34,148 +43,176 @@ export function createWizard({ $, el, icon, send, mcp, useExample, openModels })
     button.onclick = onClick;
   }
 
-  function show(name) {
-    step = name;
-    const list = steps();
-    for (const section of root.querySelectorAll("[data-step]")) section.hidden = section.dataset.step !== name;
-    $("wizard-step").textContent = `Step ${list.indexOf(name) + 1} of ${list.length}`;
-    $("wizard-title").textContent = root.querySelector(`[data-step="${name}"]`).dataset.title;
-    setButton("wizard-back", name === "provider" ? "" : "Back", () => show(list[list.indexOf(name) - 1]));
-    ({ provider: renderProvider, outlook: renderOutlook, done: renderDone })[name]();
-    root.hidden = false;
-    (name === "provider" ? $("wizard-provider") : $("wizard-next")).focus();
-  }
-
   function result(kind, text) {
     const node = $("wizard-result");
     node.className = `pc-result ${kind}`;
     node.replaceChildren();
+    if (!kind) return;
     if (kind !== "pending") node.append(icon(kind === "ok" ? "check" : "alert"));
     node.append(el("span", null, text));
   }
 
-  // Step 1: provider and key.
-
-  function renderProvider() {
-    const p = $("wizard-provider").value;
-    const info = config.keyInfo?.[p];
-    const keyed = p !== "ollama";
-    $("wizard-key-field").hidden = !keyed;
-    $("wizard-ollama-note").hidden = keyed;
-    $("wizard-result").replaceChildren();
-    if (keyed) {
-      const has = info && info.source !== "none";
-      $("wizard-key").placeholder = has ? "Leave blank to keep the current key" : "Paste your API key";
-      const note = $("wizard-key-note");
-      if (has) note.textContent = `Using the ${info.source === "env" ? `key from ${info.env}` : "saved key"} (${info.mask}). Paste a new key to replace it.`;
-      else {
-        const link = Object.assign(el("a", null, new URL(KEY_PAGES[p]).hostname), { href: KEY_PAGES[p], target: "_blank", rel: "noopener noreferrer" });
-        note.replaceChildren("Create one at ", link, ".");
-      }
-    }
-    setButton("wizard-skip", "Skip setup", finish);
-    setButton("wizard-next", "Test and continue", testProvider);
-  }
-
-  function testProvider() {
-    const p = $("wizard-provider").value;
-    const key = $("wizard-key").value.trim();
-    if (p !== "ollama" && !key && config.keyInfo?.[p]?.source === "none") {
-      result("error", "Paste an API key first.");
-      return $("wizard-key").focus();
-    }
-    testing = p;
-    $("wizard-next").disabled = true;
-    $("wizard-next").textContent = "Testing…";
-    result("pending", "Testing the connection…");
-    send({ type: "test_provider", provider: p, key: key || undefined });
-  }
-
-  $("wizard-provider").addEventListener("change", () => {
+  // Shows one screen: its title, lead text, which parts are visible, and its buttons.
+  function show(name, { title, lead = "", parts = [], next, skip, back, focus }) {
+    screen = name;
     testing = null;
-    $("wizard-key").value = "";
-    renderProvider();
-  });
-  $("wizard-key").addEventListener("keydown", (e) => e.key === "Enter" && !$("wizard-next").disabled && testProvider());
+    root.classList.toggle("welcome", name === "welcome");
+    $("wizard-title").textContent = title;
+    $("wizard-lead").replaceChildren(...[lead].flat());
+    for (const id of ["wizard-providers", "wizard-key-field", "wizard-outlook-logo"]) $(id).hidden = !parts.includes(id);
+    result("");
+    setButton("wizard-next", next?.[0], next?.[1]);
+    setButton("wizard-skip", skip?.[0] ?? (closable ? "Close" : ""), skip?.[1] ?? close);
+    $("wizard-back").hidden = !back;
+    $("wizard-back").onclick = back;
+    setOpen(true);
+    (focus ?? $("wizard-title")).focus();
+  }
 
-  // Step 2: Outlook, through the MCP panel's connect flow.
-
-  function renderOutlook() {
-    $("wizard-outlook-logo").innerHTML = OUTLOOK_LOGO;
-    const outlook = mcp.outlook;
-    $("wizard-outlook-status").textContent = outlook?.signedIn ? `Connected${outlook.account ? ` as ${outlook.account}` : ""}.` : "";
-    if (outlook?.signedIn) {
-      setButton("wizard-skip", "");
-      setButton("wizard-next", "Continue", () => show("done"));
-      return;
-    }
-    setButton("wizard-skip", "Skip", () => show("done"));
-    setButton("wizard-next", "Connect Outlook", () => {
-      root.hidden = true;
-      mcp.connectOutlook((signedIn) => show(signedIn ? "done" : "outlook"));
+  function welcome() {
+    show("welcome", {
+      title: PRODUCT_NAME,
+      lead: "Tell it the task. It does the browsing.",
+      next: ["Get started", pickProvider],
+      focus: $("wizard-next"),
     });
   }
 
-  // Step 3: done, with example tasks.
-
-  function renderDone() {
-    const model = config.models[config.provider];
-    $("wizard-done-text").textContent = model
-      ? `The agent will use ${model}. You can change the model and every other setting from the menu.`
-      : "Choose a model in Settings > Models before your first task.";
-    const examples = ["Find a well-reviewed lasagna recipe and open it.", "Compare the price of AirPods Pro at three stores."];
-    if (mcp.outlook?.signedIn) examples.push("What's on my calendar tomorrow?", "Summarize my unread email from today.");
-    $("wizard-examples").replaceChildren(
-      ...examples.map((text) => {
-        const button = el("button", null, text);
+  function pickProvider() {
+    $("wizard-providers").replaceChildren(
+      ...PROVIDERS.map((p) => {
+        const button = el("button");
         button.type = "button";
-        button.onclick = () => {
-          finish();
-          useExample(text);
-        };
+        if (p.glyph) button.append(icon(p.glyph));
+        button.append(el("span", null, p.name));
+        button.setAttribute("aria-label", p.label ?? p.name);
+        button.onclick = () => enterKey(p);
         return button;
       }),
     );
-    setButton("wizard-skip", "");
-    setButton("wizard-next", model ? "Start" : "Choose a model", () => {
-      finish();
-      if (!model) openModels();
+    show("provider", {
+      title: "Pick your provider",
+      lead: "The agent runs on the AI provider you choose, with your own account.",
+      parts: ["wizard-providers"],
+      back: welcome,
+      focus: $("wizard-providers").querySelector(`button:nth-child(${Math.max(1, PROVIDERS.findIndex((p) => p.id === config.provider) + 1)})`),
     });
   }
 
+  // The key screen, or for Ollama a check that the local server answers.
+  function enterKey(p) {
+    provider = p;
+    $("wizard-key").value = "";
+    if (p.id === "ollama") {
+      const cmd = el("code", null, "ollama serve");
+      return show("key", {
+        title: "Use a local model",
+        lead: ["Ollama runs models on this computer, so no key is needed. Start it with ", cmd, ", then test the connection."],
+        next: ["Test connection", test],
+        back: pickProvider,
+        focus: $("wizard-next"),
+      });
+    }
+    const info = config.keyInfo?.[p.id];
+    const has = info && info.source !== "none";
+    $("wizard-key").placeholder = has ? "Leave blank to keep the current key" : "Paste your API key";
+    const link = Object.assign(el("a", null, new URL(p.keyPage).hostname), { href: p.keyPage, target: "_blank", rel: "noopener noreferrer" });
+    $("wizard-key-note").replaceChildren(
+      ...(has ? [`Using the ${info.source === "env" ? `key from ${info.env}` : "saved key"} (${info.mask}). Paste a new one to replace it. `] : []),
+      "Get a key at ",
+      link,
+      ".",
+    );
+    show("key", {
+      title: `Add your ${p.name} key`,
+      lead: "The key stays on this device and is sent only to the provider, which bills you for what the agent uses.",
+      parts: ["wizard-key-field"],
+      next: ["Test and continue", test],
+      back: pickProvider,
+      focus: $("wizard-key"),
+    });
+  }
+
+  function test() {
+    const key = $("wizard-key").value.trim();
+    if (provider.id !== "ollama" && !key && config.keyInfo?.[provider.id]?.source === "none") {
+      result("error", "Paste an API key first.");
+      return $("wizard-key").focus();
+    }
+    testing = provider.id;
+    $("wizard-next").disabled = true;
+    $("wizard-next").textContent = "Testing…";
+    result("pending", "Testing the connection…");
+    send({ type: "test_provider", provider: provider.id, key: key || undefined });
+  }
+
+  $("wizard-key").addEventListener("keydown", (e) => e.key === "Enter" && !$("wizard-next").disabled && test());
+
+  function outlookScreen() {
+    $("wizard-outlook-logo").innerHTML = OUTLOOK_LOGO;
+    const outlook = mcp.outlook;
+    if (outlook?.signedIn) {
+      return show("outlook", {
+        title: "Outlook is connected",
+        lead: `Signed in${outlook.account ? ` as ${outlook.account}` : ""}. The agent can use your mail and calendar when a task needs them.`,
+        parts: ["wizard-outlook-logo"],
+        next: ["Continue", finish],
+        skip: [""],
+        focus: $("wizard-next"),
+      });
+    }
+    show("outlook", {
+      title: "Connect your Outlook",
+      lead: "With Outlook connected, the agent can find emails, draft replies and check your calendar as part of a task. It asks you before sending anything.",
+      parts: ["wizard-outlook-logo"],
+      next: ["Connect Outlook", () => mcp.connectOutlook(outlookScreen)],
+      skip: ["Skip for now", finish],
+      focus: $("wizard-next"),
+    });
+  }
+
+  // The rest of the page is inert while setup is open, so neither focus nor a screen
+  // reader reaches it. The connect flow and toasts stay live above it.
+  function setOpen(open) {
+    root.hidden = !open;
+    for (const node of document.body.children) {
+      if (node !== root && node.id !== "connect-flow" && node.id !== "toast") node.inert = open;
+    }
+  }
+
   function close() {
-    root.hidden = true;
-    step = null;
+    setOpen(false);
+    screen = null;
     testing = null;
-    returnFocus?.focus?.();
+    $("input")?.focus();
   }
 
   function finish() {
     if (!config.setupDone) send({ type: "save_config", patch: { setupDone: true } });
     close();
+    if (!config.models[config.provider]) openModels();
   }
 
-  // Escape skips; Tab stays inside the dialog.
+  // Tab stays inside setup. Escape closes it only when it was reopened after setup.
   root.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.stopPropagation();
-      return finish();
+      if (closable) close();
+      return;
     }
     if (e.key !== "Tab") return;
-    const items = [...root.querySelectorAll("button, input, select, a[href]")].filter((n) => !n.disabled && n.offsetParent);
+    const items = [...root.querySelectorAll("button, input, a[href]")].filter((n) => !n.disabled && n.offsetParent);
     const edge = e.shiftKey ? items[0] : items.at(-1);
     if (document.activeElement === edge) {
       e.preventDefault();
-      (e.shiftKey ? items.at(-1) : items[0]).focus();
+      (e.shiftKey ? items.at(-1) : items[0])?.focus();
     }
   });
 
   function open() {
     autoOpened = true;
-    returnFocus = document.activeElement;
-    $("wizard-provider").value = config.provider;
-    $("wizard-key").value = "";
-    show("provider");
+    closable = Boolean(config.setupDone);
+    welcome();
   }
 
   return {
@@ -186,18 +223,22 @@ export function createWizard({ $, el, icon, send, mcp, useExample, openModels })
     render(next) {
       config = next;
       if (!config.setupDone && !autoOpened) open();
-      else if (step === "done") renderDone();
     },
     handlers: {
       provider_test(msg) {
-        if (msg.provider !== testing || step !== "provider") return;
+        if (msg.provider !== testing || screen !== "key") return;
         testing = null;
-        setButton("wizard-next", "Test and continue", testProvider);
-        if (!msg.ok) return result("error", msg.text);
+        setButton("wizard-next", provider.id === "ollama" ? "Test connection" : "Test and continue", test);
+        if (!msg.ok) {
+          result("error", msg.text);
+          return (provider.id === "ollama" ? $("wizard-next") : $("wizard-key")).focus();
+        }
         const key = $("wizard-key").value.trim();
         $("wizard-key").value = "";
         send({ type: "save_config", patch: { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) } });
-        show(steps()[1]);
+        // The saved config arrives after this; finish() reads the chosen provider from it.
+        config = { ...config, provider: msg.provider };
+        config.edition === "local" ? outlookScreen() : finish();
       },
     },
   };
