@@ -333,6 +333,17 @@ export class Agent {
 
   async #runTools(calls, config, signal) {
     const guarded = config.permissionMode !== "auto";
+    // Filling a form field does not change which page the next field is on, so the
+    // safety checks for a batch of form fields start together; each action still waits
+    // for its own verdict before it runs.
+    const prechecks = new Map();
+    if (guarded && calls.length > 1 && calls.every((c) => c.name === "form_input")) {
+      for (const call of calls) {
+        const check = this.#safetyCheck(call, config, signal);
+        check.catch(() => {});
+        prechecks.set(call.id, check);
+      }
+    }
     const results = [];
     for (const call of calls) {
       const base = { type: "tool_result", id: call.id, nativeId: call.nativeId, name: call.name };
@@ -352,7 +363,7 @@ export class Agent {
         );
         if (signal.aborted) throw new Error("Cancelled by the user.");
         authorizing = true;
-        await this.#authorize(call, config, signal);
+        await this.#authorize(call, config, signal, prechecks.get(call.id));
         authorizing = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
         let output = toBlocks(
@@ -397,22 +408,13 @@ export class Agent {
   // Throws when the action must not run. Sensitive sites and password fields always need
   // the user's approval, in every mode. Site prompts apply in "ask" mode; the safety check
   // applies to state-changing actions in every mode except "auto".
-  async #authorize(call, config, signal) {
+  // precheck: this call's safety check, already started (see #runTools).
+  async #authorize(call, config, signal, precheck) {
     await this.#checkSensitive(call, config);
     if (config.permissionMode === "ask") await this.#checkSite(call, config);
     if (config.permissionMode === "auto" || !isStateChanging(call.name, call.input)) return;
 
-    const page = await this.browser.currentPage();
-    const target = ["browser", "form_input"].includes(call.name) ? await this.browser.describeTarget(call.input) : null;
-    const { verdict, reason } = await this.guard.checkAction({
-      config,
-      userRequests: this.#userRequests(),
-      page,
-      name: call.name,
-      input: call.input,
-      target,
-      signal,
-    });
+    const { page, target, verdict, reason } = await (precheck ?? this.#safetyCheck(call, config, signal));
     // A check cut short by Stop is not a reason to ask; the action is not going to run.
     if (signal.aborted) throw new Error("Cancelled by the user.");
     this.emit({ type: "guard", name: call.name, input: call.input, target, page: page.url, verdict, reason });
@@ -426,6 +428,22 @@ export class Agent {
       allowAlways: false,
     });
     if (decision === "deny") throw new Error(`The user declined this action (${reason}).`);
+  }
+
+  // The safety model's verdict on an action, with the page and target it was judged on.
+  async #safetyCheck(call, config, signal) {
+    const page = await this.browser.currentPage();
+    const target = ["browser", "form_input"].includes(call.name) ? await this.browser.describeTarget(call.input) : null;
+    const { verdict, reason } = await this.guard.checkAction({
+      config,
+      userRequests: this.#userRequests(),
+      page,
+      name: call.name,
+      input: call.input,
+      target,
+      signal,
+    });
+    return { page, target, verdict, reason };
   }
 
   async #checkSensitive(call, config) {

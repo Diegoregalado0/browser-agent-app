@@ -109,6 +109,25 @@ await agent.run("check my courses", config);
 const notes = JSON.stringify(requests.at(-1)).match(/Site notes for CatCourses/g) ?? [];
 assert.equal(notes.length, 1, "CatCourses notes were not given exactly once");
 
+// A batch of form fields has its safety checks run together, and a blocked field still
+// does not run.
+const field = (id, value) => ({ type: "tool_call", id, name: "form_input", input: { ref: id, value } });
+const filled = [];
+agent.reset();
+agent.browser.currentUrl = async () => "https://example.com/";
+agent.browser.run = async (name, input) => (filled.push(input.value), "set");
+providers.openai.classify = ({ text }) =>
+  new Promise((resolve) => setTimeout(() => resolve(/"forbidden"/.test(text) ? { verdict: "block", reason: "no" } : { verdict: "allow", reason: "ok" }), 300));
+replies = [
+  { content: [field("f1", "a"), field("f2", "forbidden"), field("f3", "c")], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+let started = Date.now();
+await agent.run("fill the form", config);
+const batchMs = Date.now() - started;
+assert.deepEqual(filled, ["a", "c"], "the blocked field ran, or an allowed one did not");
+assert.ok(batchMs < 800, `three 300ms safety checks took ${batchMs}ms, so they did not run together`);
+
 // OpenAI pacing, against a local server that answers like the API: after a response
 // reports an empty token budget, the next request waits for it to refill, and a 429 is
 // not retried instantly by the SDK.
@@ -130,7 +149,7 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const pacingConfig = { openaiBaseUrl: `http://127.0.0.1:${server.address().port}/v1` };
 const ask = () => openai.classify({ apiKey: "test", model: "pace-test", config: pacingConfig, system: "s", text: "t", schema: {} });
 await ask();
-let started = Date.now();
+started = Date.now();
 await ask();
 const waited = Date.now() - started;
 assert.ok(waited >= 800, `request after an empty budget waited only ${waited}ms`);
