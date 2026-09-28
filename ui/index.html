@@ -48,6 +48,8 @@
       <button data-settings-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
       <button data-settings-page="browser" data-icon="window"><span>Browser</span></button>
       <button data-settings-page="data" data-icon="lock"><span>Data and privacy</span></button>
+      <button data-settings-page="mcp" data-icon="plug" data-local-only><span>MCP</span></button>
+      <button data-settings-page="debug" data-icon="bug"><span>Debug</span></button>
       <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
     </nav>
     <section class="menu-bottom" aria-label="Sessions">
@@ -72,6 +74,8 @@
         <button data-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
         <button data-page="browser" data-icon="window"><span>Browser</span></button>
         <button data-page="data" data-icon="lock"><span>Data and privacy</span></button>
+        <button data-page="mcp" data-icon="plug" data-local-only><span>MCP</span></button>
+        <button data-page="debug" data-icon="bug"><span>Debug</span></button>
       </nav>
 
       <div class="settings-pages">
@@ -378,9 +382,95 @@
             </div>
           </div>
         </section>
+
+        <section class="settings-page" data-page="mcp" data-title="MCP" hidden>
+          <p class="group-desc">MCP servers give the agent tools outside the browser, such as your mail and calendar. They run on this Mac with your permissions, so add only servers you trust. Actions they take get the same safety checks as actions in the browser.</p>
+
+          <h3 class="group-label">Microsoft 365</h3>
+          <div class="setting-group">
+            <div class="setting stack">
+              <div class="setting-text">
+                <span class="setting-title">Outlook mail and calendar</span>
+                <p class="setting-desc" id="ms-status">Not connected.</p>
+              </div>
+              <div class="row" id="ms-actions">
+                <button type="button" id="ms-connect" class="primary">Connect</button>
+                <button type="button" id="ms-login" hidden>Sign in</button>
+                <button type="button" id="ms-verify" hidden>Check sign-in</button>
+                <button type="button" id="ms-logout" class="link-danger" hidden>Sign out</button>
+              </div>
+              <div class="device-code" id="ms-code" hidden>
+                <p class="setting-desc">Open <a id="ms-code-link" target="_blank" rel="noopener noreferrer"></a> in any browser, enter this code, and sign in with your UC Merced (Microsoft) account:</p>
+                <div class="code-row"><code id="ms-code-value"></code><button type="button" id="ms-code-copy">Copy</button></div>
+                <p class="setting-desc">Then click Check sign-in.</p>
+              </div>
+              <p class="setting-desc field-note" id="ms-result" aria-live="polite"></p>
+            </div>
+          </div>
+
+          <h3 class="group-label">Servers</h3>
+          <div class="setting-group" id="mcp-list"></div>
+
+          <h3 class="group-label">Add a server</h3>
+          <form class="setting-group" id="mcp-add">
+            <div class="setting stack">
+              <div class="card-field"><label class="card-label" for="mcp-name">Name</label><input id="mcp-name" placeholder="Canvas" autocomplete="off" /></div>
+              <div class="card-field"><label class="card-label" for="mcp-command">Command</label><input id="mcp-command" placeholder="npx" autocomplete="off" spellcheck="false" /></div>
+              <div class="card-field"><label class="card-label" for="mcp-args">Arguments</label><input id="mcp-args" placeholder="-y some-mcp-server@1.0.0" autocomplete="off" spellcheck="false" /></div>
+              <div class="card-field"><label class="card-label" for="mcp-env">Environment (one NAME=value per line)</label><textarea id="mcp-env" rows="3" spellcheck="false" placeholder="CANVAS_API_URL=https://catcourses.ucmerced.edu/api/v1&#10;CANVAS_API_TOKEN=..."></textarea></div>
+              <p class="field-note">Values are kept on this Mac and never shown again or sent to the AI. For CatCourses, a Canvas server needs an access token from CatCourses > Account > Settings > New Access Token, if UC Merced allows students to create one.</p>
+              <div class="row"><button type="submit" class="primary">Add server</button></div>
+            </div>
+          </form>
+        </section>
+
+        <section class="settings-page" data-page="debug" data-title="Debug" hidden>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <label class="setting-title" for="debugMode">Debug mode</label>
+                <p class="setting-desc">Shows tokens and timing for every model request in the chat, and each MCP server's tools and log in Settings > MCP.</p>
+              </div>
+              <input id="debugMode" type="checkbox" role="switch" class="switch" data-setting="debugMode" />
+            </div>
+          </div>
+
+          <h3 class="group-label">Checks</h3>
+          <div class="setting-group">
+            <div class="setting stack">
+              <div class="setting-text">
+                <span class="setting-title">Run checks</span>
+                <p class="setting-desc">Tests the model provider, the agent browser, and every MCP server.</p>
+              </div>
+              <div class="row"><button type="button" id="run-checks">Run checks</button></div>
+              <ul class="check-list" id="check-results"></ul>
+            </div>
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Diagnostics</span>
+                <p class="setting-desc">Copies versions, settings (without keys), MCP status, and recent debug lines, for a bug report.</p>
+              </div>
+              <button type="button" id="copy-diagnostics">Copy</button>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </aside>
+
+  <div id="wizard" class="wizard" hidden role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+    <div class="wizard-card">
+      <p class="wizard-step" id="wizard-step"></p>
+      <h2 id="wizard-title"></h2>
+      <div id="wizard-body"></div>
+      <div class="row wizard-actions">
+        <button type="button" id="wizard-skip" class="link">Skip setup</button>
+        <span class="spacer"></span>
+        <button type="button" id="wizard-back">Back</button>
+        <button type="button" id="wizard-next" class="primary">Continue</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
 

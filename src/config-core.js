@@ -41,14 +41,28 @@ export const DEFAULTS = {
   sensitiveSites: [],
   // javascript_exec and edit_html: powerful on pages where the user is signed in.
   developerTools: true,
+  // MCP servers (local edition): [{ id, name, command, args, env, enabled, preset?, hiddenTools? }].
+  mcpServers: [],
+  // Extra detail in the chat (tokens and timing per request) and in Settings.
+  debugMode: false,
+  // Set when the first-run setup has been finished or skipped.
+  setupDone: false,
 };
 
 const ENV_KEYS = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", gemini: "GEMINI_API_KEY", mistral: "MISTRAL_API_KEY" };
 
-// Settings back to their defaults. API keys and Ghost mode are kept: keys are
-// credentials rather than preferences, and Ghost mode belongs to the conversation.
+// Settings back to their defaults. API keys, MCP servers, Ghost mode and finished setup
+// are kept: keys and servers are connections rather than preferences, and Ghost mode
+// belongs to the conversation.
 export function resetConfig(config, overrides = {}) {
-  return { ...structuredClone(DEFAULTS), ...structuredClone(overrides), keys: config.keys, ghostMode: config.ghostMode };
+  return {
+    ...structuredClone(DEFAULTS),
+    ...structuredClone(overrides),
+    keys: config.keys,
+    ghostMode: config.ghostMode,
+    mcpServers: config.mcpServers,
+    setupDone: config.setupDone,
+  };
 }
 
 // Stored key wins; the provider's standard environment variable is the fallback. The
@@ -70,8 +84,10 @@ export function publicConfig(config, envVars = {}) {
     const key = config.keys[p] || envVars[env] || "";
     keyInfo[p] = { source: config.keys[p] ? "saved" : key ? "env" : "none", mask: key ? maskKey(key) : "", env };
   }
-  const { keys, ...rest } = config;
-  return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
+  const { keys, mcpServers = [], ...rest } = config;
+  // MCP server environments can hold tokens: the UI gets their names, not their values.
+  const servers = mcpServers.map(({ env = {}, ...s }) => ({ ...s, envKeys: Object.keys(env) }));
+  return { ...rest, mcpServers: servers, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
 }
 
 // Stored settings over the defaults (adjusted by an edition's overrides), with nested

@@ -104,6 +104,8 @@ export class Agent {
     this.env = env;
     this.emit = emit;
     this.askPermission = askPermission;
+    // MCP servers' tools (McpServers, local edition), connected by the host.
+    this.mcp = null;
     // Called whenever the history changes, so the conversation can be saved.
     this.onHistory = onHistory;
     this.messages = [];
@@ -140,6 +142,7 @@ export class Agent {
     }
     // A pass that found nothing old enough to trim does not count, so the next step tries again.
     if (trimmed) this.compactedAt = lastInput;
+    return trimmed;
   }
 
   // The first time a conversation reaches a site with notes (site-guides.js), they ride
@@ -212,7 +215,11 @@ export class Agent {
     });
 
     const browserTools = config.developerTools ? BROWSER_TOOL_DEFS : BROWSER_TOOL_DEFS.filter((t) => !DEVELOPER_TOOLS.has(t.name));
-    const tools = config.desktopControl && this.desktop ? [...browserTools, this.desktop.def] : browserTools;
+    const tools = [
+      ...browserTools,
+      ...(config.desktopControl && this.desktop ? [this.desktop.def] : []),
+      ...(this.mcp?.toolDefs() ?? []),
+    ];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.abortController = new AbortController();
@@ -221,6 +228,7 @@ export class Agent {
     this.emit({ type: "status", running: true });
 
     try {
+      let requestStarted = 0;
       for (let step = 0; step < config.maxSteps; step++) {
         this.emit({ type: "assistant_start" });
         let result;
@@ -230,7 +238,10 @@ export class Agent {
             this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
           );
           if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-          this.#compact(this.lastInput);
+          if (this.#compact(this.lastInput) && config.debugMode) {
+            this.emit({ type: "debug", text: `Trimmed old screenshots and tool output (last request ${this.lastInput} input tokens).` });
+          }
+          requestStarted = Date.now();
           for (;;) {
             try {
               result = await provider.turn({
@@ -266,6 +277,13 @@ export class Agent {
 
         this.messages.push({ role: "assistant", content: result.content, raw: result.raw });
         if (result.usage?.input) this.lastInput = result.usage.input;
+        if (config.debugMode && result.usage) {
+          const u = result.usage;
+          this.emit({
+            type: "debug",
+            text: `Request ${step + 1}: ${u.input ?? 0} input tokens (${u.cachedInput ?? 0} cached), ${u.output ?? 0} output, ${Date.now() - requestStarted} ms, stop: ${result.stop}.`,
+          });
+        }
         this.onHistory();
         if (result.usage) {
           for (const k of Object.keys(this.usage)) this.usage[k] += result.usage[k] ?? 0;
@@ -367,7 +385,11 @@ export class Agent {
         authorizing = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
         let output = toBlocks(
-          call.name === "desktop" ? await this.desktop.tool.run(call.input) : await this.browser.run(call.name, call.input),
+          this.mcp?.has(call.name)
+            ? await this.mcp.call(call.name, call.input, { signal })
+            : call.name === "desktop"
+              ? await this.desktop.tool.run(call.input)
+              : await this.browser.run(call.name, call.input),
         );
         if (guarded) {
           const warning = await this.guard.scanContent({ config, name: call.name, output, signal });
@@ -412,7 +434,7 @@ export class Agent {
   async #authorize(call, config, signal, precheck) {
     await this.#checkSensitive(call, config);
     if (config.permissionMode === "ask") await this.#checkSite(call, config);
-    if (config.permissionMode === "auto" || !isStateChanging(call.name, call.input)) return;
+    if (config.permissionMode === "auto" || !this.#changesState(call)) return;
 
     const { page, target, verdict, reason } = await (precheck ?? this.#safetyCheck(call, config, signal));
     // A check cut short by Stop is not a reason to ask; the action is not going to run.
@@ -468,8 +490,14 @@ export class Agent {
     }
   }
 
+  // MCP tools act outside the browser; the ones their server does not mark read-only are
+  // treated as actions and get the safety check.
+  #changesState(call) {
+    return this.mcp?.has(call.name) ? !this.mcp.isReadOnly(call.name) : isStateChanging(call.name, call.input);
+  }
+
   async #checkSite(call, config) {
-    if (call.name === "desktop") return;
+    if (call.name === "desktop" || this.mcp?.has(call.name)) return;
     const origin = originForToolCall(call.name, call.input, await this.browser.currentUrl());
     if (!origin || !/^https?:/.test(origin)) return;
     if (this.sessionOrigins.has(origin) || config.approvedOrigins.includes(origin)) return;

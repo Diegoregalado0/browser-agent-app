@@ -13,6 +13,7 @@ import { Desktop, DESKTOP_TOOL_DEF, helper } from "./desktop-tools.js";
 import { createController } from "./controller.js";
 import { writeSidebarExtension, sidebarExtensionId, updateRunningSidebar } from "./sidebar.js";
 import * as sessions from "./sessions.js";
+import { McpServers, MCP_PRESETS } from "./mcp.js";
 
 const UI_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "ui");
 const ACTIVITY_LOG = join(HOME_DIR, "activity.log");
@@ -45,7 +46,11 @@ const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css
 export async function startServer({ port, token = randomBytes(24).toString("hex") }) {
   const origin = `http://127.0.0.1:${port}`;
 
-  const controller = createController({
+  // MCP servers start with the app and follow Settings > MCP from then on.
+  const mcpServers = new McpServers({ onChange: () => controller?.mcpChanged() });
+  let controller = null;
+  controller = createController({
+    mcp: { servers: mcpServers, presets: MCP_PRESETS },
     edition: "local",
     env: process.env,
     // The controller chains on the promise loadConfig returns.
@@ -131,6 +136,8 @@ export async function startServer({ port, token = randomBytes(24).toString("hex"
 
   const url = `${origin}/?t=${token}`;
   writeSidebarExtension(url);
+  mcpServers.sync(loadConfig().mcpServers).catch((err) => console.error(`MCP: ${err.message}`));
+  process.on("exit", () => mcpServers.killAll());
   if (!updateRunningSidebar(PROFILE_DIR)) console.error("Restart the agent browser to load the updated side panel extension.");
   controller.ensureBrowser().catch((err) => console.error(`Agent browser: ${err.message}`));
   return { url };

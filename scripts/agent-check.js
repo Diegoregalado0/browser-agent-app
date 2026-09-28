@@ -9,6 +9,7 @@ import { DEFAULTS } from "../src/config-core.js";
 import * as openai from "../src/providers/openai.js";
 import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
+import { McpServers } from "../src/mcp.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -192,5 +193,44 @@ replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end"
 await looping.run("next page", loopConfig);
 const reads = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "read_page");
 assert.equal(reads.at(-1).content.at(-1).text.startsWith("[Loop check]"), true, "a repeated identical read gets a loop note");
+
+// MCP: a small real server over stdio. Its tools reach the model under a prefixed name,
+// read-only tools skip the safety check while the others get it, and tool errors come
+// back as errors.
+const serverCode = `
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+const server = new McpServer({ name: "test", version: "1.0.0" });
+server.registerTool("read_note", { description: "Read", inputSchema: {}, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: "text", text: "note" }] }));
+server.registerTool("send_note", { description: "Send", inputSchema: { to: z.string() } }, async ({ to }) => ({ content: [{ type: "text", text: "sent to " + to }] }));
+server.registerTool("broken", { description: "Fails", inputSchema: {} }, async () => ({ isError: true, content: [{ type: "text", text: "nope" }] }));
+server.registerTool("login", { description: "Hidden", inputSchema: {} }, async () => ({ content: [{ type: "text", text: "code" }] }));
+await server.connect(new StdioServerTransport());`;
+const mcp = new McpServers();
+await mcp.sync([{ id: "t", name: "Test", enabled: true, command: "node", args: ["--input-type=module", "-e", serverCode], env: {}, hiddenTools: ["login"] }]);
+assert.equal(mcp.status()[0].status, "connected", `test MCP server did not start: ${mcp.status()[0].error}`);
+assert.deepEqual(mcp.toolDefs().map((d) => d.name).sort(), ["mcp__Test__broken", "mcp__Test__read_note", "mcp__Test__send_note"]);
+assert.ok(mcp.isReadOnly("mcp__Test__read_note") && !mcp.isReadOnly("mcp__Test__send_note"));
+await assert.rejects(mcp.call("mcp__Test__broken"), /nope/);
+assert.equal((await mcp.call("login", {}, { raw: true, serverId: "t" }))[0].text, "code");
+
+const checked = [];
+providers.openai.classify = async ({ text }) => (checked.push(text), { verdict: "allow", reason: "ok" });
+const mcpCall = (id, name, input = {}) => ({ type: "tool_call", id, name, input });
+agent.reset();
+agent.mcp = mcp;
+replies = [
+  { content: [mcpCall("m1", "mcp__Test__read_note"), mcpCall("m2", "mcp__Test__send_note", { to: "ada" })], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await agent.run("send the note to ada", config);
+const mcpResults = agent.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result");
+assert.equal(mcpResults[0].content[0].text, "note");
+assert.equal(mcpResults[1].content[0].text, "sent to ada");
+assert.equal(checked.length, 1, `expected one safety check (send_note), got ${checked.length}`);
+assert.match(checked[0], /mcp__Test__send_note/);
+agent.mcp = null;
+await mcp.stopAll();
 
 console.log("agent checks passed");

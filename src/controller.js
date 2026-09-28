@@ -6,6 +6,7 @@ import { today } from "./limits.js";
 
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
 
+
 // The conversation behind every UI: runs tasks, keeps the saved session in step, applies
 // Ghost mode, and answers the UI's messages. Both editions use it; the host supplies
 // what differs between them:
@@ -116,6 +117,26 @@ export function createController(host) {
         broadcast({ type: "permission_request", text, allowAlways });
       }),
   });
+  agent.mcp = host.mcp?.servers ?? null;
+
+  // MCP servers: the saved list is the source of truth; the running servers follow it.
+  const mcpStatus = () => ({ type: "mcp_status", servers: host.mcp.servers.status() });
+  async function saveMcpServers(update) {
+    const config = await host.loadConfig();
+    config.mcpServers = update(config.mcpServers ?? []);
+    await host.saveConfig(config);
+    broadcastConfig(config);
+    await host.mcp.servers.sync(config.mcpServers);
+  }
+  // Calls one of a server's own tools that the model does not get (sign-in).
+  async function mcpAccount(id, tool) {
+    try {
+      const blocks = await host.mcp.servers.call(tool, {}, { raw: true, serverId: id });
+      return blocks.map((b) => b.text ?? "").join("\n");
+    } catch (err) {
+      return err.message;
+    }
+  }
 
   async function resolvePermission(decision) {
     if (!pendingPermission) return;
@@ -148,6 +169,7 @@ export function createController(host) {
         if (pendingPermission) {
           reply({ type: "permission_request", text: pendingPermission.text, allowAlways: pendingPermission.allowAlways });
         }
+        if (host.mcp) reply(mcpStatus());
         if (agent.messages.length) {
           reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
         }
@@ -169,6 +191,78 @@ export function createController(host) {
         agent.stop();
         resolvePermission("deny");
         return;
+      case "mcp_status":
+        if (host.mcp) reply(mcpStatus());
+        return;
+      case "self_test": {
+        const results = [];
+        const check = async (name, run) => {
+          try {
+            results.push({ name, ok: true, text: await run() });
+          } catch (err) {
+            results.push({ name, ok: false, text: err.message });
+          }
+        };
+        const config = await host.loadConfig();
+        await check(`Model provider (${config.provider})`, async () => {
+          const apiKey = apiKeyFor(config, config.provider, host.env);
+          if (config.provider !== "ollama" && !apiKey) throw new Error("No API key. Add one in Settings > Models.");
+          const models = await providers[config.provider].listModels({ apiKey, config });
+          return `reachable, ${models.length} models; using ${config.models[config.provider] || "no model selected"}`;
+        });
+        await check("Agent browser", async () => {
+          await host.ensureBrowser(agent);
+          return `connected; current tab ${(await agent.browser.currentPage()).url.slice(0, 80)}`;
+        });
+        for (const s of host.mcp?.servers.status() ?? []) {
+          results.push({ name: `MCP: ${s.name}`, ok: s.status === "connected", text: s.status === "connected" ? `${s.tools.length} tools` : s.error || s.status });
+        }
+        reply({ type: "self_test", results });
+        return;
+      }
+      case "mcp_add_preset": {
+        const preset = host.mcp?.presets[msg.preset];
+        if (!preset) return;
+        await saveMcpServers((list) => (list.some((s) => s.id === msg.preset) ? list : [...list, { id: msg.preset, ...structuredClone(preset), enabled: true, preset: msg.preset }]));
+        return;
+      }
+      case "mcp_save": {
+        if (!host.mcp) return;
+        const input = msg.server ?? {};
+        const name = String(input.name ?? "").trim();
+        const command = String(input.command ?? "").trim();
+        if (!name || !command) return reply({ type: "error", text: "An MCP server needs a name and a command." });
+        const args = Array.isArray(input.args) ? input.args.map(String) : String(input.args ?? "").split(/\s+/).filter(Boolean);
+        await saveMcpServers((list) => {
+          const id = input.id || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
+          const old = list.find((s) => s.id === id);
+          // An empty value keeps the saved one, so masked values are not overwritten.
+          const env = {};
+          for (const [k, v] of Object.entries(input.env ?? {})) {
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
+            env[k] = v === "" && old?.env?.[k] !== undefined ? old.env[k] : String(v);
+          }
+          const server = { ...old, id, name, command, args, env, enabled: input.enabled !== false };
+          return old ? list.map((s) => (s.id === id ? server : s)) : [...list, server];
+        });
+        return;
+      }
+      case "mcp_remove":
+        if (host.mcp) await saveMcpServers((list) => list.filter((s) => s.id !== msg.id));
+        return;
+      case "mcp_toggle":
+        if (host.mcp) await saveMcpServers((list) => list.map((s) => (s.id === msg.id ? { ...s, enabled: Boolean(msg.enabled) } : s)));
+        return;
+      case "mcp_restart": {
+        const server = (await host.loadConfig()).mcpServers?.find((s) => s.id === msg.id);
+        if (host.mcp && server) await host.mcp.servers.restart(server);
+        return;
+      }
+      case "mcp_account": {
+        if (!host.mcp || !["login", "verify-login", "logout"].includes(msg.action)) return;
+        reply({ type: "mcp_account", id: msg.id, action: msg.action, text: await mcpAccount(msg.id, msg.action) });
+        return;
+      }
       case "reset":
         clearConversation();
         return;
@@ -260,8 +354,9 @@ export function createController(host) {
         return;
       case "save_config": {
         const config = await host.loadConfig();
-        // Ghost mode changes only through set_ghost, which also starts a new conversation.
-        const { keys, models, ghostMode: _ghost, ...rest } = msg.patch || {};
+        // Ghost mode changes only through set_ghost, which also starts a new conversation, and
+        // MCP servers only through the mcp_* messages, which keep their hidden values.
+        const { keys, models, ghostMode: _ghost, mcpServers: _mcp, ...rest } = msg.patch || {};
         Object.assign(config, rest);
         if (models) Object.assign(config.models, models);
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
@@ -313,6 +408,8 @@ export function createController(host) {
     ensureBrowser: () => host.ensureBrowser(agent),
     // Re-reads settings that changed outside this controller and updates every UI.
     refreshConfig: async () => broadcastConfig(await host.loadConfig()),
+    // Tells every UI that an MCP server's status or tools changed.
+    mcpChanged: () => host.mcp && broadcast(mcpStatus()),
     // client: { send(event) }. Returns the function that takes the client's messages.
     connect(client) {
       clients.add(client);

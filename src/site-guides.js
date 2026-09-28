@@ -5,7 +5,7 @@
 
 const GUIDES = {
   "catcourses.ucmerced.edu": `Site notes for CatCourses (UC Merced's Canvas):
-- Sign-in is UC Merced single sign-on with Duo. On a login or Duo page, ask the user to sign in; do not enter credentials.
+- Sign-in is UC Merced single sign-on with Duo. On a login or Duo page, ask the user to sign in; do not enter credentials. Choosing "Yes, this is my device" in Duo lets this browser skip Duo until the session expires.
 - Pages by URL: / (dashboard), /courses (all courses), /courses/<id> (course home), /courses/<id>/assignments, /courses/<id>/modules, /courses/<id>/grades, /courses/<id>/announcements, /courses/<id>/discussion_topics, /courses/<id>/files, /calendar, /conversations (inbox).
 - To look things up, Canvas's JSON API works with the signed-in session and is much cheaper than screenshots: navigate to the URL, then get_page_text (ignore a leading "while(1);"). Examples: /api/v1/courses?enrollment_state=active&per_page=50 (courses), /api/v1/planner/items?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&per_page=100 (everything due in a date range, across courses, with html_url and submission status), /api/v1/courses/<id>/assignments?bucket=upcoming&order_by=due_at&include[]=submission&per_page=50, /api/v1/users/self/todo.
 - Publisher tools (Macmillan Achieve and others) open from Modules or assignment links, usually in a new tab; switch to it with tabs. If one shows inside a frame on the Canvas page, use its "Load in a new window" button, since page tools cannot read into another site's frame.`,

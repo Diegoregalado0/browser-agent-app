@@ -339,3 +339,34 @@ input.switch:checked::after { transform: translateX(16px); }
 .onboarding p { margin: 0 0 8px; }
 .onboarding .empty-sub { margin-bottom: 16px; }
 .onboarding button { padding: 8px 16px; font-size: 14px; }
+
+/* MCP page. */
+.device-code { display: flex; flex-direction: column; gap: 6px; }
+.code-row { display: flex; gap: 8px; align-items: center; }
+.code-row code { font-size: 18px; letter-spacing: 2px; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 6px; }
+.mcp-server { display: flex; flex-direction: column; gap: 6px; }
+.mcp-head { display: flex; align-items: center; gap: 8px; }
+.mcp-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.badge-status { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.badge-status.connected { color: var(--ok); border-color: var(--ok); }
+.badge-status.error { color: var(--error); border-color: var(--error); }
+.mcp-detail pre { margin: 4px 0 0; max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; }
+.check-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.check-list .ok { color: var(--ok); }
+.check-list .fail { color: var(--error); }
+.msg.debug { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); }
+
+button.link { border: none; background: none; color: var(--muted); padding: 4px 6px; }
+button.link:hover { color: var(--fg); text-decoration: underline; }
+.spacer { flex: 1; }
+
+/* First-run setup. */
+.wizard { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.35); }
+.wizard[hidden] { display: none; }
+.wizard-card { width: 100%; max-width: 440px; max-height: 100%; overflow: auto; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.wizard-card h2 { margin: 0; font-size: 18px; }
+.wizard-step { margin: 0; font-size: 12px; color: var(--muted); }
+#wizard-body { display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+#wizard-body p { margin: 0; }
+#wizard-body input, #wizard-body select { font-size: 14px; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.wizard-actions { margin-top: 6px; }

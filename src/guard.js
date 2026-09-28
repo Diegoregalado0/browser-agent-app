@@ -118,7 +118,8 @@ export class Guard {
 
   // Returns a warning string when the tool output looks like a prompt injection, else null.
   async scanContent({ config, name, output, signal }) {
-    if (!SCANNED_TOOLS.has(name)) return null;
+    // MCP results (emails, calendar entries) are outside content too.
+    if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
     const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n").slice(0, SCAN_MAX_CHARS);
     const images = output.filter((b) => b.type === "image");
     if (!images.length && text.length < 40) return null;
