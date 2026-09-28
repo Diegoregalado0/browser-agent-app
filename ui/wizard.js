@@ -156,7 +156,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
         title: "Outlook is connected",
         lead: `Signed in${outlook.account ? ` as ${outlook.account}` : ""}. The agent can use your mail and calendar when a task needs them.`,
         parts: ["wizard-outlook-logo"],
-        next: ["Continue", finish],
+        next: ["Continue", () => finish()],
         skip: [""],
         focus: $("wizard-next"),
       });
@@ -166,7 +166,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
       lead: "With Outlook connected, the agent can find emails, draft replies and check your calendar as part of a task. It asks you before sending anything.",
       parts: ["wizard-outlook-logo"],
       next: ["Connect Outlook", () => mcp.connectOutlook(outlookScreen)],
-      skip: ["Skip for now", finish],
+      skip: ["Skip for now", () => finish()],
       focus: $("wizard-next"),
     });
   }
@@ -187,8 +187,11 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     $("input")?.focus();
   }
 
-  function finish() {
-    if (!config.setupDone) send({ type: "save_config", patch: { setupDone: true } });
+  // patch: settings still to save. It goes out with setupDone in one message, since two
+  // saves in a row can race and the second can overwrite the first.
+  function finish(patch = {}) {
+    if (!config.setupDone) patch.setupDone = true;
+    if (Object.keys(patch).length) send({ type: "save_config", patch });
     close();
     if (!config.models[config.provider]) openModels();
   }
@@ -235,10 +238,12 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
         }
         const key = $("wizard-key").value.trim();
         $("wizard-key").value = "";
-        send({ type: "save_config", patch: { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) } });
+        const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) };
         // The saved config arrives after this; finish() reads the chosen provider from it.
         config = { ...config, provider: msg.provider };
-        config.edition === "local" ? outlookScreen() : finish();
+        if (config.edition !== "local") return finish(patch);
+        send({ type: "save_config", patch });
+        outlookScreen();
       },
     },
   };
