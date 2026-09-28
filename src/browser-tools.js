@@ -891,7 +891,9 @@ export class Browser {
           .filter((m) => m.score > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, 25);
-        return matches.length ? matches.map((m) => m.line).join("\n") : `No elements matched "${input.query}"`;
+        if (matches.length) return matches.map((m) => m.line).join("\n");
+        const frames = res.tree.includes("(cross-origin:") ? " The page has cross-origin iframes, whose contents find cannot search." : "";
+        return `No elements matched "${input.query}".${frames} Take a screenshot to see the page, or use read_page.`;
       }
       case "form_input": {
         if (this.showActions) {
@@ -907,7 +909,9 @@ export class Browser {
         return `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nSource: <${res.source}>\n\n${res.text}`;
       }
       case "javascript_exec": {
-        const value = await this.evaluate(input.code);
+        const value = await this.evaluate(input.code).catch((err) => {
+          throw new Error(explainScriptError(err.message));
+        });
         const out = value === undefined ? "undefined" : JSON.stringify(value, null, 2);
         return out.length > 30000 ? out.slice(0, 30000) + "\n[truncated]" : out;
       }
@@ -937,6 +941,29 @@ export class Browser {
   async browserPid() {
     return this.transport.browserPid?.();
   }
+}
+
+// A javascript_exec error with a hint at the usual cause, so the model looks at the page
+// instead of guessing at selectors again.
+export function explainScriptError(message) {
+  const first = message.split("\n")[0];
+  let hint = "";
+  if (/Blocked a frame|SecurityError|cross-origin/i.test(first)) {
+    hint =
+      "The code reached into a cross-origin iframe, which page scripts cannot access. Interact with it by screenshot " +
+      "coordinates, or navigate to the iframe's src.";
+  } else if (/Execution context was destroyed|Cannot find context|Inspected target navigated/i.test(first)) {
+    hint = "The page navigated while the code ran. Take a screenshot or use read_page to see the new page.";
+  } else if (/of (null|undefined)|is (null|undefined)|null is not an object/.test(first)) {
+    // "reading 'contentDocument'" means the iframe itself was not found.
+    const frame = /reading '(contentDocument|contentWindow)'/.test(first) ? " Here it was the iframe itself." : "";
+    hint =
+      "Something the code expected is missing, usually because a selector matched no element." + frame +
+      " The page may have changed or navigated, or the content is in an iframe (contentDocument is null for " +
+      "cross-origin iframes). Do not retry with another guessed selector: use read_page or find to see what is on the " +
+      "page now, or take a screenshot.";
+  }
+  return hint ? `${first}\n${hint}` : message;
 }
 
 // The origin a tool call acts on, for site permission checks; null when it touches no page.
