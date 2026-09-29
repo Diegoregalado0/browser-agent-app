@@ -1,11 +1,9 @@
-import { randomBytes } from "node:crypto";
-import WebSocket from "ws";
-
-// Remote control over Discord (local edition): the owner's own bot, paired to their
-// Discord account, relays tasks and permission prompts. The bridge is a remote client of
-// the controller, so it can only start a task, stop it and answer prompts; everything else
-// stays at the Mac. Only prompts, final replies, errors and stop notices are sent, since
-// Discord can read bot messages.
+// Remote control over Discord: the owner's own bot, paired to their Discord account, relays
+// tasks and permission prompts. The bridge is a remote client of the controller, so it can
+// only start a task, stop it and answer prompts; everything else stays on the computer.
+// Only prompts, final replies, errors and stop notices are sent, since Discord can read bot
+// messages. It uses only web platform APIs (WebSocket, fetch, crypto.getRandomValues), so
+// the same code runs in the Mac app (Node) and in the extension's side panel.
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -15,15 +13,16 @@ const MAX_MESSAGE = 1900;
 const FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
 
 const clip = (text) => (text.length > MAX_MESSAGE ? `${text.slice(0, MAX_MESSAGE)}…` : text);
-const newPairCode = () => randomBytes(5).toString("hex").toUpperCase();
+const newPairCode = () => [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
 
 export class DiscordBridge {
   // controller: to connect as a remote client. loadConfig/saveConfig: settings storage, where
   // config.discord = { token, userId, userName, pairCode } lives (owner-only file).
   // onChange(): the bridge's status changed. api and gateway: Discord's addresses (a local
-  // stand-in in scripts/agent-check.js).
-  constructor({ controller, loadConfig, saveConfig, onChange = () => {}, api = API, gateway = GATEWAY }) {
+  // stand-in in scripts/agent-check.js). place: where the agent runs, in replies ("the Mac").
+  constructor({ controller, loadConfig, saveConfig, onChange = () => {}, api = API, gateway = GATEWAY, place = "the Mac" }) {
     this.api = api;
+    this.place = place;
     this.gateway = gateway;
     this.controller = controller;
     this.loadConfig = loadConfig;
@@ -57,8 +56,8 @@ export class DiscordBridge {
     clearInterval(this.heartbeat);
     this.heartbeat = null;
     if (this.ws) {
-      this.ws.removeAllListeners();
-      this.ws.on("error", () => {});
+      this.ws.onmessage = this.ws.onclose = null;
+      this.ws.onerror = () => {};
       this.ws.close();
       this.ws = null;
     }
@@ -123,10 +122,10 @@ export class DiscordBridge {
     const ws = new WebSocket(this.gateway);
     this.ws = ws;
     let seq = null;
-    ws.on("message", (data) => {
+    ws.onmessage = ({ data }) => {
       let msg;
       try {
-        msg = JSON.parse(data.toString());
+        msg = JSON.parse(data);
       } catch {
         return;
       }
@@ -142,8 +141,8 @@ export class DiscordBridge {
       } else if (msg.op === 0) {
         this.#dispatch(token, msg.t, msg.d).catch((err) => console.error(`Discord: ${err.message}`));
       }
-    });
-    ws.on("close", (code) => {
+    };
+    ws.onclose = ({ code }) => {
       if (this.ws !== ws) return;
       clearInterval(this.heartbeat);
       this.ws = null;
@@ -151,8 +150,8 @@ export class DiscordBridge {
       this.#set("connecting");
       const delay = Math.min(60000, 2000 * 2 ** this.retry++);
       setTimeout(() => this.ws === null && this.state === "connecting" && this.#connect(token), delay);
-    });
-    ws.on("error", () => {});
+    };
+    ws.onerror = () => {};
   }
 
   async #api(token, method, path, body) {
@@ -199,7 +198,7 @@ export class DiscordBridge {
     this.dmChannel = message.channel_id;
     if (/^stop$/i.test(text)) return this.receive({ type: "stop" });
     if (/^help$/i.test(text) || !text) {
-      return this.#say(token, "Send a task in plain words and I will do it on your Mac. Send `stop` to stop it. Settings stay on the Mac.");
+      return this.#say(token, `Send a task in plain words and I will do it. Send \`stop\` to stop it. Settings stay on ${this.place}.`);
     }
     if (this.running) return this.#say(token, "A task is already running. Send `stop` to stop it first.");
     this.remoteTask = true;
@@ -244,7 +243,7 @@ export class DiscordBridge {
         ...(atMacOnly ? [] : [{ type: 2, style: 3, label: "Allow", custom_id: `perm:${event.id}:once` }]),
         { type: 2, style: 4, label: "Deny", custom_id: `perm:${event.id}:deny` },
       ];
-      const note = atMacOnly ? "\n\nThis one can only be approved at the Mac." : "";
+      const note = atMacOnly ? `\n\nThis one can only be approved at ${this.place}.` : "";
       const sent = await this.#say(token, `**Approval needed**\n${event.text}${note}`, [{ type: 1, components: buttons }]);
       this.prompt = sent && { id: event.id, messageId: sent.id };
     } else if (event.type === "permission_closed" && this.prompt) {

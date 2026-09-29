@@ -399,7 +399,7 @@ export function createController(host) {
         if (!pendingPermission || msg.id !== pendingPermission.id) return reply({ type: "permission_stale" });
         if (!["once", "always", "deny"].includes(msg.decision)) return;
         if (remote && msg.decision !== "deny" && LOCAL_ONLY_PROMPTS.has(pendingPermission.kind)) {
-          return reply({ type: "error", text: "This one can only be approved at the Mac." });
+          return reply({ type: "error", text: `This one can only be approved at ${host.edition === "extension" ? "the computer" : "the Mac"}.` });
         }
         // "Always" changes settings, which only the Mac does.
         resolvePermission(remote && msg.decision === "always" ? "once" : msg.decision, source);
