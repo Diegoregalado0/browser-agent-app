@@ -151,7 +151,7 @@ Outlook uses Microsoft Graph directly, signed in with `chrome.identity.launchWeb
 
 Register the app once, in the [Microsoft Entra admin center](https://entra.microsoft.com) (or Azure portal) > App registrations > New registration:
 
-1. Name: Browser Agent. Supported account types: **Accounts in any organizational directory (Any Microsoft Entra ID tenant - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)**.
+1. Name: Browsby. Supported account types: **Accounts in any organizational directory (Any Microsoft Entra ID tenant - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)**.
 2. Redirect URI: platform **Single-page application (SPA)**, URI `https://fddhceodbfeklilaakgioapmildcmgjo.chromiumapp.org/` (the development id, see below; keep the trailing slash). Register.
 3. Copy the **Application (client) ID** from the Overview page into `OUTLOOK_CLIENT_ID`.
 4. API permissions > Add a permission > Microsoft Graph > Delegated: `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `offline_access` (`openid` and `profile` are added automatically). No admin consent is needed for these; users consent at sign-in, unless their organization blocks user consent.
