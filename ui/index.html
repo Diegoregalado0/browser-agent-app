@@ -11,7 +11,7 @@
     <span class="dot" id="dot"></span>
     <span id="model" class="model">connecting…</span>
     <button id="toggle-ghost" class="icon-btn" data-icon="ghost" aria-pressed="false" title="Ghost mode" aria-label="Ghost mode"></button>
-    <button id="open-mcp" class="icon-btn" data-icon="plug" data-local-only title="MCP connections" aria-label="MCP connections"></button>
+    <button id="open-mcp" class="icon-btn" data-icon="plug" title="Connections" aria-label="Connections"></button>
     <button id="open-menu" class="icon-btn" data-icon="menu" title="Menu" aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu"></button>
   </header>
 
@@ -52,7 +52,7 @@
       <button data-settings-page="remote" data-icon="phone"><span>Remote (Discord)</span></button>
       <button data-settings-page="debug" data-icon="bug"><span>Debug</span></button>
       <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
-      <button id="menu-open-mcp" data-icon="plug" data-local-only><span>MCP connections</span></button>
+      <button id="menu-open-mcp" data-icon="plug"><span>Connections</span></button>
     </nav>
     <section class="menu-bottom" aria-label="Sessions">
       <div class="menu-label">Sessions</div>
@@ -478,8 +478,8 @@
 
   <aside id="mcp-panel" class="settings mcp-panel" hidden aria-labelledby="mcp-title">
     <div class="settings-head">
-      <h2 id="mcp-title">MCP connections</h2>
-      <button id="close-mcp" class="icon-btn" data-icon="close" title="Close" aria-label="Close MCP connections"></button>
+      <h2 id="mcp-title">Connections</h2>
+      <button id="close-mcp" class="icon-btn" data-icon="close" title="Close" aria-label="Close connections"></button>
     </div>
     <div class="mcp-body">
       <p class="group-desc">Connections give the agent tools outside the browser, such as your mail and calendar. It asks you before it sends or changes anything.</p>
@@ -487,10 +487,10 @@
       <h3 class="group-label">Integrations</h3>
       <div class="setting-group" id="mcp-integrations"></div>
 
-      <h3 class="group-label">Your servers</h3>
-      <div class="setting-group" id="mcp-list"></div>
+      <h3 class="group-label" data-local-only>Your servers</h3>
+      <div class="setting-group" id="mcp-list" data-local-only></div>
 
-      <details class="mcp-add">
+      <details class="mcp-add" data-local-only>
         <summary>Add a custom server</summary>
         <form class="setting-group" id="mcp-add">
           <div class="setting stack">

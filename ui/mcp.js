@@ -1,6 +1,7 @@
-// MCP connections panel (local edition): integrations, connected through a short guided
-// flow, and custom MCP servers. config.mcpServers is the saved list; `status` is what the
-// running servers report (mcp_status).
+// Connections panel: integrations, connected through a short guided flow, and (local
+// edition) custom MCP servers. config.mcpServers is the saved list; `status` is what the
+// running servers report (mcp_status). In the extension, Outlook runs on Microsoft Graph
+// with a browser sign-in instead of an MCP server (outlook_status).
 
 const OUTLOOK_ID = "microsoft365";
 
@@ -48,6 +49,10 @@ export function createMcpPanel({ $, el, send, toast }) {
   let step = null;
   // Called with whether Outlook is signed in when the flow closes (first-run setup).
   let onFlowClosed = null;
+  // Extension edition: the last outlook_status ({ configured, signedIn, account }).
+  let graph = null;
+  const extension = () => config?.edition === "extension";
+  const signedIn = () => (extension() ? Boolean(graph?.signedIn) : outlookState() === "connected" && Boolean(outlook?.signedIn));
 
   const outlookServer = () => config?.mcpServers?.find((s) => s.id === OUTLOOK_ID);
   const statusOf = (id) => status.find((s) => s.id === id);
@@ -66,6 +71,7 @@ export function createMcpPanel({ $, el, send, toast }) {
   // Integrations list.
 
   function renderIntegrations() {
+    if (extension()) return renderGraphCard();
     const state = outlookState();
     const card = el("div", "setting integration");
     const logo = el("span", "integration-logo");
@@ -95,6 +101,25 @@ export function createMcpPanel({ $, el, send, toast }) {
     const more = el("details", "mcp-detail");
     more.append(el("summary", null, "Tools and log"), el("pre", null, `Tools: ${s.tools.join(", ") || "none"}\n\n${s.log.join("\n")}`));
     return more;
+  }
+
+  function renderGraphCard() {
+    const card = el("div", "setting integration");
+    const logo = el("span", "integration-logo");
+    logo.innerHTML = OUTLOOK_LOGO;
+    const text = el("div", "setting-text");
+    const line =
+      !graph ? "Checking sign-in…"
+      : !graph.configured ? "Not available in this version yet."
+      : graph.signedIn ? `Connected${graph.account ? ` as ${graph.account}` : ""}`
+      : "Read, search and draft email, and see your calendar.";
+    text.append(el("span", "setting-title", "Microsoft Outlook"), el("p", "setting-desc", line));
+    const action = el("button", graph?.signedIn ? null : "primary", graph?.signedIn ? "Manage" : "Connect");
+    action.type = "button";
+    action.disabled = !graph?.configured;
+    action.onclick = startOutlook;
+    card.append(logo, text, action);
+    $("mcp-integrations").replaceChildren(card);
   }
 
   // Custom servers.
@@ -156,12 +181,12 @@ export function createMcpPanel({ $, el, send, toast }) {
 
   // Connect flow for Outlook: intro, setup, sign-in code, done; and manage once connected.
 
-  const STEPS = ["intro", "setup", "signin", "done"];
+  const steps = () => (extension() ? ["intro", "signin", "done"] : ["intro", "setup", "signin", "done"]);
 
   function showStep(name, { title, body, primary, secondary, cancel = "Cancel" }) {
     step = name;
-    const index = STEPS.indexOf(name === "browser" ? "signin" : name);
-    $("connect-step").textContent = index >= 0 ? `Step ${index + 1} of ${STEPS.length}` : "";
+    const index = steps().indexOf(name === "browser" ? "signin" : name);
+    $("connect-step").textContent = index >= 0 ? `Step ${index + 1} of ${steps().length}` : "";
     $("connect-title").textContent = title;
     $("connect-body").replaceChildren(...body);
     const setButton = (button, spec) => {
@@ -184,7 +209,7 @@ export function createMcpPanel({ $, el, send, toast }) {
     step = null;
     const done = onFlowClosed;
     onFlowClosed = null;
-    done?.(outlookState() === "connected" && Boolean(outlook?.signedIn));
+    done?.(signedIn());
   }
   $("connect-cancel").onclick = closeFlow;
   flow.addEventListener("keydown", (e) => {
@@ -195,6 +220,7 @@ export function createMcpPanel({ $, el, send, toast }) {
 
   // The flow step that fits Outlook's current state.
   function startOutlook() {
+    if (extension()) return graph?.configured && openFlow(graph.signedIn ? "manage" : "intro");
     const state = outlookState();
     openFlow(state === "connected" && outlook?.signedIn ? "manage" : state === "connected" ? "signin" : state === "absent" ? "intro" : "setup");
   }
@@ -217,7 +243,7 @@ export function createMcpPanel({ $, el, send, toast }) {
         list,
         el("p", "field-note", "It asks you before sending, deleting or changing anything. You sign in on Microsoft's own page, and you can disconnect here at any time."),
       ],
-      primary: { label: "Continue", onClick: () => setupStep() },
+      primary: { label: "Continue", onClick: () => (extension() ? graphSignInStep() : setupStep()) },
     });
   }
 
@@ -258,6 +284,26 @@ export function createMcpPanel({ $, el, send, toast }) {
       secondary: { label: "Use a code", onClick: requestCode },
     });
     account("browser-login");
+  }
+
+  // Extension edition: Microsoft's page opens in a Chrome window (chrome.identity).
+  function graphSignInStep(note = "") {
+    const body = [el("p", null, "Microsoft's sign-in page opens in a new window. Sign in with your work, school or personal Microsoft account and accept.")];
+    if (note) body.push(el("p", "field-note error", note));
+    showStep("signin", {
+      title: "Sign in to Microsoft",
+      body,
+      primary: {
+        label: "Sign in",
+        onClick: () => {
+          showStep("browser", {
+            title: "Sign in to Microsoft",
+            body: [el("p", null, "Finish signing in in the Microsoft window. This updates when you are done."), el("div", "progress")],
+          });
+          send({ type: "outlook_sign_in" });
+        },
+      },
+    });
   }
 
   function requestCode() {
@@ -328,23 +374,28 @@ export function createMcpPanel({ $, el, send, toast }) {
     };
     showStep("manage", {
       title: "Microsoft Outlook",
-      body: [el("p", null, `Connected${outlook?.account ? ` as ${outlook.account}` : ""}.`), el("p", "field-note", "Signing out ends the agent's access to your mail and calendar until you sign in again."), remove],
+      body: [
+        el("p", null, `Connected${outlook?.account ? ` as ${outlook.account}` : ""}.`),
+        el("p", "field-note", "Signing out ends the agent's access to your mail and calendar until you sign in again."),
+        ...(extension() ? [] : [remove]),
+      ],
       primary: { label: "Close", onClick: closeFlow },
-      secondary: { label: "Sign out", onClick: () => account("logout") },
+      secondary: { label: "Sign out", onClick: () => send(extension() ? { type: "outlook_sign_out" } : { type: "mcp_account", id: OUTLOOK_ID, action: "logout" }) },
       cancel: "",
     });
   }
 
   function render(next) {
     config = next;
-    if (config.edition !== "local") return;
     renderIntegrations();
+    if (extension()) return;
     renderServers();
   }
 
   return {
     open() {
       panel.hidden = false;
+      if (extension()) return send({ type: "outlook_status" });
       send({ type: "mcp_status" });
       if (outlookState() === "connected" && !checking) checkSignIn();
     },
@@ -360,6 +411,7 @@ export function createMcpPanel({ $, el, send, toast }) {
     },
     // Outlook's sign-in, or null when it is not running or not checked yet.
     get outlook() {
+      if (extension()) return graph?.signedIn ? outlook : null;
       return outlookState() === "connected" ? outlook : null;
     },
     // Runs the Outlook connect flow on its own, over whatever is on screen; onClosed(signedIn)
@@ -370,6 +422,16 @@ export function createMcpPanel({ $, el, send, toast }) {
     },
     render,
     handlers: {
+      outlook_status(msg) {
+        graph = msg;
+        outlook = { signedIn: msg.signedIn, account: msg.account };
+        if (config) render(config);
+        if (step === "browser") msg.signedIn ? doneStep() : graphSignInStep(msg.error || "Sign-in did not finish.");
+        else if (step === "manage" && !msg.signedIn) {
+          closeFlow();
+          toast("Signed out of Outlook");
+        }
+      },
       mcp_status(msg) {
         status = msg.servers;
         const state = outlookState();
