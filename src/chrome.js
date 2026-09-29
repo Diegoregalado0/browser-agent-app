@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, openSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +8,15 @@ import { CDP } from "./cdp.js";
 
 const KEEPER = join(dirname(fileURLToPath(import.meta.url)), "chrome-keeper.js");
 const ACTIVE_PORT_FILE = join(PROFILE_DIR, "DevToolsActivePort");
-// Held while one caller launches Chrome. At app launch the server and the CLI both
-// connect; a second keeper would start a second Chrome, which hands off to the first
-// and opens an extra window that the next session restores.
+// The built extension the test browser loads (npm run build:extension).
+export const EXTENSION_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "extension");
+// Fixed by the manifest's "key" (scripts/build-extension.js); Outlook's redirect relies on it.
+export const EXTENSION_ID = "fddhceodbfeklilaakgioapmildcmgjo";
+// The build the running browser has loaded: the manifest's mtime at install, written by the
+// keeper and removed when the browser exits.
+export const LOADED_FILE = join(HOME_DIR, "extension-loaded");
+// Held while one caller launches Chrome, so two launches at once do not start a second
+// keeper (whose Chrome would hand off to the first and open an extra window).
 const LAUNCH_LOCK = join(PROFILE_DIR, "launching");
 const LAUNCH_LOCK_MAX_AGE_MS = 20000;
 
@@ -26,10 +32,11 @@ function claimLaunch() {
   }
 }
 
-function readActivePort() {
+// The DevTools port of the running browser, from the file Chrome writes in the profile.
+export function activePort() {
   if (!existsSync(ACTIVE_PORT_FILE)) return null;
   const [port, path] = readFileSync(ACTIVE_PORT_FILE, "utf8").trim().split("\n");
-  return port && path ? `ws://127.0.0.1:${port}${path}` : null;
+  return port && path ? { port: Number(port), wsUrl: `ws://127.0.0.1:${port}${path}` } : null;
 }
 
 async function tryConnect(wsUrl) {
@@ -40,13 +47,34 @@ async function tryConnect(wsUrl) {
   }
 }
 
-// Connects to the agent's Chrome, launching it (through the keeper, which also installs
-// the sidebar) on the dedicated profile if it is not already running. It is launched with
-// --remote-debugging-pipe, which sets navigator.webdriver, so pages can tell it is automated.
-export async function connectChrome() {
-  const existing = readActivePort();
+// The test browser on this profile and its keeper (the parent of the main Chrome process).
+// Returns { chrome, keeper } pids; either is null when not found.
+export function browserProcesses() {
+  let chrome = null;
+  let keeper = null;
+  try {
+    const rows = execFileSync("ps", ["-ax", "-o", "pid=,ppid=,command="], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
+      .split("\n")
+      .map((row) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(row))
+      .filter(Boolean);
+    const main = rows.find((m) => m[3].includes(`--user-data-dir=${PROFILE_DIR} `) && !m[3].includes("--type="));
+    if (main) {
+      chrome = Number(main[1]);
+      const parent = rows.find((m) => m[1] === main[2]);
+      if (parent?.[3].includes("chrome-keeper.js")) keeper = Number(parent[1]);
+    }
+  } catch {}
+  return { chrome, keeper };
+}
+
+// Connects to the test browser, launching it through the keeper (which installs the
+// extension) when it is not running. devtoolsPort applies only to a new launch; 0 picks a
+// free port. Chrome runs with --remote-debugging-pipe, which sets navigator.webdriver, so
+// pages can tell it is automated.
+export async function connectChrome({ devtoolsPort = 0 } = {}) {
+  const existing = activePort();
   if (existing) {
-    const cdp = await tryConnect(existing);
+    const cdp = await tryConnect(existing.wsUrl);
     if (cdp) return cdp;
     rmSync(ACTIVE_PORT_FILE, { force: true });
   }
@@ -54,13 +82,13 @@ export async function connectChrome() {
   const launching = claimLaunch();
   if (launching) {
     const log = openSync(join(HOME_DIR, "chrome.log"), "a");
-    spawn(process.execPath, [KEEPER], { detached: true, stdio: ["ignore", log, log], env: process.env }).unref();
+    spawn(process.execPath, [KEEPER, String(devtoolsPort)], { detached: true, stdio: ["ignore", log, log], env: process.env }).unref();
   }
 
   try {
     for (let i = 0; i < 400; i++) {
       await sleep(50);
-      const wsUrl = readActivePort();
+      const wsUrl = activePort()?.wsUrl;
       if (!wsUrl) continue;
       const cdp = await tryConnect(wsUrl);
       if (cdp) return cdp;

@@ -1,6 +1,4 @@
-// Tab helpers built on the chrome.* extension APIs. The extension edition calls them
-// directly; the local edition runs them in the side panel extension's bridge page,
-// serialized with toString(), so each function must be self-contained.
+// Tab helpers built on the chrome.* extension APIs, used by the debugger transport.
 
 // Opens a tab right after the opener tab, in its window (or in fallbackWindowId, else the
 // last focused normal window, when there is no opener), and returns the new tab's id.
