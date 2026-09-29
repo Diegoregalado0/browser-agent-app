@@ -108,7 +108,7 @@ export function writeSidebarExtension(uiUrl) {
     join(SIDEBAR_DIR, "sidepanel.html"),
     `<!doctype html>
 <html><head><meta charset="utf-8"><title>Browsby</title>
-<style>html,body,iframe{margin:0;border:0;width:100%;height:100%;display:block;background:#1b1c1e}</style>
+<style>html,body,iframe{margin:0;border:0;width:100%;height:100%;display:block;background:#121822}</style>
 </head><body><iframe allow="clipboard-write"></iframe><script src="sidepanel.js"></script></body></html>
 `,
   );
