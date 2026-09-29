@@ -51,7 +51,6 @@
       <button data-settings-page="data" data-icon="lock"><span>Data and privacy</span></button>
       <button data-settings-page="remote" data-icon="phone"><span>Remote (Discord)</span></button>
       <button data-settings-page="debug" data-icon="bug"><span>Debug</span></button>
-      <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
       <button id="menu-open-mcp" data-icon="plug"><span>Connections</span></button>
     </nav>
     <section class="menu-bottom" aria-label="Sessions">
@@ -202,8 +201,7 @@
           </div>
 
           <h3 class="group-label">API keys and endpoints</h3>
-          <p class="group-desc" data-local-only>Keys are stored in ~/.browser-agent/config.json, readable only by you. When none is saved here, a key from the environment or the project's .env file is used.</p>
-          <p class="group-desc" data-extension-only>You use your own API key. It is stored only in this browser profile, never synced, and sent only to the provider it belongs to. Usage is billed to your account with that provider.</p>
+          <p class="group-desc">You use your own API key. It is stored only in this browser profile, never synced, and sent only to the provider it belongs to. Usage is billed to your account with that provider.</p>
           <div id="provider-cards"></div>
         </section>
 
@@ -335,17 +333,6 @@
               <input id="showActions" type="checkbox" role="switch" class="switch" data-setting="showActions" />
             </div>
           </div>
-
-          <h3 class="group-label" data-local-only>Agent browser</h3>
-          <div class="setting-group" data-local-only>
-            <div class="setting">
-              <div class="setting-text">
-                <span class="setting-title">Show the agent browser</span>
-                <p class="setting-desc">Brings the agent's Chrome window to the front. It uses its own profile; sign in to sites and install extensions there once and they persist.</p>
-              </div>
-              <button id="settings-show-browser" type="button">Show</button>
-            </div>
-          </div>
         </section>
 
         <section class="settings-page" data-page="data" data-title="Data and privacy" hidden>
@@ -353,7 +340,7 @@
             <div class="setting">
               <div class="setting-text">
                 <label class="setting-title" for="ghostMode">Ghost mode</label>
-                <p class="setting-desc">Sessions are not saved and nothing is written to the activity log. Switching starts a new session. Chrome still keeps its own browsing history.</p>
+                <p class="setting-desc">Sessions are not saved. Switching starts a new session. Chrome still keeps its own browsing history.</p>
                 <p class="setting-desc locked-note" id="ghost-locked-note" hidden>Ghost mode is on during incognito mode</p>
               </div>
               <input id="ghostMode" type="checkbox" role="switch" class="switch" />
@@ -365,30 +352,17 @@
             <div class="setting">
               <div class="setting-text">
                 <span class="setting-title">Saved sessions</span>
-                <p class="setting-desc"><span id="sessions-count">…</span><span data-local-only> in <span class="path" data-path="sessions"></span></span><span data-extension-only>, kept only in this browser profile</span>. Screenshots are not saved.</p>
+                <p class="setting-desc"><span id="sessions-count">…</span>, kept only in this browser profile. Screenshots are not saved.</p>
               </div>
               <button id="delete-all-sessions" type="button" class="danger-outline">Delete all</button>
-            </div>
-            <div class="setting" data-local-only>
-              <div class="setting-text">
-                <span class="setting-title">Activity log</span>
-                <p class="setting-desc">Tasks, actions, and safety-check decisions (<span id="activity-size">…</span>), shown by <code>browser-agent activity</code>.</p>
-              </div>
-              <button id="clear-activity" type="button" class="danger-outline">Clear</button>
-            </div>
-            <div class="setting" data-local-only>
-              <div class="setting-text">
-                <span class="setting-title">Data folder</span>
-                <p class="setting-desc"><span class="path" data-path=""></span> holds settings, history, the log, and the agent's Chrome profile.</p>
-              </div>
             </div>
           </div>
         </section>
 
 
         <section class="settings-page" data-page="remote" data-title="Remote (Discord)" hidden>
-          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this <span data-local-only>Mac</span><span data-extension-only>computer</span>, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
-          <p class="group-desc" data-extension-only>It works only while Chrome is open with the agent's panel open. Closing the panel disconnects the bot until you open it again, and tasks from Discord run in that panel's window.</p>
+          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this computer, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
+          <p class="group-desc">It works only while Chrome is open with the agent's panel open. Closing the panel disconnects the bot until you open it again, and tasks from Discord run in that panel's window.</p>
 
           <div class="setting-group">
             <div class="setting stack">
@@ -418,8 +392,7 @@
                 <li>Send the bot the pairing code shown above as a direct message.</li>
               </ol>
               <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
-              <p class="field-note" data-local-only>The token stays in the settings file on this Mac, readable only by you, and is never shown again.</p>
-              <p class="field-note" data-extension-only>The token stays in this Chrome profile on this computer (never synced) and is never shown again.</p>
+              <p class="field-note">The token stays in this Chrome profile on this computer (never synced) and is never shown again.</p>
               <div class="row"><button type="submit" class="primary">Save and connect</button></div>
             </div>
           </form>

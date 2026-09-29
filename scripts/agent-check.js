@@ -232,7 +232,6 @@ agent.mcp = null;
 // Controller: permission prompts carry ids, and remote clients are limited.
 let hostConfig = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const controller = createController({
-  edition: "extension",
   env: {},
   loadConfig: async () => structuredClone(hostConfig),
   saveConfig: async (c) => (hostConfig = structuredClone(c)),
@@ -244,7 +243,7 @@ const controller = createController({
 const localEvents = [];
 const remoteEvents = [];
 const fromLocal = controller.connect({ send: (e) => localEvents.push(e) });
-const fromRemote = controller.connect({ send: (e) => remoteEvents.push(e) }, { remote: true, source: "discord" });
+const fromRemote = controller.connect({ send: (e) => remoteEvents.push(e) }, { remote: true });
 const lastPrompt = () => localEvents.filter((e) => e.type === "permission_request").at(-1);
 const settled = (promise) => Promise.race([promise, new Promise((r) => setTimeout(() => r("pending"), 50))]);
 

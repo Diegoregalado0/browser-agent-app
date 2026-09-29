@@ -14,13 +14,11 @@ const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 
 
 // The conversation behind every UI: runs tasks, keeps the saved session in step, applies
-// Ghost mode, and answers the UI's messages. Both editions use it; the host supplies
-// what differs between them:
+// Ghost mode, and answers the UI's messages. The host (extension/sidepanel-main.js, or a
+// test) supplies:
 //   env                   environment variables that may hold API keys ({} in the extension)
 //   loadConfig/saveConfig settings storage (async)
 //   sessions              { save, list, load, remove, removeAll } (async)
-//   log(event)            activity log sink, optional; clearLog(), logBytes() with it
-//   dataLocation          where data is kept, shown in Settings
 //   ensureBrowser(agent)  connects agent.browser
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
 //   defaults              the edition's changes to the default settings
@@ -29,12 +27,12 @@ export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
   let permissionCount = 0;
-  // Per client: { remote, source } from connect(); local UIs are not remote.
+  // Per client: { remote } from connect(); local UIs are not remote.
   const clientInfo = new WeakMap();
   // The saved conversation the agent's history belongs to: { id, title, created }, or
   // null until the first request of a new conversation is saved.
   let session = null;
-  // Ghost mode saves nothing: no session and no activity log entries. It is on when the
+  // Ghost mode saves nothing: no session. It is on when the
   // user switches it on, and forced on while any incognito client is connected. A
   // conversation that starts as a ghost stays one until a new conversation begins, so it
   // is never saved later, even after the lock lifts.
@@ -49,20 +47,14 @@ export function createController(host) {
     conversationGhost = ghostActive();
   });
 
-  const record = (event) => {
-    if (!unsaved()) host.log?.(event);
-  };
-
   // The config as the UI sees it: no keys, and the effective Ghost mode state.
   const clientConfig = (config) => ({
     ...publicConfig(config, host.env),
     ghostMode: unsaved(),
     ghostLocked: ghostLocked(),
-    edition: host.edition,
   });
 
   const broadcast = (event) => {
-    record(event);
     for (const client of clients) client.send(event);
   };
 
@@ -139,13 +131,10 @@ export function createController(host) {
     kind: pendingPermission.kind,
   });
 
-  // source: where the answer came from ("local", a remote bridge's name, or "agent" when a
-  // stop or reset ends the prompt).
-  async function resolvePermission(decision, source = "agent") {
+  async function resolvePermission(decision) {
     if (!pendingPermission) return;
     const { resolve, origin } = pendingPermission;
     pendingPermission = null;
-    record({ type: "permission_answer", decision, source });
     if (decision === "always" && origin) {
       const config = await host.loadConfig();
       if (!config.approvedOrigins.includes(origin)) config.approvedOrigins.push(origin);
@@ -159,7 +148,7 @@ export function createController(host) {
   async function handle(client, msg) {
     await ready;
     const reply = (event) => client.send(event);
-    const { remote = false, source = "local" } = clientInfo.get(client) ?? {};
+    const { remote = false } = clientInfo.get(client) ?? {};
     if (remote && !REMOTE_MESSAGES.has(msg.type)) return;
     switch (msg.type) {
       case "hello": {
@@ -178,7 +167,6 @@ export function createController(host) {
       }
       case "run": {
         if (agent.running) return reply({ type: "error", text: "A task is already running." });
-        record({ type: "task", text: String(msg.text) });
         try {
           await host.ensureBrowser(agent);
           await agent.run(String(msg.text), await host.loadConfig());
@@ -285,16 +273,10 @@ export function createController(host) {
         clearConversation();
         return;
       }
-      case "clear_activity_log":
-        await host.clearLog?.();
-        reply({ type: "activity_log_cleared" });
-        return;
       case "data_info":
         reply({
           type: "data_info",
-          home: host.dataLocation,
           sessions: (await host.sessions.list()).length,
-          activityBytes: host.logBytes ? await host.logBytes() : null,
           tokensToday: await ledger.used(),
         });
         return;
@@ -332,10 +314,10 @@ export function createController(host) {
         if (!pendingPermission || msg.id !== pendingPermission.id) return reply({ type: "permission_stale" });
         if (!["once", "always", "deny"].includes(msg.decision)) return;
         if (remote && msg.decision !== "deny" && LOCAL_ONLY_PROMPTS.has(pendingPermission.kind)) {
-          return reply({ type: "error", text: `This one can only be approved at ${host.edition === "extension" ? "the computer" : "the Mac"}.` });
+          return reply({ type: "error", text: "This one can only be approved at the computer." });
         }
         // "Always" changes settings, which only the Mac does.
-        resolvePermission(remote && msg.decision === "always" ? "once" : msg.decision, source);
+        resolvePermission(remote && msg.decision === "always" ? "once" : msg.decision);
         return;
       }
       case "save_config": {
@@ -370,14 +352,6 @@ export function createController(host) {
         }
         return;
       }
-      case "open_browser":
-        try {
-          await host.ensureBrowser(agent);
-          await agent.browser.bringToFront();
-        } catch (err) {
-          reply({ type: "error", text: err.message });
-        }
-        return;
     }
   }
 
@@ -391,11 +365,10 @@ export function createController(host) {
     // Tells every UI that the Discord bridge's status changed.
     discordChanged: async () => host.discord && broadcast(await host.discord.status()),
     // client: { send(event) }. Returns the function that takes the client's messages.
-    // options.remote: a bridge that may only send REMOTE_MESSAGES; options.source names it in
-    // the activity log.
-    connect(client, { remote = false, source = "local" } = {}) {
+    // options.remote: a bridge that may only send REMOTE_MESSAGES.
+    connect(client, { remote = false } = {}) {
       clients.add(client);
-      clientInfo.set(client, { remote, source });
+      clientInfo.set(client, { remote });
       return (msg) => handle(client, msg).catch((err) => client.send({ type: "error", text: err.message }));
     },
     disconnect(client) {

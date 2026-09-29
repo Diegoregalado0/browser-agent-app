@@ -137,7 +137,6 @@ details.steps details.thinking summary { font-style: italic; }
 .msg.assistant a { color: var(--accent); }
 
 /* Side panel layout: narrow, so tighten spacing and drop the Browser button. */
-.in-sidebar #show-browser { display: none !important; }
 .in-sidebar header { padding: 4px 6px 4px 10px; }
 .in-sidebar #log { padding: 10px; }
 .in-sidebar #composer { padding: 8px 10px; }
@@ -333,9 +332,6 @@ input.switch:checked::after { transform: translateX(16px); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
-/* Options that exist in only one edition. */
-:root[data-edition="extension"] [data-local-only],
-:root:not([data-edition="extension"]) [data-extension-only] { display: none !important; }
 
 .onboarding { max-width: 320px; }
 .onboarding h2 { margin: 0 0 8px; font-size: 17px; color: var(--fg); }

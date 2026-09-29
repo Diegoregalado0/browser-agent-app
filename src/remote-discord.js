@@ -170,7 +170,7 @@ export class DiscordBridge {
       this.bot = { id: d.user.id, username: d.user.username };
       if (!this.client) {
         this.client = { send: (event) => this.#onEvent(token, event).catch((err) => console.error(`Discord: ${err.message}`)) };
-        this.receive = this.controller.connect(this.client, { remote: true, source: "discord" });
+        this.receive = this.controller.connect(this.client, { remote: true });
       }
       this.#set("connected");
       return;

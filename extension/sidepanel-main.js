@@ -31,7 +31,6 @@ const outlook = new OutlookGraph({
 await outlook.init();
 
 const host = {
-  edition: "extension",
   env: {},
   loadConfig,
   saveConfig,
@@ -40,7 +39,6 @@ const host = {
   defaults: EXTENSION_DEFAULTS,
   sessions,
   outlook,
-  dataLocation: "this browser profile",
   ensureBrowser: async (agent) => {
     await staleDetached;
     if (agent.browser) return;

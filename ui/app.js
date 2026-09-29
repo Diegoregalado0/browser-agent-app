@@ -4,19 +4,14 @@ import { createWizard } from "./wizard.js";
 
 const $ = (id) => document.getElementById(id);
 const log = $("log");
-const params = new URLSearchParams(location.search);
-const token = params.get("t");
-// The extension edition hosts the controller in this page and provides agentHost; the
-// local edition reaches it over a WebSocket.
+// The side panel page hosts the controller and provides agentHost (sidepanel-main.js).
 const host = globalThis.agentHost;
 const GHOST_TEXT = "This session will not be saved";
 const GHOST_LOCKED_TEXT = "Ghost mode is on during incognito mode";
-// Inside the browser's side panel the "Browser" button has nothing to bring forward.
-if (host || params.get("embed") === "sidebar") document.documentElement.classList.add("in-sidebar");
+document.documentElement.classList.add("in-sidebar");
 // Set by the side panel in an incognito window, where Ghost mode is locked on.
-const incognito = host ? host.incognito : params.get("incognito") === "1";
+const incognito = host.incognito;
 
-let ws;
 let link = null;
 let config = null;
 let running = false;
@@ -97,7 +92,7 @@ function onboarding() {
 }
 
 function emptyState() {
-  if (config && config.edition === "extension" && !providerReady()) return onboarding();
+  if (config && !providerReady()) return onboarding();
   const ghost = config?.ghostMode;
   const box = el("div", "empty");
   if (ghost) box.append(icon("ghost"));
@@ -241,7 +236,6 @@ function setRunning(value) {
 
 function renderHeader() {
   if (!config) return;
-  document.documentElement.dataset.edition = config.edition;
   $("model").textContent = config.models[config.provider] || "No model selected";
   const ghost = Boolean(config.ghostMode);
   document.documentElement.classList.toggle("ghost", ghost);
@@ -554,20 +548,8 @@ function receive(msg) {
 }
 
 function connect() {
-  if (host) {
-    link = host.connect(receive);
-    send({ type: "hello", incognito });
-    return;
-  }
-  ws = new WebSocket(`ws://${location.host}/ws?t=${token}`);
-  link = { send: (msg) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg)) };
-  ws.onopen = () => send({ type: "hello", incognito });
-  ws.onmessage = (e) => receive(JSON.parse(e.data));
-  ws.onclose = () => {
-    $("dot").className = "dot";
-    $("model").textContent = "disconnected, retrying…";
-    setTimeout(connect, 1500);
-  };
+  link = host.connect(receive);
+  send({ type: "hello", incognito });
 }
 
 $("composer").addEventListener("submit", (e) => {
@@ -650,10 +632,6 @@ $("open-mcp").onclick = openMcp;
 $("menu-open-mcp").onclick = openMcp;
 $("close-mcp").onclick = () => mcpPanel.close();
 
-$("show-browser").onclick = () => {
-  closeMenu();
-  send({ type: "open_browser" });
-};
 $("close-settings").onclick = () => settings.close();
 $("run-setup").onclick = () => {
   settings.close();
