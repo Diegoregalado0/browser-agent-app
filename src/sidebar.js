@@ -38,7 +38,7 @@ const ICON_SOURCE = join(ROOT, "scripts", "icon-128.png");
 const BACKGROUND_SOURCE = join(ROOT, "extension", "background.js");
 
 // Bumped whenever the extension's files change, so a running browser reloads it.
-export const SIDEBAR_VERSION = "1.4.0";
+export const SIDEBAR_VERSION = "1.5.0";
 
 // The keeper of the browser running on this profile: the parent of its main Chrome
 // process. Returns { chrome, keeper } pids; either is null when not found.
