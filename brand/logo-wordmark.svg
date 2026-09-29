@@ -1,24 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 214 64" width="214" height="64" role="img" aria-label="Duomo">
-  <style>
-    .word { fill: #1E2433; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif; font-size: 38px; font-weight: 600; letter-spacing: -0.5px; }
-    @media (prefers-color-scheme: dark) { .word { fill: #EDE7DC; } }
-  </style>
-  <g stroke="#7A2E15" stroke-width="1.2" stroke-linejoin="round">
-    <path d="M9 49h46v10H9z" fill="#F7F3EC"/>
-    <path d="M9 49h46v3.6H9z" fill="#D9C4A0"/>
-    <path d="M10 49C10 34 19 23.5 28.5 17h7C45 23.5 54 34 54 49z" fill="#C8552B"/>
-    <path d="M26.5 17v-1.8h11V17z" fill="#F7F3EC"/>
-    <path d="M28 15.2V9.6h8v5.6z" fill="#F7F3EC"/>
-    <path d="M27.3 9.6L32 5.2l4.7 4.4z" fill="#F7F3EC"/>
-  </g>
-  <g fill="none" stroke="#F7F3EC" stroke-width="2.6" stroke-linecap="round">
-    <path d="M23.6 48C23.8 35 26.5 25 30.4 18.2"/>
-    <path d="M40.4 48C40.2 35 37.5 25 33.6 18.2"/>
-    <path d="M11.5 48C11.8 35 19.5 25 28.2 18.4"/>
-    <path d="M52.5 48C52.2 35 44.5 25 35.8 18.4"/>
-  </g>
-  <circle cx="32" cy="55.7" r="1.9" fill="#1E2433"/>
-  <path d="M30.5 11.2h1.1v3h-1.1zM32.4 11.2h1.1v3h-1.1z" fill="#1E2433"/>
-  <circle cx="32" cy="3.6" r="2.3" fill="#D4A62A" stroke="#7A2E15" stroke-width="0.8"/>
-  <text class="word" x="70" y="52">Duomo</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 128" role="img" aria-label="Browsby">
+  <path d="M23 112 Q31 112 31 104 L31 24 Q31 16 39 16 L43 16 Q51 16 51 24 L51 112 Z" fill="#1F3A5F"/>
+  <circle cx="75" cy="81" r="23.5" fill="none" stroke="#1F3A5F" stroke-width="15"/>
+  <circle cx="75" cy="81" r="8" fill="#E0A23B"/>
+  <!-- Live text in the system font stack; convert to outlines before print -->
+  <text x="124" y="112" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="76" font-weight="600" letter-spacing="-1" fill="#1F3A5F">Browsby</text>
 </svg>
