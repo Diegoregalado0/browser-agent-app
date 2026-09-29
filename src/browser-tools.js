@@ -170,6 +170,16 @@ function formatHeaders(headers = {}) {
     .join("\n");
 }
 
+// Bot checks from search engines and Cloudflare, by URL, title, or the text of a short page.
+// Retrying them only makes the block last longer.
+const BOT_CHECK_URL = /^https?:\/\/([^/]+\.)?(google\.[a-z.]+\/sorry\/|bing\.com\/turing\/captcha|search\.brave\.com\/captcha)|\/cdn-cgi\/challenge-platform\//i;
+const BOT_CHECK_TITLE = /^(just a moment\.\.\.|attention required! \| cloudflare|verify you are human)$/i;
+const BOT_CHECK_TEXT = /unusual traffic from your computer|bots use duckduckgo too|verify you are human|checking if the site connection is secure|confirm (that )?you are (a )?human|are you a robot/i;
+
+export function isBotCheck(url = "", title = "", text = "") {
+  return BOT_CHECK_URL.test(url) || BOT_CHECK_TITLE.test(title.trim()) || (text.length < 3000 && BOT_CHECK_TEXT.test(text));
+}
+
 function normalizeUrl(url) {
   return /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
 }
@@ -875,7 +885,10 @@ export class Browser {
         this.cssPerPixel = null;
         await this.waitForLoad();
         const page = await this.currentPage();
-        return `Loaded: ${shortUrl(page.title)} | ${shortUrl(page.url)}${note}`;
+        const loaded = `Loaded: ${shortUrl(page.title)} | ${shortUrl(page.url)}${note}`;
+        const text = await this.evaluate("document.body?.innerText.slice(0, 3000) ?? ''").catch(() => "");
+        if (!isBotCheck(page.url, page.title, text)) return loaded;
+        return `${loaded}\nThis page is a bot check. Do not retry it or try to solve it: use a different source (another site, or web search if you have it), or ask the user.`;
       }
       case "read_page": {
         const res = await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS);
