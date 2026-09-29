@@ -2,6 +2,7 @@ import { createController } from "../src/controller.js";
 import { Browser } from "../src/browser-tools.js";
 import { DebuggerTransport } from "./transport-debugger.js";
 import { DiscordBridge } from "../src/remote-discord.js";
+import { OutlookGraph } from "../src/outlook-graph.js";
 import { loadConfig, saveConfig, loadUsage, saveUsage, sessions, EXTENSION_DEFAULTS } from "./storage.js";
 
 // The extension edition runs the whole agent inside the side panel page: the panel's
@@ -19,6 +20,16 @@ const staleDetached = (async () => {
   await Promise.all(stale.map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => {})));
 })().catch(() => {});
 
+// Outlook on Microsoft Graph. Its tokens have their own key in chrome.storage.local (never
+// synced), apart from the settings, so they never pass through the UI.
+const outlook = new OutlookGraph({
+  loadAuth: async () => (await chrome.storage.local.get("outlookAuth")).outlookAuth ?? null,
+  saveAuth: (outlookAuth) => (outlookAuth ? chrome.storage.local.set({ outlookAuth }) : chrome.storage.local.remove("outlookAuth")),
+  launchAuth: (url, interactive) => chrome.identity.launchWebAuthFlow({ url, interactive }),
+  redirectUri: chrome.identity.getRedirectURL(),
+});
+await outlook.init();
+
 const host = {
   edition: "extension",
   env: {},
@@ -28,6 +39,7 @@ const host = {
   saveUsage,
   defaults: EXTENSION_DEFAULTS,
   sessions,
+  outlook,
   dataLocation: "this browser profile",
   desktop: null,
   ensureBrowser: async (agent) => {
@@ -57,6 +69,10 @@ if (!win.incognito) {
 // Settings changed in another window's panel.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.config) controller.refreshConfig();
+  // Outlook signed in or out, here or in another window's panel.
+  if (area === "local" && changes.outlookAuth && Boolean(changes.outlookAuth.newValue) !== outlook.signedIn) {
+    outlook.init().then(() => controller.outlookChanged());
+  }
 });
 
 // Closing the panel stops the task and removes the debugging banner and the Agent group.

@@ -23,15 +23,23 @@ const PROVIDER_HOSTS = [
   "http://localhost/*",
 ];
 
+// The public key that fixes the extension id, so Outlook's sign-in redirect
+// (https://<id>.chromiumapp.org/) is the same on every unpacked load. This development key
+// gives id fddhceodbfeklilaakgioapmildcmgjo; its private key was discarded, since unpacked
+// loads do not need it. Replace it with the Chrome Web Store item's public key once the
+// store listing exists (README, "Outlook in the extension").
+const EXTENSION_KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA04xrUsDhyxcjdNB1VwYah9JJv2HCtjZT7dCSv5wcQM/vvLQVjehFBkLPGAuNdqry6m89saTyGm45SxYatrhuvpqqHum2RCg4y3kRyLhcR2drcuxfdsD2wxdVJHYUziouz9Tl8g0aNFn7MID7SehMg5cBnWb7s0GLGMEieXdz3MzO3EVi1ZM0jxPXwwMUHBXWVdquzgGydAoVWhZjuEU6UC6b29J/OEWZ+HxayNqglxjqc3KiHb7aF1aYdwO11MY4zbSo0+ACjmnh5XyRbGmcKoc093WAijYSXrxxnRqhLSUhpljI2y3z8A/8GpbHRacyKwdgVWnk8Sxmox1ft1JTNwIDAQAB";
+
 const manifest = {
   manifest_version: 3,
   name: "Browsby",
   version,
   description: "An AI agent that does tasks in your browser tabs, using your own API key.",
   minimum_chrome_version: "120",
-  permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage"],
-  // Discord's API for remote control; its gateway is a WebSocket, which needs no permission.
-  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*"],
+  permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage", "identity"],
+  // Discord's API for remote control (its gateway is a WebSocket, which needs no
+  // permission), and Microsoft sign-in and Graph for Outlook.
+  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*", "https://login.microsoftonline.com/*", "https://graph.microsoft.com/*"],
   background: { service_worker: "background.js" },
   side_panel: { default_path: "sidepanel.html" },
   action: { default_title: "Browsby", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },
@@ -61,6 +69,7 @@ await build({
   logLevel: "warning",
 });
 
+// The store zip has no key (the store keeps its own); the unpacked folder gets it after packing.
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
 copyFileSync(join(ROOT, "extension", "background.js"), join(OUT, "background.js"));
 copyFileSync(join(ROOT, "ui", "style.css"), join(OUT, "style.css"));
@@ -78,4 +87,5 @@ for (const size of [16, 32, 48, 128]) {
 
 rmSync(ZIP, { force: true });
 execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
+writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));
 console.log(`Built ${OUT}\nPacked ${ZIP}`);

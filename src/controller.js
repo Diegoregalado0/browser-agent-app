@@ -25,6 +25,7 @@ const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 //   desktop               { status(), requestAccess() } locally, null in the extension
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
 //   defaults              the edition's changes to the default settings
+//   outlook               Outlook on Microsoft Graph (extension; see outlook-graph.js), optional
 export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
@@ -128,7 +129,8 @@ export function createController(host) {
         broadcast(permissionRequest());
       }),
   });
-  agent.mcp = host.mcp?.servers ?? null;
+  // MCP servers locally; the extension's Outlook tools have the same interface.
+  agent.mcp = host.mcp?.servers ?? host.outlook ?? null;
 
   // MCP servers: the saved list is the source of truth; the running servers follow it.
   const mcpStatus = () => ({ type: "mcp_status", servers: host.mcp.servers.status() });
@@ -203,6 +205,7 @@ export function createController(host) {
         reply({ type: "status", running: agent.running });
         if (pendingPermission) reply(permissionRequest());
         if (host.mcp) reply(mcpStatus());
+        if (host.outlook) reply(await host.outlook.status());
         if (agent.messages.length) {
           reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
         }
@@ -227,6 +230,22 @@ export function createController(host) {
       case "mcp_status":
         if (host.mcp) reply(mcpStatus());
         return;
+      case "outlook_status":
+        if (host.outlook) reply(await host.outlook.status());
+        return;
+      case "outlook_sign_in":
+      case "outlook_sign_out": {
+        if (!host.outlook) return;
+        let error = null;
+        try {
+          if (msg.type === "outlook_sign_in") await host.outlook.signIn();
+          else await host.outlook.signOut();
+        } catch (err) {
+          error = err.message;
+        }
+        broadcast({ ...(await host.outlook.status()), error });
+        return;
+      }
       case "discord_status":
         if (host.discord) reply(await host.discord.status());
         return;
@@ -464,6 +483,8 @@ export function createController(host) {
     refreshConfig: async () => broadcastConfig(await host.loadConfig()),
     // Tells every UI that an MCP server's status or tools changed.
     mcpChanged: () => host.mcp && broadcast(mcpStatus()),
+    // Tells every UI that Outlook was signed in or out elsewhere.
+    outlookChanged: async () => host.outlook && broadcast(await host.outlook.status()),
     // Tells every UI that the Discord bridge's status changed.
     discordChanged: async () => host.discord && broadcast(await host.discord.status()),
     // client: { send(event) }. Returns the function that takes the client's messages.

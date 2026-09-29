@@ -9,11 +9,12 @@ import { DEFAULTS } from "../src/config-core.js";
 import * as openai from "../src/providers/openai.js";
 import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { McpServers } from "../src/mcp.js";
 import { createController } from "../src/controller.js";
 import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
-import { OutlookGraph, newPkce } from "../src/outlook-graph.js";
+import { OutlookGraph } from "../src/outlook-graph.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -467,24 +468,38 @@ const graphServer = createServer((req, res) => {
 await new Promise((r) => graphServer.listen(0, "127.0.0.1", r));
 const graphBase = `http://127.0.0.1:${graphServer.address().port}`;
 let outlookAuth = null;
+// Microsoft's page, as chrome.identity would show it: answers with a code for the state
+// it was given, or fails when there is no signed-in session to reuse silently.
+let signInPage = null;
 const outlook = new OutlookGraph({
   clientId: "client-1",
   loadAuth: async () => structuredClone(outlookAuth),
   saveAuth: async (a) => (outlookAuth = structuredClone(a)),
+  redirectUri: "https://abc.chromiumapp.org/",
+  launchAuth: async (url, interactive) => {
+    signInPage = new URL(url);
+    if (!interactive) throw new Error("User interaction required.");
+    return `https://abc.chromiumapp.org/?code=c1&state=${signInPage.searchParams.get("state")}`;
+  },
   authority: `${graphBase}/auth`,
   graph: `${graphBase}/graph`,
 });
 await outlook.init();
 assert.equal(outlook.toolDefs().length, 0, "Outlook tools offered before sign-in");
-const pkce = await newPkce();
-const signInUrl = new URL(outlook.authUrl({ redirectUri: "https://abc.chromiumapp.org/", challenge: pkce.challenge, state: pkce.state }));
-assert.equal(signInUrl.searchParams.get("code_challenge_method"), "S256");
-assert.equal(signInUrl.searchParams.get("client_id"), "client-1");
-assert.match(signInUrl.searchParams.get("scope"), /offline_access.*Mail\.Send/);
-assert.equal(await outlook.redeem({ code: "c1", verifier: pkce.verifier, redirectUri: "https://abc.chromiumapp.org/" }), "ada@example.edu");
+assert.equal(await outlook.signIn(), "ada@example.edu");
+assert.equal(signInPage.searchParams.get("code_challenge_method"), "S256");
+assert.equal(signInPage.searchParams.get("client_id"), "client-1");
+assert.equal(signInPage.searchParams.get("redirect_uri"), "https://abc.chromiumapp.org/");
+assert.match(signInPage.searchParams.get("scope"), /offline_access.*Mail\.Send/);
 const redeemForm = new URLSearchParams(graphCalls[0].body);
-assert.equal(redeemForm.get("code_verifier"), pkce.verifier);
+const verifierHash = createHash("sha256").update(redeemForm.get("code_verifier")).digest("base64url");
+assert.equal(verifierHash, signInPage.searchParams.get("code_challenge"), "the PKCE verifier does not match its challenge");
 assert.equal(redeemForm.get("grant_type"), "authorization_code");
+await assert.rejects(
+  new OutlookGraph({ loadAuth: async () => null, saveAuth: async () => {}, launchAuth: async (url) => `https://abc.chromiumapp.org/?code=x&state=forged`, clientId: "c" }).signIn(),
+  /unexpected answer/,
+);
+await assert.rejects(new OutlookGraph({ loadAuth: async () => null, saveAuth: async () => {}, clientId: "" }).signIn(), /not set up/);
 assert.ok(JSON.stringify(outlook.toolDefs()).length < 2500, "Outlook tool definitions grew past a few hundred tokens");
 assert.ok(outlook.isReadOnly("mcp__outlook__mail_read") && !outlook.isReadOnly("mcp__outlook__send"), "send must count as an action");
 const listed = (await outlook.call("mcp__outlook__mail_search", {}))[0].text;
@@ -513,6 +528,7 @@ assert.ok(status.signedIn && !JSON.stringify(status).match(/rt2|at\d/), "Outlook
 // A revoked refresh token signs out, with a message the model can relay.
 outlookAuth = { ...outlookAuth, refreshToken: "rt-revoked", expiresAt: 0 };
 await assert.rejects(outlook.call("mcp__outlook__mail_search", {}), /sign in again/);
+assert.equal(signInPage.searchParams.get("prompt"), "none", "a failed refresh did not try a silent sign-in first");
 assert.equal(outlookAuth, null);
 assert.equal(outlook.has("mcp__outlook__mail_search"), false);
 graphServer.close();

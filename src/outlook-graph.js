@@ -90,11 +90,12 @@ const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 
 export class OutlookGraph {
   // loadAuth/saveAuth: the token store, { accessToken, refreshToken, expiresAt, account } or
-  // null. silentSignIn(): optional; a sign-in without a window, tried when a refresh fails,
-  // resolving to whether it worked. fetch, authority and graph are replaceable for the
-  // offline checks.
-  constructor({ loadAuth, saveAuth, clientId = OUTLOOK_CLIENT_ID, silentSignIn = null, fetch = globalThis.fetch.bind(globalThis), authority = AUTHORITY, graph = GRAPH }) {
-    Object.assign(this, { loadAuth, saveAuth, clientId, silentSignIn, fetch, authority, graph });
+  // null. launchAuth(url, interactive): opens Microsoft's sign-in page and resolves to the
+  // address it redirected to (chrome.identity.launchWebAuthFlow). redirectUri: that
+  // redirect (https://<extension id>.chromiumapp.org/). fetch, authority and graph are
+  // replaceable for the offline checks.
+  constructor({ loadAuth, saveAuth, launchAuth, redirectUri, clientId = OUTLOOK_CLIENT_ID, fetch = globalThis.fetch.bind(globalThis), authority = AUTHORITY, graph = GRAPH }) {
+    Object.assign(this, { loadAuth, saveAuth, launchAuth, redirectUri, clientId, fetch, authority, graph });
     // Whether a sign-in is stored; the model gets the tools only then.
     this.signedIn = false;
   }
@@ -113,12 +114,12 @@ export class OutlookGraph {
     return { type: "outlook_status", configured: this.configured, signedIn: Boolean(auth?.refreshToken), account: auth?.account ?? "" };
   }
 
-  // Microsoft's sign-in page for this redirect and PKCE challenge.
-  authUrl({ redirectUri, challenge, state, prompt }) {
+  // Microsoft's sign-in page for a PKCE challenge.
+  authUrl({ challenge, state, prompt }) {
     const q = new URLSearchParams({
       client_id: this.clientId,
       response_type: "code",
-      redirect_uri: redirectUri,
+      redirect_uri: this.redirectUri,
       response_mode: "query",
       scope: SCOPES,
       code_challenge: challenge,
@@ -129,9 +130,18 @@ export class OutlookGraph {
     return `${this.authority}/authorize?${q}`;
   }
 
-  // Finishes a sign-in: redeems the code from the redirect and stores the tokens.
-  async redeem({ code, verifier, redirectUri }) {
-    const auth = await this.#token({ grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: redirectUri });
+  // Signs in on Microsoft's page and stores the tokens; resolves to the account name.
+  // Without interaction (a renewal), it works only while the user's Microsoft session is
+  // still signed in.
+  async signIn({ interactive = true } = {}) {
+    if (!this.configured) throw new Error("Outlook is not set up in this version of the extension yet.");
+    const { verifier, challenge, state } = await newPkce();
+    const url = this.authUrl({ challenge, state, prompt: interactive ? "select_account" : "none" });
+    const redirected = new URL(await this.launchAuth(url, interactive));
+    const q = redirected.searchParams;
+    if (q.get("state") !== state) throw new Error("Microsoft sign-in returned an unexpected answer.");
+    if (!q.get("code")) throw new Error(`Microsoft sign-in did not finish: ${q.get("error_description")?.split("\n")[0] || q.get("error") || "no code"}`);
+    const auth = await this.#token({ grant_type: "authorization_code", code: q.get("code"), code_verifier: verifier, redirect_uri: this.redirectUri });
     const me = await this.#graphFetch(auth.accessToken, "GET", "/me?$select=userPrincipalName,mail,displayName");
     auth.account = me.userPrincipalName || me.mail || me.displayName || "";
     await this.saveAuth(auth);
@@ -164,7 +174,8 @@ export class OutlookGraph {
     try {
       fresh = await this.#token({ grant_type: "refresh_token", refresh_token: auth.refreshToken });
     } catch (err) {
-      if (this.silentSignIn && (await this.silentSignIn().catch(() => false))) return (await this.loadAuth()).accessToken;
+      // Refresh tokens from a browser sign-in last about a day; a silent sign-in renews it.
+      if (await this.signIn({ interactive: false }).then(() => true, () => false)) return (await this.loadAuth()).accessToken;
       await this.signOut();
       throw new Error(`Outlook sign-in expired; ask the user to sign in again in the Connections panel. (${err.message})`);
     }
