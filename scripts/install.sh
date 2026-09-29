@@ -1,14 +1,14 @@
 #!/bin/sh
-# Installs the `browser-agent` command and a "Browser Agent" app in ~/Applications.
+# Installs the `browser-agent` command and a "Browsby" app in ~/Applications.
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NODE="$(command -v node)"
-APP="$HOME/Applications/Browser Agent.app"
+APP="$HOME/Applications/Browsby.app"
 
 [ -n "$NODE" ] || { echo "node not found on PATH. Install Node.js 22 or newer from https://nodejs.org"; exit 1; }
 "$NODE" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' ||
-  { echo "Browser Agent needs Node.js 22 or newer; this is $("$NODE" --version). Update it from https://nodejs.org"; exit 1; }
+  { echo "Browsby needs Node.js 22 or newer; this is $("$NODE" --version). Update it from https://nodejs.org"; exit 1; }
 
 # Terminal command. npm link can fail where the global npm folder belongs to root (Node
 # from the nodejs.org installer); the app below does not need it.
@@ -21,6 +21,8 @@ fi
 
 # App bundle. Apps launched from Finder don't get the shell PATH, so node is pinned here;
 # rerun this script after moving the project or changing Node installs.
+# The app was called "Browser Agent" before the rename; remove it so upgrades leave one app.
+rm -rf "$HOME/Applications/Browser Agent.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cat > "$APP/Contents/MacOS/browser-agent" <<SCRIPT
 #!/bin/sh
@@ -33,8 +35,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Browser Agent</string>
-  <key>CFBundleDisplayName</key><string>Browser Agent</string>
+  <key>CFBundleName</key><string>Browsby</string>
+  <key>CFBundleDisplayName</key><string>Browsby</string>
   <key>CFBundleIdentifier</key><string>local.browser-agent</string>
   <key>CFBundleExecutable</key><string>browser-agent</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
