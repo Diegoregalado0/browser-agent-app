@@ -104,7 +104,7 @@ export class Agent {
     this.env = env;
     this.emit = emit;
     this.askPermission = askPermission;
-    // MCP servers' tools (McpServers, local edition), connected by the host.
+    // Tool servers with mcp__ names (Outlook in the extension), connected by the host.
     this.mcp = null;
     // Called whenever the history changes, so the conversation can be saved.
     this.onHistory = onHistory;

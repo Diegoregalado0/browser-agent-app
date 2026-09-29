@@ -7,7 +7,7 @@ import { today } from "./limits.js";
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
 
 // What a remote client (a chat bridge such as Discord) may send: start a task, stop it, and
-// answer a permission prompt. Settings, MCP servers, keys and data change only at the Mac.
+// answer a permission prompt. Settings, keys and data change only at the computer.
 const REMOTE_MESSAGES = new Set(["run", "stop", "permission"]);
 // Prompts only the person at the Mac can approve.
 const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
@@ -129,39 +129,8 @@ export function createController(host) {
         broadcast(permissionRequest());
       }),
   });
-  // MCP servers locally; the extension's Outlook tools have the same interface.
-  agent.mcp = host.mcp?.servers ?? host.outlook ?? null;
-
-  // MCP servers: the saved list is the source of truth; the running servers follow it.
-  const mcpStatus = () => ({ type: "mcp_status", servers: host.mcp.servers.status() });
-  async function saveMcpServers(update) {
-    const config = await host.loadConfig();
-    config.mcpServers = update(config.mcpServers ?? []);
-    await host.saveConfig(config);
-    broadcastConfig(config);
-    await host.mcp.servers.sync(config.mcpServers);
-  }
-  // Calls one of a server's own tools that the model does not get (sign-in).
-  async function mcpAccount(id, tool) {
-    try {
-      const blocks = await host.mcp.servers.call(tool, {}, { raw: true, serverId: id });
-      return blocks.map((b) => b.text ?? "").join("\n");
-    } catch (err) {
-      return err.message;
-    }
-  }
-
-  // Microsoft sign-in in the browser, for the Outlook preset; restarts the server so it
-  // loads the new session.
-  async function mcpBrowserSignIn(id) {
-    const server = (await host.loadConfig()).mcpServers?.find((s) => s.id === id && s.preset === "microsoft365");
-    if (!server) return "Outlook is not set up.";
-    const text = await host.mcp.servers.signInWithBrowser(server);
-    try {
-      if (JSON.parse(text).success) await host.mcp.servers.restart(server);
-    } catch {}
-    return text;
-  }
+  // Outlook's tools (outlook-graph.js), under mcp__ names.
+  agent.mcp = host.outlook ?? null;
 
   const permissionRequest = () => ({
     type: "permission_request",
@@ -204,7 +173,6 @@ export function createController(host) {
         reply({ type: "config", config: clientConfig(await host.loadConfig()) });
         reply({ type: "status", running: agent.running });
         if (pendingPermission) reply(permissionRequest());
-        if (host.mcp) reply(mcpStatus());
         if (host.outlook) reply(await host.outlook.status());
         if (agent.messages.length) {
           reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
@@ -226,9 +194,6 @@ export function createController(host) {
       case "stop":
         agent.stop();
         resolvePermission("deny");
-        return;
-      case "mcp_status":
-        if (host.mcp) reply(mcpStatus());
         return;
       case "outlook_status":
         if (host.outlook) reply(await host.outlook.status());
@@ -278,54 +243,7 @@ export function createController(host) {
           await host.ensureBrowser(agent);
           return `connected; current tab ${(await agent.browser.currentPage()).url.slice(0, 80)}`;
         });
-        for (const s of host.mcp?.servers.status() ?? []) {
-          results.push({ name: `MCP: ${s.name}`, ok: s.status === "connected", text: s.status === "connected" ? `${s.tools.length} tools` : s.error || s.status });
-        }
         reply({ type: "self_test", results });
-        return;
-      }
-      case "mcp_add_preset": {
-        const preset = host.mcp?.presets[msg.preset];
-        if (!preset) return;
-        await saveMcpServers((list) => (list.some((s) => s.id === msg.preset) ? list : [...list, { id: msg.preset, ...structuredClone(preset), enabled: true, preset: msg.preset }]));
-        return;
-      }
-      case "mcp_save": {
-        if (!host.mcp) return;
-        const input = msg.server ?? {};
-        const name = String(input.name ?? "").trim();
-        const command = String(input.command ?? "").trim();
-        if (!name || !command) return reply({ type: "error", text: "An MCP server needs a name and a command." });
-        const args = Array.isArray(input.args) ? input.args.map(String) : String(input.args ?? "").split(/\s+/).filter(Boolean);
-        await saveMcpServers((list) => {
-          const id = input.id || `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now().toString(36)}`;
-          const old = list.find((s) => s.id === id);
-          // An empty value keeps the saved one, so masked values are not overwritten.
-          const env = {};
-          for (const [k, v] of Object.entries(input.env ?? {})) {
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
-            env[k] = v === "" && old?.env?.[k] !== undefined ? old.env[k] : String(v);
-          }
-          const server = { ...old, id, name, command, args, env, enabled: input.enabled !== false };
-          return old ? list.map((s) => (s.id === id ? server : s)) : [...list, server];
-        });
-        return;
-      }
-      case "mcp_remove":
-        if (host.mcp) await saveMcpServers((list) => list.filter((s) => s.id !== msg.id));
-        return;
-      case "mcp_toggle":
-        if (host.mcp) await saveMcpServers((list) => list.map((s) => (s.id === msg.id ? { ...s, enabled: Boolean(msg.enabled) } : s)));
-        return;
-      case "mcp_restart": {
-        const server = (await host.loadConfig()).mcpServers?.find((s) => s.id === msg.id);
-        if (host.mcp && server) await host.mcp.servers.restart(server);
-        return;
-      }
-      case "mcp_account": {
-        if (!host.mcp || !["login", "verify-login", "logout", "browser-login"].includes(msg.action)) return;
-        const text = msg.action === "browser-login" ? await mcpBrowserSignIn(msg.id) : await mcpAccount(msg.id, msg.action);
-        reply({ type: "mcp_account", id: msg.id, action: msg.action, text });
         return;
       }
       case "reset":
@@ -426,10 +344,9 @@ export function createController(host) {
       }
       case "save_config": {
         const config = await host.loadConfig();
-        // Ghost mode changes only through set_ghost, which also starts a new conversation, MCP
-        // servers only through the mcp_* messages, which keep their hidden values, and the
-        // Discord bot only through the discord_* messages.
-        const { keys, models, ghostMode: _ghost, mcpServers: _mcp, discord: _discord, ...rest } = msg.patch || {};
+        // Ghost mode changes only through set_ghost, which also starts a new conversation,
+        // and the Discord bot only through the discord_* messages.
+        const { keys, models, ghostMode: _ghost, discord: _discord, ...rest } = msg.patch || {};
         Object.assign(config, rest);
         if (models) Object.assign(config.models, models);
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
@@ -481,8 +398,6 @@ export function createController(host) {
     ensureBrowser: () => host.ensureBrowser(agent),
     // Re-reads settings that changed outside this controller and updates every UI.
     refreshConfig: async () => broadcastConfig(await host.loadConfig()),
-    // Tells every UI that an MCP server's status or tools changed.
-    mcpChanged: () => host.mcp && broadcast(mcpStatus()),
     // Tells every UI that Outlook was signed in or out elsewhere.
     outlookChanged: async () => host.outlook && broadcast(await host.outlook.status()),
     // Tells every UI that the Discord bridge's status changed.

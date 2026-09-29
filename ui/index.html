@@ -114,7 +114,7 @@
             <div class="setting">
               <div class="setting-text">
                 <span class="setting-title">Setup</span>
-                <p class="setting-desc">Walks through choosing a model provider and API key<span data-local-only>, and connecting Outlook</span>, as on first launch.</p>
+                <p class="setting-desc">Walks through choosing a model provider and API key, as on first launch.</p>
               </div>
               <button id="run-setup" type="button">Run setup</button>
             </div>
@@ -447,7 +447,7 @@
             <div class="setting">
               <div class="setting-text">
                 <label class="setting-title" for="debugMode">Debug mode</label>
-                <p class="setting-desc">Shows tokens and timing for every model request in the chat, and each MCP server's tools and log in Settings > MCP.</p>
+                <p class="setting-desc">Shows tokens and timing for every model request in the chat.</p>
               </div>
               <input id="debugMode" type="checkbox" role="switch" class="switch" data-setting="debugMode" />
             </div>
@@ -458,7 +458,7 @@
             <div class="setting stack">
               <div class="setting-text">
                 <span class="setting-title">Run checks</span>
-                <p class="setting-desc">Tests the model provider, the agent browser, and every MCP server.</p>
+                <p class="setting-desc">Tests the model provider and the agent browser.</p>
               </div>
               <div class="row"><button type="button" id="run-checks">Run checks</button></div>
               <ul class="check-list" id="check-results"></ul>
@@ -466,7 +466,7 @@
             <div class="setting">
               <div class="setting-text">
                 <span class="setting-title">Diagnostics</span>
-                <p class="setting-desc">Copies versions, settings (without keys), MCP status, and recent debug lines, for a bug report.</p>
+                <p class="setting-desc">Copies versions, settings (without keys), and recent debug lines, for a bug report.</p>
               </div>
               <button type="button" id="copy-diagnostics">Copy</button>
             </div>
@@ -487,23 +487,6 @@
       <h3 class="group-label">Integrations</h3>
       <div class="setting-group" id="mcp-integrations"></div>
 
-      <h3 class="group-label" data-local-only>Your servers</h3>
-      <div class="setting-group" id="mcp-list" data-local-only></div>
-
-      <details class="mcp-add" data-local-only>
-        <summary>Add a custom server</summary>
-        <form class="setting-group" id="mcp-add">
-          <div class="setting stack">
-            <p class="field-note">Custom servers run on this Mac with your permissions; add only servers you trust.</p>
-            <div class="card-field"><label class="card-label" for="mcp-name">Name</label><input id="mcp-name" placeholder="Canvas" autocomplete="off" /></div>
-            <div class="card-field"><label class="card-label" for="mcp-command">Command</label><input id="mcp-command" placeholder="npx" autocomplete="off" spellcheck="false" /></div>
-            <div class="card-field"><label class="card-label" for="mcp-args">Arguments</label><input id="mcp-args" placeholder="-y some-mcp-server@1.0.0" autocomplete="off" spellcheck="false" /></div>
-            <div class="card-field"><label class="card-label" for="mcp-env">Environment (one NAME=value per line)</label><textarea id="mcp-env" rows="3" spellcheck="false" placeholder="CANVAS_API_URL=https://catcourses.ucmerced.edu/api/v1&#10;CANVAS_API_TOKEN=..."></textarea></div>
-            <p class="field-note">Values stay on this Mac and are never shown again or sent to the AI. For CatCourses, a Canvas server needs an access token from CatCourses > Account > Settings > New Access Token, if UC Merced allows students to create one.</p>
-            <div class="row"><button type="submit" class="primary">Add server</button></div>
-          </div>
-        </form>
-      </details>
     </div>
   </aside>
 

@@ -343,17 +343,10 @@ input.switch:checked::after { transform: translateX(16px); }
 .onboarding .empty-sub { margin-bottom: 16px; }
 .onboarding button { padding: 8px 16px; font-size: 14px; }
 
-/* MCP page. */
+/* Pairing codes (Discord). */
 .device-code { display: flex; flex-direction: column; gap: 6px; }
 .code-row { display: flex; gap: 8px; align-items: center; }
 .code-row code { font-size: 18px; letter-spacing: 2px; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 6px; }
-.mcp-server { display: flex; flex-direction: column; gap: 6px; }
-.mcp-head { display: flex; align-items: center; gap: 8px; }
-.mcp-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.badge-status { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-.badge-status.connected { color: var(--ok); border-color: var(--ok); }
-.badge-status.error { color: var(--error); border-color: var(--error); }
-.mcp-detail pre { margin: 4px 0 0; max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; }
 .check-list { margin: 0; padding-left: 18px; font-size: 13px; }
 .check-list .ok { color: var(--ok); }
 .check-list .fail { color: var(--error); }
@@ -371,7 +364,7 @@ button.link:hover { color: var(--fg); text-decoration: underline; }
 .wizard-step { margin: 0; font-size: 12px; color: var(--muted); }
 .wizard-actions { margin-top: 6px; }
 
-/* MCP connections panel. */
+/* Connections panel. */
 .mcp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 32px; max-width: 660px; width: 100%; margin: 0 auto; }
 .integration { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .integration .setting-text { flex: 1; min-width: 160px; }
@@ -381,14 +374,9 @@ button.link:hover { color: var(--fg); text-decoration: underline; }
 .logo-line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
 .logo-tile { fill: var(--accent); }
 .logo-o { fill: none; stroke: var(--accent-fg); stroke-width: 2; }
-.integration .mcp-detail { flex-basis: 100%; }
-.mcp-add { margin-top: 20px; }
-.mcp-add summary { cursor: pointer; font-size: 13px; font-weight: 600; margin: 0 2px 8px; color: var(--fg); }
 .connect-head { display: flex; align-items: center; gap: 10px; }
 .connect-list, .connect-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .connect-steps li { display: list-item; }
-.connect-steps .code-row { margin-top: 6px; }
-.big-code { font-size: 22px; letter-spacing: 3px; padding: 6px 12px; border: 1px dashed var(--border); border-radius: 8px; user-select: all; }
 a.button-link { display: inline-block; margin-top: 4px; padding: 5px 12px; border-radius: 6px; background: var(--accent); color: var(--accent-fg); text-decoration: none; font-size: 13px; }
 a.button-link:hover { filter: brightness(1.08); }
 .progress { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; position: relative; }

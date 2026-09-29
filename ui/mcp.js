@@ -1,9 +1,5 @@
-// Connections panel: integrations, connected through a short guided flow, and (local
-// edition) custom MCP servers. config.mcpServers is the saved list; `status` is what the
-// running servers report (mcp_status). In the extension, Outlook runs on Microsoft Graph
-// with a browser sign-in instead of an MCP server (outlook_status).
-
-const OUTLOOK_ID = "microsoft365";
+// Connections panel: integrations, connected through a short guided flow. Outlook runs on
+// Microsoft Graph with a browser sign-in (outlook_status).
 
 // Outlook's mark drawn in the app's own style: an "O" tile over a mail envelope, in the
 // accent color, so it follows the light and dark themes. Microsoft's official Outlook
@@ -19,89 +15,20 @@ export const OUTLOOK_LOGO = `<svg class="logo" viewBox="0 0 40 40" aria-hidden="
 <ellipse cx="14" cy="20" rx="3.4" ry="4.4" class="logo-o"/>
 </svg>`;
 
-// The sign-in link and code in the Outlook server's device-code message.
-function parseDeviceCode(text) {
-  const url = /https:\/\/[^\s"',]+/.exec(text)?.[0];
-  const code = /\bcode\s+([A-Z0-9-]{6,})/i.exec(text)?.[1];
-  return url && code ? { url, code } : null;
-}
-
-// The Outlook server's sign-in check: { signedIn, account, message }.
-function parseVerify(text) {
-  try {
-    const data = JSON.parse(text);
-    const user = data.userData ?? {};
-    return { signedIn: data.success === true, account: user.userPrincipalName || user.mail || user.displayName || "", message: data.message ?? "" };
-  } catch {
-    return { signedIn: false, account: "", message: text };
-  }
-}
-
 export function createMcpPanel({ $, el, send, toast }) {
   const panel = $("mcp-panel");
   const flow = $("connect-flow");
-  let config = null;
-  let status = [];
-  // Outlook's last sign-in check: null until checked, then { signedIn, account }.
+  // Outlook's sign-in: null until outlook_status arrives, then { signedIn, account }.
   let outlook = null;
-  let checking = false;
   // The connect flow's current step, or null when it is closed.
   let step = null;
   // Called with whether Outlook is signed in when the flow closes (first-run setup).
   let onFlowClosed = null;
-  // Extension edition: the last outlook_status ({ configured, signedIn, account }).
+  // The last outlook_status ({ configured, signedIn, account }).
   let graph = null;
-  const extension = () => config?.edition === "extension";
-  const signedIn = () => (extension() ? Boolean(graph?.signedIn) : outlookState() === "connected" && Boolean(outlook?.signedIn));
-
-  const outlookServer = () => config?.mcpServers?.find((s) => s.id === OUTLOOK_ID);
-  const statusOf = (id) => status.find((s) => s.id === id);
-  function outlookState() {
-    const server = outlookServer();
-    if (!server) return "absent";
-    if (!server.enabled) return "off";
-    return statusOf(OUTLOOK_ID)?.status ?? "starting";
-  }
-  const account = (action) => send({ type: "mcp_account", id: OUTLOOK_ID, action });
-  function checkSignIn() {
-    checking = true;
-    account("verify-login");
-  }
+  const signedIn = () => Boolean(graph?.signedIn);
 
   // Integrations list.
-
-  function renderIntegrations() {
-    if (extension()) return renderGraphCard();
-    const state = outlookState();
-    const card = el("div", "setting integration");
-    const logo = el("span", "integration-logo");
-    logo.innerHTML = OUTLOOK_LOGO;
-    const text = el("div", "setting-text");
-    const line =
-      state === "absent" ? "Read, search and draft email, and see your calendar."
-      : state === "off" ? "Turned off."
-      : state === "starting" ? "Setting up…"
-      : state === "error" ? `Could not start: ${statusOf(OUTLOOK_ID)?.error ?? "unknown error"}`
-      : state === "stopped" ? "Stopped."
-      : outlook === null ? "Checking sign-in…"
-      : outlook.signedIn ? `Connected${outlook.account ? ` as ${outlook.account}` : ""}`
-      : "Sign-in needed.";
-    text.append(el("span", "setting-title", "Microsoft Outlook"), el("p", "setting-desc", line));
-    const connected = state === "connected" && outlook?.signedIn;
-    const action = el("button", connected ? null : "primary", connected ? "Manage" : state === "connected" ? "Sign in" : state === "off" ? "Turn on" : state === "error" || state === "stopped" ? "Try again" : "Connect");
-    action.type = "button";
-    action.disabled = state === "starting";
-    action.onclick = startOutlook;
-    card.append(logo, text, action);
-    if (config.debugMode && statusOf(OUTLOOK_ID)) card.append(debugDetail(statusOf(OUTLOOK_ID)));
-    $("mcp-integrations").replaceChildren(card);
-  }
-
-  function debugDetail(s) {
-    const more = el("details", "mcp-detail");
-    more.append(el("summary", null, "Tools and log"), el("pre", null, `Tools: ${s.tools.join(", ") || "none"}\n\n${s.log.join("\n")}`));
-    return more;
-  }
 
   function renderGraphCard() {
     const card = el("div", "setting integration");
@@ -122,66 +49,9 @@ export function createMcpPanel({ $, el, send, toast }) {
     $("mcp-integrations").replaceChildren(card);
   }
 
-  // Custom servers.
+  // Connect flow for Outlook: intro, sign-in, done; and manage once connected.
 
-  function renderServers() {
-    const list = $("mcp-list");
-    list.replaceChildren();
-    const servers = (config.mcpServers ?? []).filter((s) => s.id !== OUTLOOK_ID);
-    if (!servers.length) {
-      list.append(el("p", "setting-empty", "No custom servers."));
-      return;
-    }
-    for (const server of servers) {
-      const s = server.enabled ? statusOf(server.id) : null;
-      const state = server.enabled ? s?.status ?? "starting" : "off";
-      const row = el("div", "setting stack mcp-server");
-      const head = el("div", "mcp-head");
-      head.append(el("span", "mcp-name", server.name), el("span", `badge-status ${state}`, state));
-      const toggle = Object.assign(el("input"), { type: "checkbox", role: "switch", className: "switch", checked: server.enabled });
-      toggle.setAttribute("aria-label", `Use ${server.name}`);
-      toggle.onchange = () => send({ type: "mcp_toggle", id: server.id, enabled: toggle.checked });
-      head.append(toggle);
-      const detail =
-        state === "connected" ? `${s.tools.length} tool${s.tools.length === 1 ? "" : "s"} available to the agent.`
-        : state === "error" ? s.error
-        : `${server.command} ${(server.args ?? []).join(" ")}`;
-      row.append(head, el("p", "setting-desc", detail));
-      if (server.envKeys?.length) row.append(el("p", "field-note", `Environment: ${server.envKeys.join(", ")} (values hidden)`));
-      const actions = el("div", "row");
-      const restart = el("button", null, "Restart");
-      restart.type = "button";
-      restart.disabled = !server.enabled;
-      restart.onclick = () => send({ type: "mcp_restart", id: server.id });
-      const remove = el("button", "link-danger", "Remove");
-      remove.type = "button";
-      remove.onclick = () => {
-        if (remove.dataset.confirm) return send({ type: "mcp_remove", id: server.id });
-        remove.dataset.confirm = "1";
-        remove.textContent = `Remove ${server.name}?`;
-      };
-      actions.append(restart, remove);
-      row.append(actions);
-      if (config.debugMode && s) row.append(debugDetail(s));
-      list.append(row);
-    }
-  }
-
-  $("mcp-add").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const env = {};
-    for (const line of $("mcp-env").value.split("\n")) {
-      const at = line.indexOf("=");
-      if (at > 0) env[line.slice(0, at).trim()] = line.slice(at + 1).trim();
-    }
-    send({ type: "mcp_save", server: { name: $("mcp-name").value, command: $("mcp-command").value, args: $("mcp-args").value, env } });
-    for (const id of ["mcp-name", "mcp-command", "mcp-args", "mcp-env"]) $(id).value = "";
-    toast("Server added");
-  });
-
-  // Connect flow for Outlook: intro, setup, sign-in code, done; and manage once connected.
-
-  const steps = () => (extension() ? ["intro", "signin", "done"] : ["intro", "setup", "signin", "done"]);
+  const steps = () => ["intro", "signin", "done"];
 
   function showStep(name, { title, body, primary, secondary, cancel = "Cancel" }) {
     step = name;
@@ -220,16 +90,12 @@ export function createMcpPanel({ $, el, send, toast }) {
 
   // The flow step that fits Outlook's current state.
   function startOutlook() {
-    if (extension()) return graph?.configured && openFlow(graph.signedIn ? "manage" : "intro");
-    const state = outlookState();
-    openFlow(state === "connected" && outlook?.signedIn ? "manage" : state === "connected" ? "signin" : state === "absent" ? "intro" : "setup");
+    if (graph?.configured) openFlow(graph.signedIn ? "manage" : "intro");
   }
 
   function openFlow(name) {
     $("connect-logo").innerHTML = OUTLOOK_LOGO;
     if (name === "intro") return introStep();
-    if (name === "setup") return setupStep();
-    if (name === "signin") return browserStep();
     if (name === "manage") return manageStep();
   }
 
@@ -239,56 +105,17 @@ export function createMcpPanel({ $, el, send, toast }) {
     showStep("intro", {
       title: "Connect Microsoft Outlook",
       body: [
-        el("p", null, "Let the agent work with your Outlook mail and calendar."),
+        el("p", null, "Find emails, draft replies and check your calendar. Browsby asks before sending anything."),
         list,
-        el("p", "field-note", "It asks you before sending, deleting or changing anything. You sign in on Microsoft's own page, and you can disconnect here at any time."),
+        el("p", "field-note", "You sign in on Microsoft's own page, and you can disconnect here at any time."),
       ],
-      primary: { label: "Continue", onClick: () => (extension() ? graphSignInStep() : setupStep()) },
+      primary: { label: "Continue", onClick: () => graphSignInStep() },
     });
   }
 
-  function setupStep(problem = "") {
-    const state = outlookState();
-    if (!problem) {
-      if (state === "absent") send({ type: "mcp_add_preset", preset: OUTLOOK_ID });
-      else if (state === "off") send({ type: "mcp_toggle", id: OUTLOOK_ID, enabled: true });
-      else if (state === "error" || state === "stopped") send({ type: "mcp_restart", id: OUTLOOK_ID });
-      else if (state === "connected") checkSignIn();
-    }
-    showStep("setup", {
-      title: "Setting up",
-      body: problem
-        ? [el("p", "field-note error", problem)]
-        : [el("p", null, "Starting the Outlook connection. The first time downloads it, which can take about a minute."), el("div", "progress")],
-      primary: problem ? { label: "Try again", onClick: () => setupStep() } : { label: "Continue", disabled: true },
-    });
-  }
-
-  // One-step sign-in: Microsoft's page opens in the default browser, where the user is
-  // often signed in already. A device code is the fallback.
-  function browserStep(note = "") {
-    const body = [el("p", null, "Microsoft's sign-in page opens in your web browser. Sign in with your Microsoft account (work, school or personal) and accept.")];
-    if (note) body.push(el("p", "field-note error", note));
-    showStep("signin", {
-      title: "Sign in to Microsoft",
-      body,
-      primary: { label: "Sign in", onClick: startBrowserSignIn },
-      secondary: { label: "Use a code", onClick: requestCode },
-    });
-  }
-
-  function startBrowserSignIn() {
-    showStep("browser", {
-      title: "Sign in to Microsoft",
-      body: [el("p", null, "Finish signing in on the Microsoft page in your browser. This updates when you are done."), el("div", "progress")],
-      secondary: { label: "Use a code", onClick: requestCode },
-    });
-    account("browser-login");
-  }
-
-  // Extension edition: Microsoft's page opens in a Chrome window (chrome.identity).
+  // Microsoft's page opens in a Chrome window (chrome.identity).
   function graphSignInStep(note = "") {
-    const body = [el("p", null, "Microsoft's sign-in page opens in a new window. Sign in with your work, school or personal Microsoft account and accept.")];
+    const body = [el("p", null, "Microsoft's sign-in page opens in a new window. Sign in with your Microsoft account and accept.")];
     if (note) body.push(el("p", "field-note error", note));
     showStep("signin", {
       title: "Sign in to Microsoft",
@@ -306,47 +133,6 @@ export function createMcpPanel({ $, el, send, toast }) {
     });
   }
 
-  function requestCode() {
-    showStep("signin", {
-      title: "Sign in to Microsoft",
-      body: [el("p", null, "Getting a sign-in code…"), el("div", "progress")],
-      primary: { label: "I've signed in", disabled: true },
-    });
-    account("login");
-  }
-
-  function signinStep(device, note = "") {
-    const steps = el("ol", "connect-steps");
-    const open = Object.assign(el("a", "button-link", "Open Microsoft sign-in"), { href: device.url, target: "_blank", rel: "noopener noreferrer" });
-    const first = el("li");
-    first.append(el("span", null, "Open Microsoft's sign-in page: "), open);
-    const second = el("li");
-    const code = el("code", "big-code", device.code);
-    const copy = el("button", null, "Copy");
-    copy.type = "button";
-    copy.onclick = () => navigator.clipboard?.writeText(device.code).then(() => toast("Code copied"));
-    const codeRow = el("div", "code-row");
-    codeRow.append(code, copy);
-    second.append(el("span", null, "Enter this code:"), codeRow);
-    steps.append(first, second, el("li", null, "Sign in with your Microsoft account (work, school or personal) and accept."));
-    const body = [steps];
-    if (note) body.push(el("p", "field-note error", note));
-    showStep("signin", {
-      title: "Sign in to Microsoft",
-      body,
-      primary: {
-        label: "I've signed in",
-        onClick: () => {
-          $("connect-primary").disabled = true;
-          $("connect-primary").textContent = "Checking…";
-          checkSignIn();
-        },
-      },
-      secondary: { label: "New code", onClick: requestCode },
-    });
-    signinStep.device = device;
-  }
-
   function doneStep() {
     const tips = el("ul", "connect-list");
     for (const tip of ["What's on my calendar tomorrow?", "Summarize my unread email from today.", "Draft a reply to the last email from my professor."]) tips.append(el("li", null, tip));
@@ -359,45 +145,26 @@ export function createMcpPanel({ $, el, send, toast }) {
   }
 
   function manageStep() {
-    const remove = el("button", "link-danger", "Remove connection");
-    remove.type = "button";
-    remove.onclick = () => {
-      if (!remove.dataset.confirm) {
-        remove.dataset.confirm = "1";
-        remove.textContent = "Remove Outlook from the agent?";
-        return;
-      }
-      send({ type: "mcp_remove", id: OUTLOOK_ID });
-      outlook = null;
-      closeFlow();
-      toast("Outlook removed");
-    };
     showStep("manage", {
       title: "Microsoft Outlook",
       body: [
         el("p", null, `Connected${outlook?.account ? ` as ${outlook.account}` : ""}.`),
         el("p", "field-note", "Signing out ends the agent's access to your mail and calendar until you sign in again."),
-        ...(extension() ? [] : [remove]),
       ],
       primary: { label: "Close", onClick: closeFlow },
-      secondary: { label: "Sign out", onClick: () => send(extension() ? { type: "outlook_sign_out" } : { type: "mcp_account", id: OUTLOOK_ID, action: "logout" }) },
+      secondary: { label: "Sign out", onClick: () => send({ type: "outlook_sign_out" }) },
       cancel: "",
     });
   }
 
-  function render(next) {
-    config = next;
-    renderIntegrations();
-    if (extension()) return;
-    renderServers();
+  function render() {
+    renderGraphCard();
   }
 
   return {
     open() {
       panel.hidden = false;
-      if (extension()) return send({ type: "outlook_status" });
-      send({ type: "mcp_status" });
-      if (outlookState() === "connected" && !checking) checkSignIn();
+      send({ type: "outlook_status" });
     },
     close() {
       closeFlow();
@@ -406,13 +173,13 @@ export function createMcpPanel({ $, el, send, toast }) {
     get isOpen() {
       return !panel.hidden;
     },
-    get status() {
-      return status;
+    // Whether Outlook can be connected in this build (its app registration is set).
+    get outlookAvailable() {
+      return Boolean(graph?.configured);
     },
-    // Outlook's sign-in, or null when it is not running or not checked yet.
+    // Outlook's sign-in, or null when not signed in or not checked yet.
     get outlook() {
-      if (extension()) return graph?.signedIn ? outlook : null;
-      return outlookState() === "connected" ? outlook : null;
+      return graph?.signedIn ? outlook : null;
     },
     // Runs the Outlook connect flow on its own, over whatever is on screen; onClosed(signedIn)
     // runs when the user finishes or leaves it.
@@ -425,55 +192,10 @@ export function createMcpPanel({ $, el, send, toast }) {
       outlook_status(msg) {
         graph = msg;
         outlook = { signedIn: msg.signedIn, account: msg.account };
-        if (config) render(config);
+        render();
         if (step === "browser") msg.signedIn ? doneStep() : graphSignInStep(msg.error || "Sign-in did not finish.");
         else if (step === "manage" && !msg.signedIn) {
           closeFlow();
-          toast("Signed out of Outlook");
-        }
-      },
-      mcp_status(msg) {
-        status = msg.servers;
-        const state = outlookState();
-        if (state !== "connected") outlook = null;
-        else if (outlook === null && !checking) checkSignIn();
-        if (step === "setup") {
-          if (state === "error") setupStep(`The Outlook connection could not start: ${statusOf(OUTLOOK_ID)?.error ?? "unknown error"}`);
-        }
-        if (config) render(config);
-      },
-      mcp_account(msg) {
-        if (msg.id !== OUTLOOK_ID) return;
-        if (msg.action === "verify-login") {
-          checking = false;
-          outlook = parseVerify(msg.text);
-          if (config) render(config);
-          if (step === "setup") outlook.signedIn ? doneStep() : browserStep();
-          else if (step === "signin" && signinStep.device) {
-            outlook.signedIn ? doneStep() : signinStep(signinStep.device, "Not signed in yet. Finish on Microsoft's page, then click I've signed in.");
-          }
-          return;
-        }
-        if (msg.action === "browser-login") {
-          if (step !== "browser") return;
-          const result = parseVerify(msg.text);
-          if (!result.signedIn) return browserStep(result.message || "Sign-in did not finish.");
-          outlook = result;
-          if (config) render(config);
-          doneStep();
-          return;
-        }
-        if (msg.action === "login" && step === "signin") {
-          const device = parseDeviceCode(msg.text);
-          if (device) signinStep(device);
-          else if (/already|signed in|logged in/i.test(msg.text)) checkSignIn();
-          else showStep("signin", { title: "Sign in to Microsoft", body: [el("p", "field-note error", msg.text)], primary: { label: "Try again", onClick: requestCode } });
-          return;
-        }
-        if (msg.action === "logout") {
-          outlook = { signedIn: false, account: "" };
-          if (config) render(config);
-          if (step === "manage") closeFlow();
           toast("Signed out of Outlook");
         }
       },

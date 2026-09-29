@@ -1,7 +1,7 @@
 import { OUTLOOK_LOGO } from "./mcp.js";
 
 // First-run setup, full screen over the app: welcome, provider, its key (or a local server
-// check), then Outlook in the local edition. It opens once while config.setupDone is false,
+// check), then Outlook when this build can connect it. It opens once while config.setupDone is false,
 // and again from Settings > General. The first run cannot be skipped until a provider
 // works; setupDone is saved only after that (and after the Outlook screen is answered).
 
@@ -163,7 +163,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     }
     show("outlook", {
       title: "Connect your Outlook",
-      lead: "With Outlook connected, the agent can find emails, draft replies and check your calendar as part of a task. It asks you before sending anything.",
+      lead: "Find emails, draft replies and check your calendar. Browsby asks before sending anything.",
       parts: ["wizard-outlook-logo"],
       next: ["Connect Outlook", () => mcp.connectOutlook(outlookScreen)],
       skip: ["Skip for now", () => finish()],
@@ -241,7 +241,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
         const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) };
         // The saved config arrives after this; finish() reads the chosen provider from it.
         config = { ...config, provider: msg.provider };
-        if (config.edition !== "local") return finish(patch);
+        if (!mcp.outlookAvailable) return finish(patch);
         send({ type: "save_config", patch });
         outlookScreen();
       },

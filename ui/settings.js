@@ -6,9 +6,8 @@ const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Goog
 const KEYED_PROVIDERS = ["anthropic", "openai", "gemini", "mistral"];
 const WIDE = window.matchMedia("(min-width: 640px)");
 
-// getDebugLines() and getMcpStatus(): the chat's recent debug lines and what the MCP
-// servers report, for Copy diagnostics.
-export function createSettings({ $, el, icon, send, getDebugLines = () => [], getMcpStatus = () => [] }) {
+// getDebugLines(): the chat's recent debug lines, for Copy diagnostics.
+export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) {
   const sheet = $("settings");
   let config = null;
   let page = "general";
@@ -383,14 +382,12 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
     send({ type: "self_test" });
   };
   $("copy-diagnostics").onclick = () => {
-    const { keyInfo, mcpServers, customInstructions, ...settings } = config ?? {};
+    const { keyInfo, customInstructions, ...settings } = config ?? {};
     const report = {
       time: new Date().toISOString(),
       userAgent: navigator.userAgent,
       settings,
       keys: Object.fromEntries(Object.entries(keyInfo ?? {}).map(([p, k]) => [p, k.source])),
-      mcpServers: (mcpServers ?? []).map(({ id, name, command, args, enabled }) => ({ id, name, command, args, enabled })),
-      mcpStatus: getMcpStatus().map(({ log, ...s }) => ({ ...s, log: log.slice(-20) })),
       debugLines: getDebugLines().slice(-50),
     };
     navigator.clipboard?.writeText(JSON.stringify(report, null, 2)).then(

@@ -61,7 +61,7 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines, getMcpStatus: () => mcpPanel.status });
+const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines });
 const mcpPanel = createMcpPanel({ $, el, send, toast: (text, kind) => settings.toast(text, kind) });
 const wizard = createWizard({
   $,
