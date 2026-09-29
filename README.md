@@ -54,6 +54,7 @@ You can run setup again from Settings > General.
 - The agent works in its own tabs and never takes over a tab you opened. The tab it is working in is marked with an "Agent" tab group.
 - **Show the agent's actions** (Settings > Browser, off by default): a pointer glides to each target before a click, and typing appears one character at a time.
 - **Stop** ends the task at once.
+- **Let the model search the web** (Settings > Models, on by default, Anthropic and OpenAI): the model finds pages with its provider's search, then opens them in the browser. The provider bills each search, about 1 to 1.4 cents.
 
 ### Safety checks
 
