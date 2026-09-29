@@ -1,6 +1,7 @@
 import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
 import { createWizard } from "./wizard.js";
+import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const log = $("log");
@@ -182,41 +183,6 @@ function closeGroup() {
 
 let textNode = null;
 let thinkingBody = null;
-
-// Minimal Markdown for replies: bold, italic, inline code, http(s) links, bullet and
-// numbered lists. Everything is escaped first, so reply text cannot inject HTML.
-function renderMarkdown(src) {
-  const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const inline = (t) =>
-    esc(t)
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
-  const out = [];
-  let list = null;
-  for (const line of src.split("\n")) {
-    const item = /^\s*(?:[-*]|(\d+)\.)\s+(.*)$/.exec(line);
-    if (item) {
-      const tag = item[1] ? "ol" : "ul";
-      if (list !== tag) {
-        if (list) out.push(`</${list}>`);
-        out.push(`<${tag}>`);
-        list = tag;
-      }
-      out.push(`<li>${inline(item[2])}</li>`);
-      continue;
-    }
-    if (list) {
-      out.push(`</${list}>`);
-      list = null;
-    }
-    out.push(line.trim() ? `<p>${inline(line)}</p>` : "");
-  }
-  if (list) out.push(`</${list}>`);
-  return out.join("");
-}
 
 function renderBlocks(container, blocks) {
   for (const b of blocks) {
