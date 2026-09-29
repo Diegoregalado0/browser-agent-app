@@ -59,10 +59,8 @@ async function sha256(text) {
 }
 
 export class Guard {
-  // env: environment variables that may hold API keys (none in the extension edition).
   // onUsage(tokens): tokens each check used, counted toward the usage limits.
-  constructor({ env = {}, onUsage = () => {} } = {}) {
-    this.env = env;
+  constructor({ onUsage = () => {} } = {}) {
     this.onUsage = onUsage;
     this.scanned = new Map();
     this.flags = [];
@@ -76,7 +74,7 @@ export class Guard {
   #resolve(config) {
     const provider = config.provider;
     const model = config.guardModels?.[provider] || DEFAULT_GUARD_MODELS[provider] || config.models[provider];
-    return { impl: providers[provider], provider, model, apiKey: apiKeyFor(config, provider, this.env) };
+    return { impl: providers[provider], provider, model, apiKey: apiKeyFor(config, provider) };
   }
 
   async #classify(config, args, signal) {

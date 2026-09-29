@@ -291,7 +291,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       if (info) {
         status.className = `pc-status ${info.source}`;
         status.textContent =
-          info.source === "saved" ? `Saved · ${info.mask}` : info.source === "env" ? `From ${info.env} · ${info.mask}` : "No key";
+          info.source === "saved" ? `Saved · ${info.mask}` : "No key";
         card.querySelector(".pc-remove").hidden = info.source !== "saved";
       } else status.textContent = "";
       for (const input of card.querySelectorAll("[data-bind]")) {

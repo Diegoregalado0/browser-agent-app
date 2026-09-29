@@ -92,14 +92,12 @@ function toBlocks(output) {
 }
 
 export class Agent {
-  // env: environment variables that may hold API keys (none in the extension edition).
   // ledger: today's token usage across tasks, { used(), add(tokens) }, for the daily limit.
-  constructor({ emit, askPermission, onHistory = () => {}, env = {}, ledger = null }) {
+  constructor({ emit, askPermission, onHistory = () => {}, ledger = null }) {
     this.ledger = ledger;
     this.limiter = new RateLimiter();
     // Connected by the host before the first task.
     this.browser = null;
-    this.env = env;
     this.emit = emit;
     this.askPermission = askPermission;
     // Tool servers with mcp__ names (Outlook in the extension), connected by the host.
@@ -109,7 +107,7 @@ export class Agent {
     this.messages = [];
     this.sessionOrigins = new Set();
     // Safety checks bill the same account, so their tokens count toward the limits too.
-    this.guard = new Guard({ env, onUsage: (tokens) => this.#countTokens(tokens) });
+    this.guard = new Guard({ onUsage: (tokens) => this.#countTokens(tokens) });
     this.taskTokens = 0;
     this.abortController = null;
     this.usage = { input: 0, cachedInput: 0, output: 0 };
@@ -186,7 +184,7 @@ export class Agent {
     if (!provider) throw new Error(`Unknown provider ${config.provider}`);
     const model = config.models[config.provider];
     if (!model) throw new Error(`Pick a ${config.provider} model in Settings.`);
-    const apiKey = apiKeyFor(config, config.provider, this.env);
+    const apiKey = apiKeyFor(config, config.provider);
     if (config.provider !== "ollama" && !apiKey) throw new Error(`Add a ${config.provider} API key in Settings.`);
     const limits = config.limits;
     if (limits.dailyTokens && this.ledger && (await this.ledger.used()) >= limits.dailyTokens) {

@@ -51,8 +51,6 @@ export const DEFAULTS = {
   discord: { token: "", userId: "", userName: "", pairCode: "" },
 };
 
-const ENV_KEYS = { anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", gemini: "GEMINI_API_KEY", mistral: "MISTRAL_API_KEY" };
-
 // Settings back to their defaults. API keys, the Discord bot, Ghost mode and finished
 // setup are kept: keys and the bot are connections rather than preferences, and Ghost
 // mode belongs to the conversation.
@@ -67,10 +65,8 @@ export function resetConfig(config, overrides = {}) {
   };
 }
 
-// Stored key wins; the provider's standard environment variable is the fallback. The
-// extension edition has no environment and passes none.
-export function apiKeyFor(config, provider, env = {}) {
-  return config.keys[provider] || env[ENV_KEYS[provider]] || "";
+export function apiKeyFor(config, provider) {
+  return config.keys[provider] || "";
 }
 
 // Enough of a key to recognize it: the first three and last four characters.
@@ -78,13 +74,13 @@ function maskKey(key) {
   return key.length > 12 ? `${key.slice(0, 3)}…${key.slice(-4)}` : "••••";
 }
 
-// The config as the UI sees it: keys are never sent back, only where one comes from
-// and a masked form.
-export function publicConfig(config, envVars = {}) {
+// The config as the UI sees it: keys are never sent back, only whether one is saved and
+// a masked form.
+export function publicConfig(config) {
   const keyInfo = {};
-  for (const [p, env] of Object.entries(ENV_KEYS)) {
-    const key = config.keys[p] || envVars[env] || "";
-    keyInfo[p] = { source: config.keys[p] ? "saved" : key ? "env" : "none", mask: key ? maskKey(key) : "", env };
+  for (const p of Object.keys(DEFAULTS.keys)) {
+    const key = config.keys[p] || "";
+    keyInfo[p] = { source: key ? "saved" : "none", mask: key ? maskKey(key) : "" };
   }
   const { keys, discord: _discord, ...rest } = config;
   return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };

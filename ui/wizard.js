@@ -117,7 +117,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     $("wizard-key").placeholder = has ? "Leave blank to keep the current key" : "Paste your API key";
     const link = Object.assign(el("a", null, new URL(p.keyPage).hostname), { href: p.keyPage, target: "_blank", rel: "noopener noreferrer" });
     $("wizard-key-note").replaceChildren(
-      ...(has ? [`Using the ${info.source === "env" ? `key from ${info.env}` : "saved key"} (${info.mask}). Paste a new one to replace it. `] : []),
+      ...(has ? [`Using the saved key (${info.mask}). Paste a new one to replace it. `] : []),
       "Get a key at ",
       link,
       ".",

@@ -16,7 +16,6 @@ const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 // The conversation behind every UI: runs tasks, keeps the saved session in step, applies
 // Ghost mode, and answers the UI's messages. The host (extension/sidepanel-main.js, or a
 // test) supplies:
-//   env                   environment variables that may hold API keys ({} in the extension)
 //   loadConfig/saveConfig settings storage (async)
 //   sessions              { save, list, load, remove, removeAll } (async)
 //   ensureBrowser(agent)  connects agent.browser
@@ -49,7 +48,7 @@ export function createController(host) {
 
   // The config as the UI sees it: no keys, and the effective Ghost mode state.
   const clientConfig = (config) => ({
-    ...publicConfig(config, host.env),
+    ...publicConfig(config),
     ghostMode: unsaved(),
     ghostLocked: ghostLocked(),
   });
@@ -108,7 +107,6 @@ export function createController(host) {
   };
 
   const agent = new Agent({
-    env: host.env,
     ledger,
     emit: broadcast,
     onHistory: () => persistSession(),
@@ -218,7 +216,7 @@ export function createController(host) {
         };
         const config = await host.loadConfig();
         await check(`Model provider (${config.provider})`, async () => {
-          const apiKey = apiKeyFor(config, config.provider, host.env);
+          const apiKey = apiKeyFor(config, config.provider);
           if (config.provider !== "ollama" && !apiKey) throw new Error("No API key. Add one in Settings > Models.");
           const models = await providers[config.provider].listModels({ apiKey, config });
           return `reachable, ${models.length} models; using ${config.models[config.provider] || "no model selected"}`;
@@ -295,7 +293,7 @@ export function createController(host) {
         if (msg.key) config.keys[msg.provider] = String(msg.key).trim();
         if (msg.provider === "openai" && typeof msg.baseUrl === "string") config.openaiBaseUrl = msg.baseUrl.trim();
         if (msg.provider === "ollama" && msg.host) config.ollamaHost = String(msg.host).trim();
-        const apiKey = apiKeyFor(config, msg.provider, host.env);
+        const apiKey = apiKeyFor(config, msg.provider);
         const result = (ok, text) => reply({ type: "provider_test", provider: msg.provider, ok, text });
         if (msg.provider !== "ollama" && !apiKey) return result(false, "No key to test. Paste a key first.");
         const started = Date.now();
@@ -339,7 +337,7 @@ export function createController(host) {
       case "list_models": {
         const config = await host.loadConfig();
         const provider = providers[msg.provider];
-        const apiKey = apiKeyFor(config, msg.provider, host.env);
+        const apiKey = apiKeyFor(config, msg.provider);
         if (msg.provider !== "ollama" && !apiKey) {
           reply({ type: "models", provider: msg.provider, models: [], error: `Save a ${msg.provider} API key to load its models.` });
           return;

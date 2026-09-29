@@ -31,7 +31,6 @@ const outlook = new OutlookGraph({
 await outlook.init();
 
 const host = {
-  env: {},
   loadConfig,
   saveConfig,
   loadUsage,

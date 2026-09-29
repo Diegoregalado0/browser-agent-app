@@ -232,7 +232,6 @@ agent.mcp = null;
 // Controller: permission prompts carry ids, and remote clients are limited.
 let hostConfig = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const controller = createController({
-  env: {},
   loadConfig: async () => structuredClone(hostConfig),
   saveConfig: async (c) => (hostConfig = structuredClone(c)),
   loadUsage: async () => null,
