@@ -53,10 +53,11 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   }
 
   // Shows one screen: its title, lead text, which parts are visible, and its buttons.
-  function show(name, { title, lead = "", parts = [], next, skip, back, focus }) {
+  function show(name, { title, lead = "", parts = [], next, skip, back, focus, centered }) {
     screen = name;
     testing = null;
     root.classList.toggle("welcome", name === "welcome");
+    root.classList.toggle("center-title", Boolean(centered));
     $("wizard-title").textContent = title;
     $("wizard-lead").replaceChildren(...[lead].flat());
     for (const id of ["wizard-providers", "wizard-key-field", "wizard-outlook-logo"]) $(id).hidden = !parts.includes(id);
@@ -72,8 +73,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   function welcome() {
     show("welcome", {
       title: PRODUCT_NAME,
-      lead: "Tell it the task. It does the browsing.",
-      next: ["Get started", pickProvider],
+      next: ["Get Browsing", pickProvider],
       focus: $("wizard-next"),
     });
   }
@@ -92,9 +92,8 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     );
     show("provider", {
       title: "Pick your provider",
-      lead: "The agent runs on the AI provider you choose, with your own account.",
       parts: ["wizard-providers"],
-      back: welcome,
+      centered: true,
       focus: $("wizard-providers").querySelector(`button:nth-child(${Math.max(1, PROVIDERS.findIndex((p) => p.id === config.provider) + 1)})`),
     });
   }
@@ -107,7 +106,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
       const cmd = el("code", null, "ollama serve");
       return show("key", {
         title: "Use a local model",
-        lead: ["Ollama runs models on this computer, so no key is needed. Start it with ", cmd, ", then test the connection."],
+        lead: ["Start your model with ", cmd, ", then test the connection."],
         next: ["Test connection", test],
         back: pickProvider,
         focus: $("wizard-next"),
@@ -125,8 +124,9 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     );
     show("key", {
       title: `Add your ${p.name} key`,
-      lead: "The key stays on this device and is sent only to the provider, which bills you for what the agent uses.",
+      lead: "The key stays on this device and is sent only to the provider.",
       parts: ["wizard-key-field"],
+      centered: true,
       next: ["Test and continue", test],
       back: pickProvider,
       focus: $("wizard-key"),

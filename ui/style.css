@@ -418,7 +418,15 @@ a.button-link:hover { filter: brightness(1.08); }
 .onboard-providers .icon { width: 24px; height: 24px; }
 .onboard input { font-size: 14px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--muted); background: var(--panel); color: var(--fg); }
 .onboard a { color: var(--accent); }
-.onboard code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.onboard code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover);
+  border: 1px solid var(--border);
+}
+.onboard.center-title h1 { text-align: center; }
 .onboard-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 4px; }
 .onboard-actions .primary { padding: 9px 16px; font-size: 14px; border-radius: 8px; }
 .onboard.welcome .onboard-actions { align-self: stretch; }
