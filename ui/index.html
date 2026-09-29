@@ -192,6 +192,13 @@
               </div>
               <input id="thinking" type="checkbox" role="switch" class="switch" data-setting="thinking" />
             </div>
+            <div class="setting" data-for-provider="anthropic openai">
+              <div class="setting-text">
+                <label class="setting-title" for="webSearch">Let the model search the web</label>
+                <p class="setting-desc">The model finds pages with its provider's own search, then opens them in the browser. Each search is billed by the provider, roughly 1 to 1.4 cents. Not available with a custom OpenAI-compatible server.</p>
+              </div>
+              <input id="webSearch" type="checkbox" role="switch" class="switch" data-setting="webSearch" />
+            </div>
           </div>
 
           <h3 class="group-label">API keys and endpoints</h3>

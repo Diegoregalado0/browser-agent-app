@@ -335,7 +335,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
     $("ghostMode").disabled = Boolean(config.ghostLocked);
     $("ghost-locked-note").hidden = !config.ghostLocked;
     for (const radio of sheet.querySelectorAll('input[name="permissionMode"]')) radio.checked = radio.value === config.permissionMode;
-    for (const row of sheet.querySelectorAll("[data-for-provider]")) row.hidden = row.dataset.forProvider !== config.provider;
+    for (const row of sheet.querySelectorAll("[data-for-provider]")) row.hidden = !row.dataset.forProvider.split(" ").includes(config.provider);
     renderCards();
     renderOrigins();
     if (pendingToast) {

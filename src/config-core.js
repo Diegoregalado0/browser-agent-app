@@ -21,6 +21,8 @@ export const DEFAULTS = {
   effort: "high",
   openaiEffort: "medium",
   thinking: true,
+  // Provider-native web search (Anthropic, OpenAI); each search is billed by the provider.
+  webSearch: true,
   maxSteps: 80,
   permissionMode: "guarded",
   guardModels: {},

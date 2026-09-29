@@ -356,4 +356,82 @@ bridge.stop();
 gateway.close();
 discordApi.close();
 
+// Web search: the provider's search tool is in the request only when the setting is on,
+// and assistant turns holding search items are replayed exactly. The real SDKs run
+// against a fetch that records each request body and answers with a canned stream.
+const { turn: anthropicTurn } = await import("../src/providers/anthropic.js");
+const { isBotCheck } = await import("../src/browser-tools.js");
+const { SYSTEM_PROMPT } = await import("../src/prompt.js");
+const realFetch = globalThis.fetch;
+const bodies = [];
+let sse = [];
+globalThis.fetch = async (url, init) => {
+  bodies.push(JSON.parse(init.body));
+  const text = sse.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(text, { status: 200, headers: { "content-type": "text/event-stream" } });
+};
+const noop = () => {};
+const userTurn = [{ role: "user", content: [{ type: "text", text: "who won" }] }];
+const searchTools = (body) => body.tools.filter((t) => t.type !== "function" && !t.input_schema);
+
+const searched = [
+  { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "nobel literature" } },
+  { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [{ type: "web_search_result", url: "https://www.nobelprize.org/", title: "Nobel", encrypted_content: "enc", page_age: null }] },
+  { type: "text", text: "It was ", citations: null },
+  { type: "text", text: "someone.", citations: [{ type: "web_search_result_location", url: "https://www.nobelprize.org/", title: "Nobel", encrypted_index: "idx", cited_text: "x" }] },
+];
+sse = [
+  { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "claude-sonnet-4-6", content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 1 } } },
+  ...searched.flatMap((block, index) => [
+    { type: "content_block_start", index, content_block: block },
+    { type: "content_block_stop", index },
+  ]),
+  { type: "message_delta", delta: { stop_reason: "pause_turn" }, usage: { output_tokens: 5, server_tool_use: { web_search_requests: 1 } } },
+  { type: "message_stop" },
+];
+const aConfig = { ...config, thinking: false };
+const aTurn = (cfg, messages) => anthropicTurn({ apiKey: "test", model: "claude-sonnet-4-6", config: cfg, system: "s", tools: [], messages, signal: undefined, onText: noop, onThinking: noop });
+const paused = await aTurn(aConfig, userTurn);
+assert.deepEqual(searchTools(bodies.at(-1)), [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }]);
+assert.equal(paused.stop, "pause", "pause_turn did not map to pause");
+assert.deepEqual(paused.content, [{ type: "text", text: "It was someone." }], "cited text blocks were not joined");
+await aTurn(aConfig, [...userTurn, { role: "assistant", content: paused.content, raw: paused.raw }]);
+assert.deepEqual(bodies.at(-1).messages[1].content.slice(0, 2), searched.slice(0, 2), "Anthropic search blocks were not replayed");
+await aTurn({ ...aConfig, webSearch: false }, userTurn);
+assert.equal(searchTools(bodies.at(-1)).length, 0, "Anthropic web search sent with the setting off");
+
+const searchCall = { type: "web_search_call", id: "ws_1", status: "completed", action: { type: "search", query: "nobel literature" } };
+const answer = { type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "It was someone.", annotations: [] }] };
+const response = { id: "resp_1", object: "response", status: "completed", model: "gpt-test", output: [searchCall, answer], usage: { input_tokens: 10, output_tokens: 5, input_tokens_details: { cached_tokens: 0 } } };
+sse = [
+  { type: "response.created", sequence_number: 0, response: { ...response, status: "in_progress", output: [] } },
+  { type: "response.output_item.added", sequence_number: 1, output_index: 0, item: searchCall },
+  { type: "response.output_item.done", sequence_number: 2, output_index: 0, item: searchCall },
+  { type: "response.output_item.added", sequence_number: 3, output_index: 1, item: { ...answer, content: [] } },
+  { type: "response.content_part.added", sequence_number: 4, output_index: 1, item_id: "msg_1", content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
+  { type: "response.output_text.delta", sequence_number: 5, output_index: 1, item_id: "msg_1", content_index: 0, delta: "It was someone." },
+  { type: "response.output_item.done", sequence_number: 6, output_index: 1, item: answer },
+  { type: "response.completed", sequence_number: 7, response },
+];
+const oTurn = (cfg, messages) => openai.turn({ apiKey: "test", model: "gpt-test", config: cfg, system: "s", tools: [], messages, signal: undefined, onText: noop, onThinking: noop });
+const oResult = await oTurn(config, userTurn);
+assert.deepEqual(searchTools(bodies.at(-1)), [{ type: "web_search" }]);
+assert.deepEqual(oResult.content, [{ type: "text", text: "It was someone." }]);
+await oTurn(config, [...userTurn, { role: "assistant", content: oResult.content, raw: oResult.raw }]);
+assert.deepEqual(bodies.at(-1).input[1], searchCall, "OpenAI web_search_call was not replayed");
+await oTurn({ ...config, webSearch: false }, userTurn);
+assert.equal(searchTools(bodies.at(-1)).length, 0, "OpenAI web search sent with the setting off");
+// A custom base URL speaks Chat Completions, which has no hosted search.
+sse = [];
+globalThis.fetch = async (url, init) => (bodies.push(JSON.parse(init.body)), new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
+await oTurn({ ...config, openaiBaseUrl: "http://127.0.0.1:9/v1" }, userTurn);
+assert.ok(bodies.at(-1).tools.every((t) => t.type === "function"), "Chat Completions got a hosted search tool");
+globalThis.fetch = realFetch;
+
+assert.ok(!SYSTEM_PROMPT.includes("google.com/search"), "the prompt still sends the model to Google result pages");
+assert.ok(isBotCheck("https://www.google.com/sorry/index?continue=x"));
+assert.ok(isBotCheck("https://example.com/", "Just a moment..."));
+assert.ok(isBotCheck("https://html.duckduckgo.com/html/?q=a", "a at DuckDuckGo", "Unfortunately, bots use DuckDuckGo too."));
+assert.ok(!isBotCheck("https://en.wikipedia.org/wiki/CAPTCHA", "CAPTCHA - Wikipedia", "Are you a robot? ".repeat(200)), "a long article was taken for a bot check");
+
 console.log("agent checks passed");

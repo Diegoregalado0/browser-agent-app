@@ -246,6 +246,8 @@ async function responsesTurn({ apiKey, model, config, system, tools, messages, s
     })),
     store: false,
   };
+  // Hosted search runs within the request; its web_search_call items replay like the rest.
+  if (config.webSearch) params.tools.push({ type: "web_search" });
   if (REASONING_MODEL.test(model) && config.openaiEffort !== "default") {
     params.reasoning = { effort: config.openaiEffort, ...(config.thinking && { summary: "auto" }) };
     params.include = ["reasoning.encrypted_content"];

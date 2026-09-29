@@ -55,7 +55,12 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
     model,
     max_tokens: 32000,
     system,
-    tools: tools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
+    tools: [
+      ...tools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
+      // Server-side search: Anthropic runs it within the request, bills each search, and
+      // counts the results as input tokens. The basic version works on every current model.
+      ...(config.webSearch ? [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] : []),
+    ],
     messages: toMessages(messages, model),
     cache_control: { type: "ephemeral" },
   };
@@ -76,7 +81,9 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
 
   const content = [];
   for (const b of message.content) {
-    if (b.type === "text") content.push({ type: "text", text: b.text });
+    // Cited answers arrive as several text blocks; they read as one.
+    if (b.type === "text" && content.at(-1)?.type === "text") content.at(-1).text += b.text;
+    else if (b.type === "text") content.push({ type: "text", text: b.text });
     else if (b.type === "tool_use") content.push({ type: "tool_call", id: b.id, name: b.name, input: b.input });
   }
   const stop = { tool_use: "tool_use", end_turn: "end", max_tokens: "max_tokens", refusal: "refusal", pause_turn: "pause" }[
