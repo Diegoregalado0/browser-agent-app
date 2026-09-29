@@ -1,10 +1,13 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
-import { apiKeyFor, keyProblem, publicConfig, resetConfig } from "./config-core.js";
+import { apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { today } from "./limits.js";
 
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
+// The longest task request accepted, from the prompt box or a remote client.
+const PROMPT_MAX_CHARS = 50000;
+const hasProvider = (id) => typeof id === "string" && Object.hasOwn(providers, id);
 
 // What a remote client (a chat bridge such as Discord) may send: start a task, stop it, and
 // answer a permission prompt. Settings, keys and data change only at the computer.
@@ -147,6 +150,7 @@ export function createController(host) {
     await ready;
     const reply = (event) => client.send(event);
     const { remote = false } = clientInfo.get(client) ?? {};
+    if (!msg || typeof msg !== "object") return;
     if (remote && !REMOTE_MESSAGES.has(msg.type)) return;
     switch (msg.type) {
       case "hello": {
@@ -165,9 +169,14 @@ export function createController(host) {
       }
       case "run": {
         if (agent.running) return reply({ type: "error", text: "A task is already running." });
+        const text = typeof msg.text === "string" ? msg.text.trim() : "";
+        if (!text) return;
+        if (text.length > PROMPT_MAX_CHARS) {
+          return reply({ type: "error", text: `That request is too long. Keep it under ${PROMPT_MAX_CHARS.toLocaleString("en-US")} characters.` });
+        }
         try {
           await host.ensureBrowser(agent);
-          await agent.run(String(msg.text), await host.loadConfig());
+          await agent.run(text, await host.loadConfig());
         } catch (err) {
           broadcast({ type: "error", text: err.message });
         }
@@ -292,18 +301,22 @@ export function createController(host) {
       }
       case "test_provider": {
         // Tests the typed (unsaved) key or endpoint when given, else the saved one.
+        if (!hasProvider(msg.provider)) return;
         const provider = providers[msg.provider];
-        if (!provider) return;
         const config = await host.loadConfig();
         const result = (ok, text) => reply({ type: "provider_test", provider: msg.provider, ok, text });
-        if (msg.key) {
-          const key = String(msg.key).trim();
-          const problem = keyProblem(key);
-          if (problem) return result(false, problem);
-          config.keys[msg.provider] = key;
+        try {
+          if (msg.key) {
+            const key = String(msg.key).trim();
+            const problem = keyProblem(key);
+            if (problem) return result(false, problem);
+            config.keys[msg.provider] = key;
+          }
+          if (msg.provider === "openai" && typeof msg.baseUrl === "string") config.openaiBaseUrl = cleanSetting("openaiBaseUrl", msg.baseUrl.trim());
+          if (msg.provider === "ollama" && msg.host) config.ollamaHost = cleanSetting("ollamaHost", String(msg.host).trim());
+        } catch (err) {
+          return result(false, err.message);
         }
-        if (msg.provider === "openai" && typeof msg.baseUrl === "string") config.openaiBaseUrl = msg.baseUrl.trim();
-        if (msg.provider === "ollama" && msg.host) config.ollamaHost = String(msg.host).trim();
         const apiKey = apiKeyFor(config, msg.provider);
         if (msg.provider !== "ollama" && !apiKey) return result(false, "No key to test. Paste a key first.");
         const started = Date.now();
@@ -330,26 +343,37 @@ export function createController(host) {
       }
       case "save_config": {
         const config = await host.loadConfig();
+        const patch = msg.patch && typeof msg.patch === "object" ? msg.patch : {};
         // Ghost mode changes only through set_ghost, which also starts a new conversation,
-        // and the Discord bot only through the discord_* messages.
-        const { keys, models, ghostMode: _ghost, discord: _discord, ...rest } = msg.patch || {};
-        Object.assign(config, rest);
-        if (models) Object.assign(config.models, models);
+        // and the Discord bot only through the discord_* messages. Other names that are not
+        // settings are ignored; every value is checked before anything is saved.
+        const { keys, ghostMode: _ghost, discord: _discord, ...rest } = patch;
+        const changes = {};
+        for (const [key, value] of Object.entries(rest)) {
+          if (!Object.hasOwn(config, key) || key === "keys") continue;
+          const merged = ["models", "limits", "guardModels"].includes(key) && value && typeof value === "object" ? { ...config[key], ...value } : value;
+          changes[key] = cleanSetting(key, merged);
+        }
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
-        for (const [p, k] of Object.entries(keys || {})) {
-          if (k === "__clear__") config.keys[p] = "";
-          else if (k) {
+        const keyChanges = {};
+        for (const [p, k] of Object.entries(keys && typeof keys === "object" ? keys : {})) {
+          if (!Object.hasOwn(config.keys, p) || !k) continue;
+          if (k === "__clear__") keyChanges[p] = "";
+          else {
             const key = String(k).trim();
             const problem = keyProblem(key);
             if (problem) throw new Error(problem);
-            config.keys[p] = key;
+            keyChanges[p] = key;
           }
         }
+        Object.assign(config, changes);
+        Object.assign(config.keys, keyChanges);
         await host.saveConfig(config);
         broadcastConfig(config);
         return;
       }
       case "list_models": {
+        if (!hasProvider(msg.provider)) return;
         const config = await host.loadConfig();
         const provider = providers[msg.provider];
         const apiKey = apiKeyFor(config, msg.provider);
