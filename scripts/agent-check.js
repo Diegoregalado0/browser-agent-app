@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Offline checks of the agent loop with a scripted provider and browser: Stop while an
-// action's safety check runs, and a history that ends in tool calls without results.
+// action's safety check runs, and a history that ends in tool calls without results. Also
+// the checks on keys, settings and reply rendering.
 
 import assert from "node:assert/strict";
 import { Agent } from "../src/agent.js";
 import { providers } from "../src/providers/index.js";
-import { DEFAULTS } from "../src/config-core.js";
+import { DEFAULTS, keyProblem, mergeConfig } from "../src/config-core.js";
+import { renderMarkdown } from "../ui/markdown.js";
 import * as openai from "../src/providers/openai.js";
 import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
@@ -263,6 +265,76 @@ await fromRemote({ type: "permission", decision: "once", id: passwordId });
 assert.equal(await settled(password), "pending", "a password prompt was approved remotely");
 await fromLocal({ type: "permission", decision: "once", id: passwordId });
 assert.equal(await password, "once");
+
+// Input checks: a pasted block that is not a key is refused before it is saved, tested or
+// sent, with a message that does not repeat it; settings are checked by type and bounds.
+const pasted = "sk-proj-abc123 — from my notes\n⌘K to open\nsecond line";
+const noEcho = (text) => assert.ok(!/abc123|notes|⌘|second line/.test(text), `message repeats the pasted text: ${text}`);
+assert.ok(keyProblem(pasted.trim()));
+noEcho(keyProblem(pasted.trim()));
+assert.equal(keyProblem("sk-proj-Ab_12-xYz"), null);
+localEvents.length = 0;
+await fromLocal({ type: "save_config", patch: { keys: { openai: pasted } } });
+assert.equal(hostConfig.keys.openai, "test", "a pasted block was saved as the key");
+noEcho(localEvents.find((e) => e.type === "error").text);
+await fromLocal({ type: "test_provider", provider: "openai", key: pasted });
+const tested = localEvents.find((e) => e.type === "provider_test");
+assert.equal(tested.ok, false);
+noEcho(tested.text);
+// A bad key already saved fails with a readable message, not the browser's Headers error.
+const stored = await providers.anthropic.listModels({ apiKey: pasted }).catch((err) => err.message);
+assert.match(stored, /saved Anthropic API key .* Settings > Models/);
+noEcho(stored);
+
+for (const patch of [
+  { ollamaHost: "file:///etc/passwd" },
+  { ollamaHost: "javascript:alert(1)" },
+  { openaiBaseUrl: "https://user:pass@evil.example/v1" },
+  { approvedOrigins: "https://bank.example https://a.test" },
+  { approvedOrigins: ["javascript:alert(1)"] },
+  { sensitiveSites: "mybank.example" },
+  { limits: { requestsPerMinute: "abc" } },
+  { limits: { taskTokens: -1 } },
+  { maxSteps: 1e9 },
+  { customInstructions: "x".repeat(20000) },
+  { models: { gemini: "../../v1beta/files?x=" } },
+  { permissionMode: "off" },
+  { debugMode: "yes" },
+]) {
+  const before = JSON.stringify(hostConfig);
+  await fromLocal({ type: "save_config", patch });
+  assert.equal(JSON.stringify(hostConfig), before, `saved a bad value: ${JSON.stringify(patch).slice(0, 80)}`);
+}
+await fromLocal({ type: "save_config", patch: JSON.parse('{"__proto__": {"permissionMode": "auto"}, "mcpServers": [], "maxSteps": 12, "limits": {"taskTokens": 5}}') });
+assert.equal(hostConfig.maxSteps, 12);
+assert.equal(hostConfig.limits.taskTokens, 5);
+assert.equal(hostConfig.limits.dailyTokens, DEFAULTS.limits.dailyTokens, "a partial limits patch dropped the others");
+assert.ok(!("mcpServers" in hostConfig) && Object.getPrototypeOf(hostConfig) === Object.prototype);
+localEvents.length = 0;
+await fromLocal({ type: "run", text: "x".repeat(60000) });
+assert.match(localEvents.find((e) => e.type === "error").text, /too long/);
+// Values loaded from storage get the same checks and fall back to their defaults.
+const loaded = mergeConfig({ approvedOrigins: "https://a.test", limits: { requestsPerMinute: Infinity }, ollamaHost: "ftp://x", maxSteps: 5 });
+assert.deepEqual(loaded.approvedOrigins, []);
+assert.equal(loaded.limits.requestsPerMinute, DEFAULTS.limits.requestsPerMinute);
+assert.equal(loaded.ollamaHost, DEFAULTS.ollamaHost);
+assert.equal(loaded.maxSteps, 5);
+// Sensitive sites saved before these checks keep working: addresses become hostnames and
+// only unusable entries are dropped.
+assert.deepEqual(mergeConfig({ sensitiveSites: ["https://MyBank.example/login", "*.pay.example", "not a site", 7] }).sensitiveSites, ["mybank.example", "*.pay.example"]);
+
+// Reply rendering: markup is escaped, only http(s) links become links, and a URL inside a
+// link cannot add attributes to it.
+for (const reply of [
+  "[click](https://a.example/(https://b.example/style=position:fixed;inset:0)",
+  '[x](javascript:alert(1)) <img src=x onerror=alert(1)> https://ok.example/"onmouseover=alert(1)',
+  "**[a](https://a.example)** *https://b.example/*x*",
+]) {
+  const html = renderMarkdown(reply);
+  for (const [tag] of html.matchAll(/<[^>]*>/g)) {
+    assert.match(tag, /^<\/?(p|ul|ol|li|code|strong|em|a)>$|^<a href="https:\/\/[^"<>\s]+" target="_blank" rel="noopener noreferrer">$/, `unsafe markup: ${html}`);
+  }
+}
 
 // Discord bridge against a local stand-in for Discord's gateway and API: pairing only with
 // the code, only the owner's messages and button presses count, a task started from
