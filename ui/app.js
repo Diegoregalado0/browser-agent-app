@@ -141,7 +141,7 @@ function send(msg) {
 }
 
 function summarize(name, input) {
-  if (name === "browser" || name === "desktop") {
+  if (name === "browser") {
     const target = input.ref || (input.coordinate ? `(${input.coordinate.join(", ")})` : "");
     const text = input.text ? ` "${input.text.slice(0, 40)}"` : "";
     return `${input.action} ${target}${text}${input.scroll_direction ? " " + input.scroll_direction : ""}`.trim();
@@ -349,8 +349,7 @@ function describeAction(name, input) {
       return "Opening page…";
     }
   }
-  if (name === "browser" || name === "desktop") {
-    const where = name === "desktop" ? " (desktop)" : "";
+  if (name === "browser") {
     const map = {
       screenshot: "Taking a screenshot",
       left_click: `Clicking${target}`,
@@ -362,12 +361,9 @@ function describeAction(name, input) {
       key: `Pressing ${input.text || ""}`,
       scroll: `Scrolling ${input.scroll_direction || "down"}`,
       left_click_drag: "Dragging",
-      drag: "Dragging",
-      move: "Moving the mouse",
       wait: `Waiting ${input.duration ?? 2}s`,
-      focus_browser: "Focusing the browser",
     };
-    return `${map[input.action] || input.action}${where}…`;
+    return `${map[input.action] || input.action}…`;
   }
   return (
     {

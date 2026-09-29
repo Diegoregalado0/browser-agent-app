@@ -99,8 +99,6 @@ export class Agent {
     this.limiter = new RateLimiter();
     // Connected by the host before the first task.
     this.browser = null;
-    // The desktop tool and its definition ({ tool, def }), local edition only.
-    this.desktop = null;
     this.env = env;
     this.emit = emit;
     this.askPermission = askPermission;
@@ -200,7 +198,6 @@ export class Agent {
 
     await this.browser.setAdSkipping(config.skipYoutubeAds);
     this.browser.showActions = config.showActions;
-    if (this.desktop) this.desktop.tool.showActions = config.showActions;
     await this.browser.startTask({ highlight: config.highlightTab });
     const page = await this.browser.currentPage();
     // A task that ended between a tool call and its results (a usage limit, or a
@@ -215,11 +212,7 @@ export class Agent {
     });
 
     const browserTools = config.developerTools ? BROWSER_TOOL_DEFS : BROWSER_TOOL_DEFS.filter((t) => !DEVELOPER_TOOLS.has(t.name));
-    const tools = [
-      ...browserTools,
-      ...(config.desktopControl && this.desktop ? [this.desktop.def] : []),
-      ...(this.mcp?.toolDefs() ?? []),
-    ];
+    const tools = [...browserTools, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.abortController = new AbortController();
@@ -385,11 +378,7 @@ export class Agent {
         authorizing = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
         let output = toBlocks(
-          this.mcp?.has(call.name)
-            ? await this.mcp.call(call.name, call.input, { signal })
-            : call.name === "desktop"
-              ? await this.desktop.tool.run(call.input)
-              : await this.browser.run(call.name, call.input),
+          this.mcp?.has(call.name) ? await this.mcp.call(call.name, call.input, { signal }) : await this.browser.run(call.name, call.input),
         );
         if (guarded) {
           const warning = await this.guard.scanContent({ config, name: call.name, output, signal });
@@ -471,18 +460,16 @@ export class Agent {
 
   async #checkSensitive(call, config) {
     if (call.name === "navigate" || call.name === "tabs" || !isStateChanging(call.name, call.input)) return;
-    if (call.name !== "desktop") {
-      const url = await this.browser.currentUrl();
-      if (config.confirmSensitiveSites && isSensitiveSite(url, config.sensitiveSites)) {
-        const site = new URL(url).hostname;
-        const decision = await this.askPermission({
-          text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}?`,
-          allowAlways: false,
-          kind: "sensitive",
-        });
-        if (decision === "deny") throw new Error(`The user declined acting on ${site}.`);
-        return;
-      }
+    const url = await this.browser.currentUrl();
+    if (config.confirmSensitiveSites && isSensitiveSite(url, config.sensitiveSites)) {
+      const site = new URL(url).hostname;
+      const decision = await this.askPermission({
+        text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}?`,
+        allowAlways: false,
+        kind: "sensitive",
+      });
+      if (decision === "deny") throw new Error(`The user declined acting on ${site}.`);
+      return;
     }
     // Typing, single keys (a password can be typed a key at a time) and pasting all count.
     const typing = (call.name === "browser" && ["type", "key"].includes(call.input.action)) || call.name === "form_input";
@@ -499,7 +486,7 @@ export class Agent {
   }
 
   async #checkSite(call, config) {
-    if (call.name === "desktop" || this.mcp?.has(call.name)) return;
+    if (this.mcp?.has(call.name)) return;
     const origin = originForToolCall(call.name, call.input, await this.browser.currentUrl());
     if (!origin || !/^https?:/.test(origin)) return;
     if (this.sessionOrigins.has(origin) || config.approvedOrigins.includes(origin)) return;

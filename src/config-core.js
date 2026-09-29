@@ -26,7 +26,6 @@ export const DEFAULTS = {
   maxSteps: 80,
   permissionMode: "guarded",
   guardModels: {},
-  desktopControl: true,
   skipYoutubeAds: true,
   highlightTab: true,
   // A visible pointer that glides to each target, and typing shown character by character.

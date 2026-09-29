@@ -424,18 +424,6 @@ export class Browser {
     return id;
   }
 
-  // Screen rectangle (in points) of the agent's side panel, or null when it is closed.
-  // Assumes Chrome's default right-side placement.
-  async sidebarRect() {
-    try {
-      const w = await this.evaluate("({ x: screenX, y: screenY, ow: outerWidth, oh: outerHeight, iw: innerWidth, ih: innerHeight })");
-      if (w.ow - w.iw < 120) return null;
-      return { left: w.x + w.iw, right: w.x + w.ow, top: w.y + (w.oh - w.ih), bottom: w.y + w.oh };
-    } catch {
-      return null;
-    }
-  }
-
   // Turns the YouTube ad skipper on or off for tabs the agent has attached to.
   async setAdSkipping(enabled) {
     this.skipYoutubeAds = enabled;
@@ -949,10 +937,6 @@ export class Browser {
       }
     } catch {}
     return null;
-  }
-
-  async browserPid() {
-    return this.transport.browserPid?.();
   }
 }
 

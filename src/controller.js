@@ -21,8 +21,7 @@ const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 //   sessions              { save, list, load, remove, removeAll } (async)
 //   log(event)            activity log sink, optional; clearLog(), logBytes() with it
 //   dataLocation          where data is kept, shown in Settings
-//   ensureBrowser(agent)  connects agent.browser (and agent.desktop locally)
-//   desktop               { status(), requestAccess() } locally, null in the extension
+//   ensureBrowser(agent)  connects agent.browser
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
 //   defaults              the edition's changes to the default settings
 //   outlook               Outlook on Microsoft Graph (extension; see outlook-graph.js), optional
@@ -157,8 +156,6 @@ export function createController(host) {
     resolve(decision);
   }
 
-  const desktopStatus = async () => (host.desktop ? host.desktop.status().catch((e) => ({ error: e.message })) : null);
-
   async function handle(client, msg) {
     await ready;
     const reply = (event) => client.send(event);
@@ -177,7 +174,6 @@ export function createController(host) {
         if (agent.messages.length) {
           reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
         }
-        if (host.desktop) reply({ type: "desktop_status", status: await desktopStatus() });
         return;
       }
       case "run": {
@@ -374,14 +370,6 @@ export function createController(host) {
         }
         return;
       }
-      case "desktop_status":
-        if (host.desktop) reply({ type: "desktop_status", status: await desktopStatus() });
-        return;
-      case "request_desktop_access":
-        if (!host.desktop) return;
-        await host.desktop.requestAccess().catch(() => {});
-        reply({ type: "desktop_status", status: await desktopStatus() });
-        return;
       case "open_browser":
         try {
           await host.ensureBrowser(agent);

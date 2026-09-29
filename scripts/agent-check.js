@@ -240,7 +240,6 @@ const controller = createController({
   saveUsage: async () => {},
   sessions: { save: async () => {}, list: async () => [], load: async () => ({}), remove: async () => {}, removeAll: async () => {} },
   ensureBrowser: async () => {},
-  desktop: null,
 });
 const localEvents = [];
 const remoteEvents = [];

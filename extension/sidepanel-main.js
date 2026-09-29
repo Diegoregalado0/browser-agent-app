@@ -41,7 +41,6 @@ const host = {
   sessions,
   outlook,
   dataLocation: "this browser profile",
-  desktop: null,
   ensureBrowser: async (agent) => {
     await staleDetached;
     if (agent.browser) return;

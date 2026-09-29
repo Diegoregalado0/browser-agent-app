@@ -43,13 +43,11 @@ const SCAN_SCHEMA = {
 };
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
-const READ_ONLY_DESKTOP_ACTIONS = new Set(["screenshot", "move", "scroll", "focus_browser"]);
 const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "javascript_exec", "browser", "network_requests", "edit_html"]);
 const SCAN_MAX_CHARS = 60000;
 
 export function isStateChanging(name, input) {
   if (name === "browser") return !READ_ONLY_BROWSER_ACTIONS.has(input.action);
-  if (name === "desktop") return !READ_ONLY_DESKTOP_ACTIONS.has(input.action);
   if (name === "tabs") return input.action !== "list" && input.action !== "switch";
   if (name === "edit_html") return input.html !== undefined;
   return ["navigate", "form_input", "javascript_exec"].includes(name);
@@ -104,7 +102,6 @@ export class Guard {
       `Proposed action: ${name} ${JSON.stringify(input)}`,
     ];
     if (target) lines.push(`The action targets: ${target}`);
-    if (name === "desktop") lines.push("This is an OS-level action outside the page; its exact target cannot be verified.");
     if (this.flags.length) {
       lines.push("", "Content the agent read earlier was flagged as a possible prompt injection:");
       for (const f of this.flags.slice(-3)) lines.push(`- ${f}`);

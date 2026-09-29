@@ -68,10 +68,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     sheet.querySelector(".settings-pages").scrollTop = 0;
     if (name === "data") send({ type: "data_info" });
     if (name === "remote") send({ type: "discord_status" });
-    if (name === "safety") {
-      send({ type: "desktop_status" });
-      send({ type: "data_info" });
-    }
+    if (name === "safety") send({ type: "data_info" });
   }
 
   function showNav() {
@@ -167,7 +164,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     send({ type: "set_ghost", on: $("ghostMode").checked });
   });
 
-  $("grant-desktop").onclick = () => send({ type: "request_desktop_access" });
   $("settings-show-browser").onclick = () => send({ type: "open_browser" });
 
   $("reset-settings").onclick = (e) =>
@@ -429,14 +425,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
         const result = cards.querySelector(`[data-provider="${msg.provider}"] .pc-result`);
         result.className = `pc-result ${msg.ok ? "ok" : "error"}`;
         result.replaceChildren(icon(msg.ok ? "check" : "alert"), el("span", null, msg.text));
-      },
-      desktop_status(msg) {
-        const s = msg.status;
-        $("desktop-status").textContent = s.error
-          ? s.error
-          : `Accessibility ${s.accessibility ? "granted" : "missing"}, Screen Recording ${s.screenRecording ? "granted" : "missing"}.` +
-            (s.accessibility && s.screenRecording ? "" : " Grant both to the app that runs browser-agent, then restart it.");
-        $("grant-desktop").hidden = Boolean(s.accessibility && s.screenRecording);
       },
       data_info(msg) {
         $("tokens-today").textContent = `Used today: ${msg.tokensToday.toLocaleString()} tokens.`;
