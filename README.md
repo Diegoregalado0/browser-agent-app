@@ -1,13 +1,13 @@
-# Browser Agent
+# Browsby
 
-Say what you want done, and Browser Agent does it in your own Chrome tabs. It opens pages, clicks, types, fills in forms, and tells you when it is finished.
+Say what you want done, and Browsby does it in your own Chrome tabs. It opens pages, clicks, types, fills in forms, and tells you when it is finished.
 
 It runs on your own AI key, with the provider you choose, and nothing is sent through us.
 
 ## Why it is different
 
 - **Your key, your provider.** Use a key from Anthropic, OpenAI, Google Gemini, or Mistral, or run a local model with Ollama. The key stays on your computer and is sent only to that provider, which bills you directly.
-- **No account, no middleman.** There is no Browser Agent account and no Browser Agent server. Your tasks, pages, and history never pass through us.
+- **No account, no middleman.** There is no Browsby account and no Browsby server. Your tasks, pages, and history never pass through us.
 - **Keep Chrome.** It is an extension in the Chrome you already have. It works in its own tabs, next to yours, in a side panel.
 - **It asks before it matters.** A safety check compares each action with what you asked for. On banks, payment sites, password managers, and password fields, it always asks first. You can press Stop at any time.
 
@@ -22,7 +22,7 @@ It aims for the end result, not a list of links. If you ask for a video, it open
 
 ## Install
 
-Browser Agent is a Chrome extension for Mac, Windows, and Linux. It needs Chrome 120 or newer. Until it is in the Chrome Web Store, build it from source with [Node.js](https://nodejs.org) 22 or newer:
+Browsby is a Chrome extension for Mac, Windows, and Linux. It needs Chrome 120 or newer. Until it is in the Chrome Web Store, build it from source with [Node.js](https://nodejs.org) 22 or newer:
 
 ```sh
 git clone https://github.com/Diegoregalado0/browser-agent-app.git
@@ -33,7 +33,7 @@ npm run build:extension
 
 1. In Chrome, open `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and select the `dist/extension` folder.
-3. Click the Browser Agent icon in the toolbar, or press Cmd+Shift+Y (Ctrl+Shift+Y on Windows and Linux).
+3. Click the Browsby icon in the toolbar, or press Cmd+Shift+Y (Ctrl+Shift+Y on Windows and Linux).
 
 It works in regular web pages, not in Chrome's own pages.
 
@@ -101,13 +101,13 @@ When turned on, the agent can run JavaScript in a page and edit its HTML, which 
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.
 - **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it. With Ollama, it stays on your computer.
-- **Nothing is sent to us.** There is no Browser Agent server, account, or analytics.
+- **Nothing is sent to us.** There is no Browsby server, account, or analytics.
 - **Stored on your device:** saved sessions, without screenshots. Delete them in Settings > Data and privacy.
 
 ## FAQ
 
 **What does it cost?**
-Browser Agent is free. Your provider bills you for what the agent uses, at its normal API rates. Local models through Ollama have no API cost. The usage limits above keep a runaway task from spending much.
+Browsby is free. Your provider bills you for what the agent uses, at its normal API rates. Local models through Ollama have no API cost. The usage limits above keep a runaway task from spending much.
 
 **Which models can I use?**
 Any model your key can use at Anthropic, OpenAI, Google Gemini, or Mistral, or a local model through Ollama. Settings > Models can load the list for your key. For best results, pick a model that supports tool use and can read images. The OpenAI option also takes a base URL for OpenAI-compatible servers running on your own computer, such as LM Studio.

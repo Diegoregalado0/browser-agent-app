@@ -144,7 +144,7 @@ async function focusAgentBrowser() {
   console.log(
     opened
       ? "Agent browser is up with the chat panel open."
-      : "Agent browser is up. Press ⌘⇧Y or click the Browser Agent icon in its toolbar to open the chat panel.",
+      : "Agent browser is up. Press ⌘⇧Y or click the Browsby icon in its toolbar to open the chat panel.",
   );
 }
 

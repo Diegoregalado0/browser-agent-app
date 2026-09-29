@@ -83,13 +83,13 @@ export function writeSidebarExtension(uiUrl) {
   mkdirSync(SIDEBAR_DIR, { recursive: true });
   const manifest = {
     manifest_version: 3,
-    name: "Browser Agent",
+    name: "Browsby",
     version: SIDEBAR_VERSION,
     description: "Side panel for the local browser agent.",
     permissions: ["sidePanel", "tabs", "tabGroups", "debugger", "storage"],
     background: { service_worker: "background.js" },
     side_panel: { default_path: "sidepanel.html" },
-    action: { default_title: "Browser Agent (⌘⇧Y)" },
+    action: { default_title: "Browsby (⌘⇧Y)" },
     commands: {
       _execute_action: { suggested_key: { default: "Ctrl+Shift+Y", mac: "Command+Shift+Y" }, description: "Open the chat panel" },
     },
@@ -107,7 +107,7 @@ export function writeSidebarExtension(uiUrl) {
   writeFileSync(
     join(SIDEBAR_DIR, "sidepanel.html"),
     `<!doctype html>
-<html><head><meta charset="utf-8"><title>Browser Agent</title>
+<html><head><meta charset="utf-8"><title>Browsby</title>
 <style>html,body,iframe{margin:0;border:0;width:100%;height:100%;display:block;background:#1b1c1e}</style>
 </head><body><iframe allow="clipboard-write"></iframe><script src="sidepanel.js"></script></body></html>
 `,

@@ -25,7 +25,7 @@ const PROVIDER_HOSTS = [
 
 const manifest = {
   manifest_version: 3,
-  name: "Browser Agent",
+  name: "Browsby",
   version,
   description: "An AI agent that does tasks in your browser tabs, using your own API key.",
   minimum_chrome_version: "120",
@@ -33,7 +33,7 @@ const manifest = {
   host_permissions: PROVIDER_HOSTS,
   background: { service_worker: "background.js" },
   side_panel: { default_path: "sidepanel.html" },
-  action: { default_title: "Browser Agent", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },
+  action: { default_title: "Browsby", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },
   icons: { 16: "icon-16.png", 32: "icon-32.png", 48: "icon-48.png", 128: "icon-128.png" },
   commands: {
     _execute_action: { suggested_key: { default: "Ctrl+Shift+Y", mac: "Command+Shift+Y" }, description: "Open the agent panel" },

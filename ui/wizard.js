@@ -6,7 +6,7 @@ import { OUTLOOK_LOGO } from "./mcp.js";
 // works; setupDone is saved only after that (and after the Outlook screen is answered).
 
 // The product name on the welcome screen. It changes with the rebrand.
-const PRODUCT_NAME = "Browser Agent";
+const PRODUCT_NAME = "Browsby";
 
 // Provider buttons, in order. Each shows the provider's name as a wordmark in the app's own
 // type: the providers' trademark rules do not allow their logos without written permission
