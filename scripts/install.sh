@@ -1,5 +1,6 @@
 #!/bin/sh
-# Installs the `browser-agent` command and a "Browsby" app in ~/Applications.
+# Installs the `browser-agent` sandbox command and a "Browsby" app in ~/Applications that
+# opens the test Chrome with the built extension (see README, "The sandbox").
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,6 +14,8 @@ APP="$HOME/Applications/Browsby.app"
 # Terminal command. npm link can fail where the global npm folder belongs to root (Node
 # from the nodejs.org installer); the app below does not need it.
 cd "$PROJECT_DIR"
+# The launcher builds the extension with esbuild, a dev dependency.
+npm install --no-audit --no-fund --silent
 if npm link --silent; then
   echo "Installed command: $(command -v browser-agent)"
 else

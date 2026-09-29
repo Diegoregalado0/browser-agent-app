@@ -87,7 +87,7 @@ Safety checks count toward the token limits too. When a provider rate-limits a r
 ### Sessions and Ghost mode
 
 - Past sessions are listed in the menu. Reopen one to pick up where you left off. You can switch provider in the middle of a session.
-- **Ghost mode** (the ghost button): the session is not saved and nothing goes to the activity log. It is always on in incognito windows. Chrome still keeps its own history.
+- **Ghost mode** (the ghost button): the session is not saved. It is always on in incognito windows. Chrome still keeps its own history.
 - Screenshots are never saved with sessions.
 
 ### Standing instructions
@@ -136,12 +136,13 @@ npm run build:extension    # builds dist/extension and dist/browser-agent-extens
 
 Layout:
 
-- `src/` the agent, browser tools, safety checks (`guard.js`), limits, and providers, shared with the test app
+- `src/` the agent, browser tools, safety checks (`guard.js`), limits, providers, Outlook and Discord, plus the sandbox's Chrome launcher (`chrome.js`, `chrome-keeper.js`)
 - `ui/` the panel, settings, and setup screens
 - `extension/` the extension's own parts: storage, the Chrome debugger transport, and its entry point
-- `scripts/` the extension build, the test app installer, and the offline checks
+- `bin/` the sandbox command
+- `scripts/` the extension build, the sandbox installer, and the offline checks
 
-Test the extension in a separate Chrome profile, not your real one, with a key that has a low spending limit.
+Test the extension in the sandbox (below) or another separate Chrome profile, not your real one, with a key that has a low spending limit.
 
 The extension build is not minified, so Chrome Web Store reviewers can read it. Raise `version` in `package.json` before each store upload.
 
@@ -162,10 +163,14 @@ The SPA platform is the one Microsoft allows for a token request from a browser 
 
 **Extension id.** The redirect URI contains the extension id, so the manifest has a `key` (`EXTENSION_KEY` in `scripts/build-extension.js`) that fixes it at `fddhceodbfeklilaakgioapmildcmgjo` for unpacked loads. The Chrome Web Store assigns its own id. After the first upload (it can stay a draft), open the item in the Developer Dashboard > Package > View public key, put that key (without the BEGIN/END lines, on one line) in `EXTENSION_KEY`, and add `https://<store id>.chromiumapp.org/` as a second SPA redirect URI in the app registration. Unpacked builds then have the store id too. The store zip is packed without the `key`.
 
-### The Mac test app
+### The sandbox
 
-The repo also contains a Mac app used only for development and testing. It is not a product and is not published. It runs the same agent from a local Node server and drives its own Chrome profile over the DevTools protocol, which makes it easy to script, inspect, and test.
+`browser-agent` (and the Browsby app that `./scripts/install.sh` puts in `~/Applications`) runs the real built extension in a dedicated test Chrome profile, so testing it is testing what users get. It is for development on a Mac and needs Chrome in `/Applications`.
 
-- Install with `./scripts/install.sh` (needs Chrome in `/Applications`), or run `browser-agent serve` in the foreground. `bin/` has `browser-agent status`, `stop`, `logs`, and `activity`.
-- Test on a throwaway profile: `BROWSER_AGENT_HOME=/tmp/ba-test browser-agent serve --port=7799 --no-open`. Settings, sessions, and its Chrome profile all go there.
-- It has experimental features that the extension does not: MCP servers (Outlook through an MCP server, and custom servers, `src/mcp.js`), an activity log, and mouse and keyboard control outside the page (`native/`, which needs Apple's command line tools and Accessibility and Screen Recording permission).
+- `browser-agent` builds `dist/extension` when its sources changed, launches the test Chrome with that build loaded (or reinstalls it in the running one), and opens the Browsby side panel. It opens a window when Chrome has none.
+- `browser-agent reload` rebuilds and reinstalls the extension in the running test Chrome, so a code change is one command away. The panel reopens with the new build.
+- `browser-agent status` shows whether it runs, its DevTools port, and whether the loaded build is current. `browser-agent stop` quits the test Chrome. `browser-agent logs` prints the launcher's log.
+- The DevTools port is for automation and inspection, for example `http://127.0.0.1:<port>/json/list`, or attaching to the panel page `chrome-extension://fddhceodbfeklilaakgioapmildcmgjo/sidepanel.html`. It is a free port by default; `--port=N` picks it when Chrome launches.
+- Settings, keys and sessions live in the test profile's extension storage, like for any user. The profile is `~/.browser-agent/chrome-profile`. For a throwaway one, set `BROWSER_AGENT_HOME`: `BROWSER_AGENT_HOME=$(mktemp -d) browser-agent --port=9340`.
+
+A small keeper process (`src/chrome-keeper.js`) starts Chrome with a DevTools pipe, which branded Chrome requires to load an unpacked extension (`Extensions.loadUnpacked`) and which also opens the side panel (`Extensions.triggerAction`). Chrome exits when the pipe closes, so the keeper holds it for the browser's life; `reload` signals it to reinstall. Pages can tell this browser is automated (`navigator.webdriver` is set).
