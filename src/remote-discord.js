@@ -5,6 +5,8 @@
 // messages. It uses only web platform APIs (WebSocket, fetch, crypto.getRandomValues), so
 // it runs in the extension's side panel and in the Node offline checks.
 
+import { keyProblem } from "./config-core.js";
+
 const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const GATEWAY_INTENTS = 1 << 12; // DIRECT_MESSAGES; message text in DMs needs no privileged intent.
@@ -49,6 +51,8 @@ export class DiscordBridge {
   async start() {
     const { discord } = await this.loadConfig();
     if (!discord?.token) return this.#set("off");
+    // Checked before the token goes into any request header.
+    if (keyProblem(discord.token)) return this.#set("error", "The saved bot token has spaces, line breaks or other characters a token cannot have. Remove the bot and paste the token again.");
     this.#connect(discord.token);
   }
 

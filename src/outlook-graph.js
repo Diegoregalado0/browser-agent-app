@@ -8,6 +8,8 @@
 // Outlook is not configured in this build.
 export const OUTLOOK_CLIENT_ID = "";
 
+import { keyProblem } from "./config-core.js";
+
 const AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0";
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = "openid profile offline_access User.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite";
@@ -184,6 +186,8 @@ export class OutlookGraph {
   }
 
   async #graphFetch(token, method, path, body, headers = {}, signal) {
+    // A stored token that cannot go in a header is handled like a rejected one: renewed.
+    if (keyProblem(token)) throw Object.assign(new Error("Outlook rejected the sign-in."), { status: 401 });
     const res = await this.fetch(`${this.graph}${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, ...(body && { "Content-Type": "application/json" }), ...headers },

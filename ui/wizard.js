@@ -1,4 +1,5 @@
 import { OUTLOOK_LOGO } from "./mcp.js";
+import { keyProblem } from "../src/config-core.js";
 
 // First-run setup, full screen over the app: welcome, provider, its key (or a local server
 // check), then Outlook when this build can connect it. It opens once while config.setupDone is false,
@@ -137,6 +138,11 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     const key = $("wizard-key").value.trim();
     if (provider.id !== "ollama" && !key && config.keyInfo?.[provider.id]?.source === "none") {
       result("error", "Paste an API key first.");
+      return $("wizard-key").focus();
+    }
+    const problem = key && keyProblem(key);
+    if (problem) {
+      result("error", problem);
       return $("wizard-key").focus();
     }
     testing = provider.id;

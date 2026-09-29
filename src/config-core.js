@@ -68,6 +68,18 @@ export function apiKeyFor(config, provider) {
   return config.keys[provider] || "";
 }
 
+// Why a pasted API key or bot token (already trimmed) cannot be one, or null when it can.
+// Keys are printable ASCII without spaces, which is also all a request header accepts.
+// The message never repeats the value.
+// noun: what the value is, in the message ("key", "bot token").
+export function keyProblem(key, noun = "key") {
+  if (typeof key !== "string" || !key) return `Paste a ${noun} first.`;
+  const again = `Copy only the ${noun} and paste it again.`;
+  if (/\s/.test(key)) return `That does not look like a ${noun}: it has spaces or line breaks in it. ${again}`;
+  if (!/^[\x21-\x7e]+$/.test(key)) return `That does not look like a ${noun}: it has characters a ${noun} never has. ${again}`;
+  return null;
+}
+
 // Enough of a key to recognize it: the first three and last four characters.
 function maskKey(key) {
   return key.length > 12 ? `${key.slice(0, 3)}…${key.slice(-4)}` : "••••";

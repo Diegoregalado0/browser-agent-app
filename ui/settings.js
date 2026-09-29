@@ -1,3 +1,5 @@
+import { keyProblem } from "../src/config-core.js";
+
 // Settings sheet: five pages of options that save as they change. On a wide window the
 // section list and the open page sit side by side; in the side panel the list is its
 // own screen and a page opens over it with a back button.
@@ -209,6 +211,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       const commit = () => {
         const key = keyInput.value.trim();
         if (!key) return keyInput.focus();
+        if (showKeyProblem(card, key)) return keyInput.focus();
         keyInput.value = "";
         save({ keys: { [p]: key } }, `${PROVIDER_NAMES[p]} key saved`);
         card.querySelector(".pc-result").textContent = "";
@@ -252,13 +255,15 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     const test = el("button", null, "Test connection");
     test.type = "button";
     test.onclick = () => {
+      const typed = keyInput?.value.trim();
+      if (typed && showKeyProblem(card, typed)) return keyInput.focus();
       const result = card.querySelector(".pc-result");
       result.className = "pc-result pending";
       result.textContent = "Testing…";
       send({
         type: "test_provider",
         provider: p,
-        key: keyInput?.value.trim() || undefined,
+        key: typed || undefined,
         baseUrl: p === "openai" ? card.querySelector('[data-bind="openaiBaseUrl"]').value : undefined,
         host: p === "ollama" ? card.querySelector('[data-bind="ollamaHost"]').value : undefined,
       });
@@ -277,6 +282,16 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     }
     card.append(actions, el("p", "pc-result"));
     return card;
+  }
+
+  // Shows why a typed key cannot be one under its card; true when there was a problem.
+  function showKeyProblem(card, key) {
+    const problem = keyProblem(key);
+    if (!problem) return false;
+    const result = card.querySelector(".pc-result");
+    result.className = "pc-result error";
+    result.replaceChildren(icon("alert"), el("span", null, problem));
+    return true;
   }
 
   const cards = $("provider-cards");
@@ -354,6 +369,11 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     e.preventDefault();
     const token = $("discord-token").value.trim();
     if (!token) return;
+    const problem = keyProblem(token, "bot token");
+    if (problem) {
+      $("discord-status").textContent = problem;
+      return $("discord-token").focus();
+    }
     $("discord-token").value = "";
     $("discord-status").textContent = "Connecting…";
     send({ type: "discord_save", token });

@@ -1,6 +1,6 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
-import { apiKeyFor, publicConfig, resetConfig } from "./config-core.js";
+import { apiKeyFor, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { today } from "./limits.js";
 
@@ -196,9 +196,14 @@ export function createController(host) {
       case "discord_status":
         if (host.discord) reply(await host.discord.status());
         return;
-      case "discord_save":
-        if (host.discord && String(msg.token ?? "").trim()) await host.discord.configure(msg.token);
+      case "discord_save": {
+        const token = typeof msg.token === "string" ? msg.token.trim() : "";
+        if (!host.discord || !token) return;
+        const problem = keyProblem(token, "bot token");
+        if (problem) return reply({ type: "error", text: problem });
+        await host.discord.configure(token);
         return;
+      }
       case "discord_unpair":
         await host.discord?.unpair();
         return;
@@ -290,11 +295,16 @@ export function createController(host) {
         const provider = providers[msg.provider];
         if (!provider) return;
         const config = await host.loadConfig();
-        if (msg.key) config.keys[msg.provider] = String(msg.key).trim();
+        const result = (ok, text) => reply({ type: "provider_test", provider: msg.provider, ok, text });
+        if (msg.key) {
+          const key = String(msg.key).trim();
+          const problem = keyProblem(key);
+          if (problem) return result(false, problem);
+          config.keys[msg.provider] = key;
+        }
         if (msg.provider === "openai" && typeof msg.baseUrl === "string") config.openaiBaseUrl = msg.baseUrl.trim();
         if (msg.provider === "ollama" && msg.host) config.ollamaHost = String(msg.host).trim();
         const apiKey = apiKeyFor(config, msg.provider);
-        const result = (ok, text) => reply({ type: "provider_test", provider: msg.provider, ok, text });
         if (msg.provider !== "ollama" && !apiKey) return result(false, "No key to test. Paste a key first.");
         const started = Date.now();
         try {
@@ -328,7 +338,12 @@ export function createController(host) {
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
         for (const [p, k] of Object.entries(keys || {})) {
           if (k === "__clear__") config.keys[p] = "";
-          else if (k) config.keys[p] = k.trim();
+          else if (k) {
+            const key = String(k).trim();
+            const problem = keyProblem(key);
+            if (problem) throw new Error(problem);
+            config.keys[p] = key;
+          }
         }
         await host.saveConfig(config);
         broadcastConfig(config);
