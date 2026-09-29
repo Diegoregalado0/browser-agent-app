@@ -10,11 +10,13 @@ import { loadConfig, saveConfig, loadUsage, saveUsage, sessions, EXTENSION_DEFAU
 const win = await chrome.windows.getCurrent();
 
 // Detach anything a previous panel in this window left attached, so no stale debugging
-// banner remains. Other windows' agents are left alone.
-const windowTabs = new Set((await chrome.tabs.query({ windowId: win.id })).map((t) => t.id));
-for (const target of await chrome.debugger.getTargets()) {
-  if (target.attached && windowTabs.has(target.tabId)) await chrome.debugger.detach({ tabId: target.tabId }).catch(() => {});
-}
+// banner remains. Other windows' agents are left alone. This runs while the UI loads;
+// ensureBrowser waits for it, so no task starts before it is done.
+const staleDetached = (async () => {
+  const windowTabs = new Set((await chrome.tabs.query({ windowId: win.id })).map((t) => t.id));
+  const stale = (await chrome.debugger.getTargets()).filter((t) => t.attached && windowTabs.has(t.tabId));
+  await Promise.all(stale.map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => {})));
+})().catch(() => {});
 
 const controller = createController({
   edition: "extension",
@@ -28,6 +30,7 @@ const controller = createController({
   dataLocation: "this browser profile",
   desktop: null,
   ensureBrowser: async (agent) => {
+    await staleDetached;
     if (agent.browser) return;
     const transport = new DebuggerTransport({ windowId: win.id });
     transport.onCanceled = () => agent.stop();
