@@ -41,8 +41,8 @@ async function tryConnect(wsUrl) {
 }
 
 // Connects to the agent's Chrome, launching it (through the keeper, which also installs
-// the sidebar) on the dedicated profile if it is not already running. It is launched
-// without automation switches, so pages see a normal browser.
+// the sidebar) on the dedicated profile if it is not already running. It is launched with
+// --remote-debugging-pipe, which sets navigator.webdriver, so pages can tell it is automated.
 export async function connectChrome() {
   const existing = readActivePort();
   if (existing) {
