@@ -94,6 +94,14 @@ Safety checks count toward the token limits too. When a provider rate-limits a r
 
 Settings > General holds instructions sent with every task, for facts and preferences such as "My city is Austin, TX." You can also let the agent confirm simple "Are you 18?" prompts for you. It never submits ID or payment details for age checks.
 
+### Outlook
+
+Connect Outlook in the Connections panel (the plug button) and sign in on Microsoft's own page with a work, school or personal Microsoft account. The agent can then search and read your mail, save drafts and replies, send, and list or add calendar events. Sending mail and adding events go through the safety check. The sign-in stays in this Chrome profile, never synced, and is never shown to the model. Sign out in the same panel.
+
+### Remote control from Discord
+
+Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets prompts and final answers, never screenshots or page contents, and sensitive-site and password prompts can only be approved at the computer.
+
 ### Developer tools
 
 When turned on, the agent can run JavaScript in a page and edit its HTML, which helps with debugging pages. Code runs with your signed-in access to the page. It is off by default; turn it on in Settings > Permissions and safety.
@@ -137,10 +145,27 @@ Test the extension in a separate Chrome profile, not your real one, with a key t
 
 The extension build is not minified, so Chrome Web Store reviewers can read it. Raise `version` in `package.json` before each store upload.
 
+### Outlook in the extension
+
+Outlook uses Microsoft Graph directly, signed in with `chrome.identity.launchWebAuthFlow` (authorization code with PKCE). It needs an app registration owned by the maintainer; until its client ID is set in `OUTLOOK_CLIENT_ID` (`src/outlook-graph.js`), the Outlook card says it is not available.
+
+Register the app once, in the [Microsoft Entra admin center](https://entra.microsoft.com) (or Azure portal) > App registrations > New registration:
+
+1. Name: Browser Agent. Supported account types: **Accounts in any organizational directory (Any Microsoft Entra ID tenant - Multitenant) and personal Microsoft accounts (e.g. Skype, Xbox)**.
+2. Redirect URI: platform **Single-page application (SPA)**, URI `https://fddhceodbfeklilaakgioapmildcmgjo.chromiumapp.org/` (the development id, see below; keep the trailing slash). Register.
+3. Copy the **Application (client) ID** from the Overview page into `OUTLOOK_CLIENT_ID`.
+4. API permissions > Add a permission > Microsoft Graph > Delegated: `User.Read`, `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `offline_access` (`openid` and `profile` are added automatically). No admin consent is needed for these; users consent at sign-in, unless their organization blocks user consent.
+5. Leave Certificates & secrets empty: it is a public client, and PKCE replaces a secret. Under Authentication, leave "Allow public client flows" off.
+6. Optional, for the consent screen: Branding & properties (logo, home page, privacy link), and publisher verification, which removes the "unverified" label for work and school accounts.
+
+The SPA platform is the one Microsoft allows for a token request from a browser origin; its refresh tokens last 24 hours, after which the extension signs in again silently while the user's Microsoft session is still active, and otherwise asks them to sign in again.
+
+**Extension id.** The redirect URI contains the extension id, so the manifest has a `key` (`EXTENSION_KEY` in `scripts/build-extension.js`) that fixes it at `fddhceodbfeklilaakgioapmildcmgjo` for unpacked loads. The Chrome Web Store assigns its own id. After the first upload (it can stay a draft), open the item in the Developer Dashboard > Package > View public key, put that key (without the BEGIN/END lines, on one line) in `EXTENSION_KEY`, and add `https://<store id>.chromiumapp.org/` as a second SPA redirect URI in the app registration. Unpacked builds then have the store id too. The store zip is packed without the `key`.
+
 ### The Mac test app
 
 The repo also contains a Mac app used only for development and testing. It is not a product and is not published. It runs the same agent from a local Node server and drives its own Chrome profile over the DevTools protocol, which makes it easy to script, inspect, and test.
 
 - Install with `./scripts/install.sh` (needs Chrome in `/Applications`), or run `browser-agent serve` in the foreground. `bin/` has `browser-agent status`, `stop`, `logs`, and `activity`.
 - Test on a throwaway profile: `BROWSER_AGENT_HOME=/tmp/ba-test browser-agent serve --port=7799 --no-open`. Settings, sessions, and its Chrome profile all go there.
-- It has experimental features that the extension does not: MCP connections (Outlook and custom servers, `src/mcp.js`), Discord remote control (`src/remote-discord.js`), an activity log, and mouse and keyboard control outside the page (`native/`, which needs Apple's command line tools and Accessibility and Screen Recording permission).
+- It has experimental features that the extension does not: MCP servers (Outlook through an MCP server, and custom servers, `src/mcp.js`), an activity log, and mouse and keyboard control outside the page (`native/`, which needs Apple's command line tools and Accessibility and Screen Recording permission).
