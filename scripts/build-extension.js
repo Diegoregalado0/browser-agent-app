@@ -67,10 +67,9 @@ const html = readFileSync(join(ROOT, "ui", "index.html"), "utf8").replace(
 if (!html.includes("sidepanel.js")) throw new Error("ui/index.html no longer loads app.js the expected way");
 writeFileSync(join(OUT, "sidepanel.html"), html);
 
-const icon = join(ROOT, "scripts", "icon-128.png");
-copyFileSync(icon, join(OUT, "icon-128.png"));
-for (const size of [16, 32, 48]) {
-  execFileSync("sips", ["-z", String(size), String(size), icon, "--out", join(OUT, `icon-${size}.png`)], { stdio: "ignore" });
+// The small sizes are drawn separately (brand/toolbar-16.svg); the 128 tile blurs when shrunk.
+for (const size of [16, 32, 48, 128]) {
+  copyFileSync(join(ROOT, "scripts", `icon-${size}.png`), join(OUT, `icon-${size}.png`));
 }
 
 rmSync(ZIP, { force: true });

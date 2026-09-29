@@ -93,7 +93,7 @@ export function writeSidebarExtension(uiUrl) {
     commands: {
       _execute_action: { suggested_key: { default: "Ctrl+Shift+Y", mac: "Command+Shift+Y" }, description: "Open the chat panel" },
     },
-    ...(existsSync(ICON_SOURCE) && { icons: { 128: "icon-128.png" } }),
+    ...(existsSync(ICON_SOURCE) && { icons: { 16: "icon-16.png", 32: "icon-32.png", 128: "icon-128.png" } }),
   };
   writeFileSync(join(SIDEBAR_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
   copyFileSync(BACKGROUND_SOURCE, join(SIDEBAR_DIR, "background.js"));
@@ -121,6 +121,8 @@ export function writeSidebarExtension(uiUrl) {
 );
 `,
   );
-  if (existsSync(ICON_SOURCE)) copyFileSync(ICON_SOURCE, join(SIDEBAR_DIR, "icon-128.png"));
+  if (existsSync(ICON_SOURCE)) {
+    for (const size of [16, 32, 128]) copyFileSync(join(dirname(ICON_SOURCE), `icon-${size}.png`), join(SIDEBAR_DIR, `icon-${size}.png`));
+  }
   return SIDEBAR_DIR;
 }
