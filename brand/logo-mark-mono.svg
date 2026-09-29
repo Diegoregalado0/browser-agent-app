@@ -1,16 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Duomo" fill="currentColor">
-  <mask id="ribs">
-    <rect width="64" height="64" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="2.6" stroke-linecap="round">
-      <path d="M23.6 48C23.8 35 26.5 25 30.4 18.2M40.4 48C40.2 35 37.5 25 33.6 18.2"/>
-    </g>
-    <path d="M28.6 11.2h2v3.2h-2zM33.4 11.2h2v3.2h-2z" fill="#000"/>
-    <circle cx="32" cy="55.4" r="2" fill="#000"/>
-  </mask>
-  <g mask="url(#ribs)">
-    <path d="M10 47.6C10 34 19 23.5 28.5 17h7C45 23.5 54 34 54 47.6z"/>
-    <path d="M9 50h46v9H9z"/>
-    <path d="M26.5 15.8h11V17h-11zM28 9.6h8v5.2h-8zM27.3 9.6L32 5.2l4.7 4.4z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Browsby">
+  <!-- One color: set the color with CSS `color` (uses currentColor) -->
+  <g fill="currentColor">
+    <path d="M23 112 Q31 112 31 104 L31 24 Q31 16 39 16 L43 16 Q51 16 51 24 L51 112 Z"/>
+    <path fill-rule="evenodd" d="M75 50a31 31 0 1 0 0.001 0Z M75 66a15 15 0 1 1 -0.001 0Z"/>
+    <circle cx="75" cy="81" r="8"/>
   </g>
-  <circle cx="32" cy="3.3" r="2.3"/>
 </svg>

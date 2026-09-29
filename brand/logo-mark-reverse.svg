@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Browsby">
+  <!-- For dark backgrounds: Paper b, Lamp center -->
+  <path d="M23 112 Q31 112 31 104 L31 24 Q31 16 39 16 L43 16 Q51 16 51 24 L51 112 Z" fill="#F6F1E7"/>
+  <circle cx="75" cy="81" r="23.5" fill="none" stroke="#F6F1E7" stroke-width="15"/>
+  <circle cx="75" cy="81" r="8" fill="#E0A23B"/>
+</svg>

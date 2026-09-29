@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Browsby">
+  <!-- Drawn on the 16 px grid for the Chrome toolbar. The tile keeps it visible on light and dark toolbars. -->
+  <rect width="16" height="16" rx="3.5" fill="#1F3A5F"/>
+  <path d="M3 13.5 L3 3.5 Q3 2.5 4 2.5 Q5 2.5 5 3.5 L5 13.5 Z" fill="#F6F1E7"/>
+  <circle cx="8.75" cy="9.75" r="2.75" fill="none" stroke="#F6F1E7" stroke-width="2"/>
+  <circle cx="8.75" cy="9.75" r="1" fill="#E0A23B"/>
+</svg>
