@@ -1,10 +1,10 @@
 # Positioning and voice
 
-The product name is being chosen (Duomo was dropped). Until it is picked, write "Browser Agent" or "the agent". Everything below holds for any name.
+The product is **Browsby**, a Chrome extension. Say "Browsby" for the product and "the agent" for what does the work. Brand details are in BRAND.md.
 
 ## One-line promise
 
-Say what you want done, and it does it in your own Chrome tabs, on your own AI key, with nothing sent through us.
+Say what you want done, and Browsby does it in your own Chrome tabs, on your own AI key, with nothing sent through us.
 
 ## Three benefits
 
@@ -12,7 +12,7 @@ Say what you want done, and it does it in your own Chrome tabs, on your own AI k
 2. **Your key, your provider, no middleman.** Bring a key from Anthropic, OpenAI, Google Gemini, or Mistral, or use a local model through Ollama. The key stays on your computer and goes only to that provider. No account with us, no server of ours in between.
 3. **It asks before it matters.** A safety check compares each action with what you asked for and watches pages for text that tries to take over. On banks, payment sites, password managers, and password fields it always asks first.
 
-Keep Chrome. It works in the browser you already use (extension), or in its own window on a Mac (app).
+Keep Chrome. Browsby is an extension for the browser you already use; there is no new browser to install.
 
 ## Voice rules
 
