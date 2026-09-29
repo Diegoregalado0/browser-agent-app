@@ -454,9 +454,12 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [], ge
         toast("Settings reset to defaults");
       },
       discord_status(msg) {
-        const set = msg.state !== "off";
+        const set = !["off", "elsewhere", "incognito"].includes(msg.state);
+        $("discord-form").hidden = msg.state === "elsewhere" || msg.state === "incognito";
         $("discord-status").textContent =
           msg.state === "off" ? "Not set up."
+          : msg.state === "elsewhere" ? "Discord runs in the agent panel of another Chrome window. Manage it there, or close that panel to move it here."
+          : msg.state === "incognito" ? "Discord does not run in incognito windows."
           : msg.state === "connecting" ? "Connecting to Discord…"
           : msg.state === "error" ? msg.error
           : msg.paired ? `Connected as ${msg.botName}, paired with ${msg.userName}. Message the bot to give it a task.`

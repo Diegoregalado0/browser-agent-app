@@ -49,7 +49,7 @@
       <button data-settings-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
       <button data-settings-page="browser" data-icon="window"><span>Browser</span></button>
       <button data-settings-page="data" data-icon="lock"><span>Data and privacy</span></button>
-      <button data-settings-page="remote" data-icon="phone" data-local-only><span>Remote (Discord)</span></button>
+      <button data-settings-page="remote" data-icon="phone"><span>Remote (Discord)</span></button>
       <button data-settings-page="debug" data-icon="bug"><span>Debug</span></button>
       <button id="show-browser" data-icon="window" data-local-only><span>Show the agent browser</span></button>
       <button id="menu-open-mcp" data-icon="plug" data-local-only><span>MCP connections</span></button>
@@ -76,7 +76,7 @@
         <button data-page="safety" data-icon="shield"><span>Permissions and safety</span></button>
         <button data-page="browser" data-icon="window"><span>Browser</span></button>
         <button data-page="data" data-icon="lock"><span>Data and privacy</span></button>
-        <button data-page="remote" data-icon="phone" data-local-only><span>Remote (Discord)</span></button>
+        <button data-page="remote" data-icon="phone"><span>Remote (Discord)</span></button>
         <button data-page="debug" data-icon="bug"><span>Debug</span></button>
       </nav>
 
@@ -404,7 +404,8 @@
 
 
         <section class="settings-page" data-page="remote" data-title="Remote (Discord)" hidden>
-          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this Mac, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
+          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this <span data-local-only>Mac</span><span data-extension-only>computer</span>, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
+          <p class="group-desc" data-extension-only>It works only while Chrome is open with the agent's panel open. Closing the panel disconnects the bot until you open it again, and tasks from Discord run in that panel's window.</p>
 
           <div class="setting-group">
             <div class="setting stack">
@@ -434,7 +435,8 @@
                 <li>Send the bot the pairing code shown above as a direct message.</li>
               </ol>
               <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
-              <p class="field-note">The token stays in the settings file on this Mac, readable only by you, and is never shown again.</p>
+              <p class="field-note" data-local-only>The token stays in the settings file on this Mac, readable only by you, and is never shown again.</p>
+              <p class="field-note" data-extension-only>The token stays in this Chrome profile on this computer (never synced) and is never shown again.</p>
               <div class="row"><button type="submit" class="primary">Save and connect</button></div>
             </div>
           </form>

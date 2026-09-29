@@ -1,6 +1,7 @@
 import { createController } from "../src/controller.js";
 import { Browser } from "../src/browser-tools.js";
 import { DebuggerTransport } from "./transport-debugger.js";
+import { DiscordBridge } from "../src/remote-discord.js";
 import { loadConfig, saveConfig, loadUsage, saveUsage, sessions, EXTENSION_DEFAULTS } from "./storage.js";
 
 // The extension edition runs the whole agent inside the side panel page: the panel's
@@ -18,7 +19,7 @@ const staleDetached = (async () => {
   await Promise.all(stale.map((t) => chrome.debugger.detach({ tabId: t.tabId }).catch(() => {})));
 })().catch(() => {});
 
-const controller = createController({
+const host = {
   edition: "extension",
   env: {},
   loadConfig,
@@ -36,7 +37,22 @@ const controller = createController({
     transport.onCanceled = () => agent.stop();
     agent.browser = new Browser(transport);
   },
-});
+};
+const controller = createController(host);
+
+// Discord remote control runs in one panel at a time, since two connections for one bot
+// would each take every task: the first panel opened holds the lock, and the next one
+// waiting takes over when it closes. Incognito panels never run it.
+const discordAway = (state) => ({ status: async () => ({ type: "discord_status", state }), configure() {}, unpair() {}, remove() {} });
+host.discord = discordAway(win.incognito ? "incognito" : "elsewhere");
+if (!win.incognito) {
+  navigator.locks.request("discord-bridge", () => {
+    host.discord = new DiscordBridge({ controller, loadConfig, saveConfig, onChange: () => controller.discordChanged(), place: "the computer" });
+    host.discord.start().catch((err) => console.error(`Discord: ${err.message}`));
+    // Held until this page closes.
+    return new Promise(() => {});
+  });
+}
 
 // Settings changed in another window's panel.
 chrome.storage.onChanged.addListener((changes, area) => {

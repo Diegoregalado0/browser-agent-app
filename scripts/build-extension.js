@@ -30,7 +30,8 @@ const manifest = {
   description: "An AI agent that does tasks in your browser tabs, using your own API key.",
   minimum_chrome_version: "120",
   permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage"],
-  host_permissions: PROVIDER_HOSTS,
+  // Discord's API for remote control; its gateway is a WebSocket, which needs no permission.
+  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*"],
   background: { service_worker: "background.js" },
   side_panel: { default_path: "sidepanel.html" },
   action: { default_title: "Browsby", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },
