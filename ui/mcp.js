@@ -241,7 +241,7 @@ export function createMcpPanel({ $, el, send, toast }) {
   // One-step sign-in: Microsoft's page opens in the default browser, where the user is
   // often signed in already. A device code is the fallback.
   function browserStep(note = "") {
-    const body = [el("p", null, "Microsoft's sign-in page opens in your web browser. Sign in with your Microsoft account (your UC Merced email) and accept.")];
+    const body = [el("p", null, "Microsoft's sign-in page opens in your web browser. Sign in with your Microsoft account (work, school or personal) and accept.")];
     if (note) body.push(el("p", "field-note error", note));
     showStep("signin", {
       title: "Sign in to Microsoft",
@@ -282,7 +282,7 @@ export function createMcpPanel({ $, el, send, toast }) {
     const codeRow = el("div", "code-row");
     codeRow.append(code, copy);
     second.append(el("span", null, "Enter this code:"), codeRow);
-    steps.append(first, second, el("li", null, "Sign in with your Microsoft account (your UC Merced email) and accept."));
+    steps.append(first, second, el("li", null, "Sign in with your Microsoft account (work, school or personal) and accept."));
     const body = [steps];
     if (note) body.push(el("p", "field-note error", note));
     showStep("signin", {
