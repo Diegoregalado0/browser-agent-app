@@ -13,6 +13,7 @@ import { McpServers } from "../src/mcp.js";
 import { createController } from "../src/controller.js";
 import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
+import { OutlookGraph, newPkce } from "../src/outlook-graph.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -433,5 +434,87 @@ assert.ok(isBotCheck("https://www.google.com/sorry/index?continue=x"));
 assert.ok(isBotCheck("https://example.com/", "Just a moment..."));
 assert.ok(isBotCheck("https://html.duckduckgo.com/html/?q=a", "a at DuckDuckGo", "Unfortunately, bots use DuckDuckGo too."));
 assert.ok(!isBotCheck("https://en.wikipedia.org/wiki/CAPTCHA", "CAPTCHA - Wikipedia", "Are you a robot? ".repeat(200)), "a long article was taken for a bot check");
+// Outlook through Microsoft Graph against a local stand-in for the token endpoint and
+// Graph: request shapes, renewal on expiry and on a rejected token, errors, and tokens
+// kept out of results and status.
+const graphCalls = [];
+let graphAccess = "at1";
+const graphServer = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    graphCalls.push({ method: req.method, url: req.url, body, auth: req.headers.authorization, prefer: req.headers.prefer });
+    const json = (status, value) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+    if (req.url === "/auth/token") {
+      const form = new URLSearchParams(body);
+      if (form.get("grant_type") === "authorization_code") return json(200, { access_token: graphAccess, refresh_token: "rt1", expires_in: 3600 });
+      if (form.get("refresh_token") === "rt-revoked") return json(400, { error: "invalid_grant", error_description: "AADSTS70000: revoked" });
+      graphAccess = `at${graphCalls.length}`;
+      return json(200, { access_token: graphAccess, refresh_token: "rt2", expires_in: 3600 });
+    }
+    if (req.headers.authorization !== `Bearer ${graphAccess}`) return json(401, { error: { code: "InvalidAuthenticationToken", message: "expired" } });
+    const path = req.url.replace(/^\/graph/, "");
+    if (path.startsWith("/me?")) return json(200, { userPrincipalName: "ada@example.edu" });
+    if (path.startsWith("/me/mailFolders/inbox/messages")) return json(200, { value: [{ id: "m1", subject: "Hi", from: { emailAddress: { address: "bob@x.test" } }, receivedDateTime: "2026-09-28T10:00:00Z", bodyPreview: "hello", isRead: false }] });
+    if (path.startsWith("/me/messages/m1?")) return json(200, { subject: "Hi", from: { emailAddress: { address: "bob@x.test" } }, toRecipients: [], ccRecipients: [], receivedDateTime: "t", body: { content: "Body text" } });
+    if (path === "/me/messages/m1/createReply") return json(201, { id: "d1" });
+    if (path === "/me/messages/d1/send") return res.writeHead(202).end();
+    if (path.startsWith("/me/calendarView")) return json(200, { value: [] });
+    if (path === "/me/events") return json(201, { subject: "Lunch", start: { dateTime: "2026-09-29T12:00:00.0000000" } });
+    json(404, { error: { code: "ErrorItemNotFound", message: "The specified object was not found in the store." } });
+  });
+});
+await new Promise((r) => graphServer.listen(0, "127.0.0.1", r));
+const graphBase = `http://127.0.0.1:${graphServer.address().port}`;
+let outlookAuth = null;
+const outlook = new OutlookGraph({
+  clientId: "client-1",
+  loadAuth: async () => structuredClone(outlookAuth),
+  saveAuth: async (a) => (outlookAuth = structuredClone(a)),
+  authority: `${graphBase}/auth`,
+  graph: `${graphBase}/graph`,
+});
+await outlook.init();
+assert.equal(outlook.toolDefs().length, 0, "Outlook tools offered before sign-in");
+const pkce = await newPkce();
+const signInUrl = new URL(outlook.authUrl({ redirectUri: "https://abc.chromiumapp.org/", challenge: pkce.challenge, state: pkce.state }));
+assert.equal(signInUrl.searchParams.get("code_challenge_method"), "S256");
+assert.equal(signInUrl.searchParams.get("client_id"), "client-1");
+assert.match(signInUrl.searchParams.get("scope"), /offline_access.*Mail\.Send/);
+assert.equal(await outlook.redeem({ code: "c1", verifier: pkce.verifier, redirectUri: "https://abc.chromiumapp.org/" }), "ada@example.edu");
+const redeemForm = new URLSearchParams(graphCalls[0].body);
+assert.equal(redeemForm.get("code_verifier"), pkce.verifier);
+assert.equal(redeemForm.get("grant_type"), "authorization_code");
+assert.ok(JSON.stringify(outlook.toolDefs()).length < 2500, "Outlook tool definitions grew past a few hundred tokens");
+assert.ok(outlook.isReadOnly("mcp__outlook__mail_read") && !outlook.isReadOnly("mcp__outlook__send"), "send must count as an action");
+const listed = (await outlook.call("mcp__outlook__mail_search", {}))[0].text;
+assert.match(listed, /id: m1[\s\S]*bob@x\.test \(unread\)/);
+assert.match(graphCalls.at(-1).url, /\/me\/mailFolders\/inbox\/messages\?\$orderby=receivedDateTime%20desc&\$top=10/);
+assert.match((await outlook.call("mcp__outlook__mail_read", { id: "m1" }))[0].text, /Body text/);
+assert.equal(graphCalls.at(-1).prefer, 'outlook.body-content-type="text"');
+// An expired access token is renewed with the refresh token before the request.
+outlookAuth.expiresAt = 0;
+assert.match((await outlook.call("mcp__outlook__draft", { body: "Thanks!", reply_to_id: "m1" }))[0].text, /draft_id: d1/);
+assert.equal(new URLSearchParams(graphCalls.at(-2).body).get("refresh_token"), "rt1");
+assert.equal(JSON.parse(graphCalls.at(-1).body).comment, "Thanks!");
+assert.equal(outlookAuth.refreshToken, "rt2");
+// A rejected access token is renewed once and the request retried.
+graphAccess = "server-side-rotation";
+assert.equal((await outlook.call("mcp__outlook__send", { draft_id: "d1" }))[0].text, "Sent.");
+assert.equal(graphCalls.at(-1).url, "/graph/me/messages/d1/send");
+await outlook.call("mcp__outlook__events", { start: "2026-09-29", end: "2026-09-30" });
+assert.ok(new URL(graphCalls.at(-1).url, graphBase).searchParams.get("startDateTime").endsWith("Z"), "calendar range not sent as UTC");
+const created = await outlook.call("mcp__outlook__event_create", { subject: "Lunch", start: "2026-09-29T12:00", end: "2026-09-29T13:00" });
+assert.match(created[0].text, /Lunch/);
+assert.ok(JSON.parse(graphCalls.at(-1).body).start.timeZone, "event created without a time zone");
+await assert.rejects(outlook.call("mcp__outlook__mail_read", { id: "missing" }), /Outlook: The specified object was not found/);
+const status = await outlook.status();
+assert.ok(status.signedIn && !JSON.stringify(status).match(/rt2|at\d/), "Outlook status leaked a token");
+// A revoked refresh token signs out, with a message the model can relay.
+outlookAuth = { ...outlookAuth, refreshToken: "rt-revoked", expiresAt: 0 };
+await assert.rejects(outlook.call("mcp__outlook__mail_search", {}), /sign in again/);
+assert.equal(outlookAuth, null);
+assert.equal(outlook.has("mcp__outlook__mail_search"), false);
+graphServer.close();
 
 console.log("agent checks passed");
