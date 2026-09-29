@@ -3,7 +3,7 @@
 // only start a task, stop it and answer prompts; everything else stays on the computer.
 // Only prompts, final replies, errors and stop notices are sent, since Discord can read bot
 // messages. It uses only web platform APIs (WebSocket, fetch, crypto.getRandomValues), so
-// the same code runs in the Mac app (Node) and in the extension's side panel.
+// it runs in the extension's side panel and in the Node offline checks.
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -19,8 +19,8 @@ export class DiscordBridge {
   // controller: to connect as a remote client. loadConfig/saveConfig: settings storage, where
   // config.discord = { token, userId, userName, pairCode } lives (owner-only file).
   // onChange(): the bridge's status changed. api and gateway: Discord's addresses (a local
-  // stand-in in scripts/agent-check.js). place: where the agent runs, in replies ("the Mac").
-  constructor({ controller, loadConfig, saveConfig, onChange = () => {}, api = API, gateway = GATEWAY, place = "the Mac" }) {
+  // stand-in in scripts/agent-check.js). place: where the agent runs, in replies.
+  constructor({ controller, loadConfig, saveConfig, onChange = () => {}, api = API, gateway = GATEWAY, place = "the computer" }) {
     this.api = api;
     this.place = place;
     this.gateway = gateway;
@@ -184,7 +184,7 @@ export class DiscordBridge {
     const discord = config.discord ?? {};
     const text = (message.content ?? "").trim();
     if (!discord.userId) {
-      // Pairing: the code shown at the Mac, sent from the owner's account.
+      // Pairing: the code shown at the computer, sent from the owner's account.
       if (discord.pairCode && text.toUpperCase() === discord.pairCode) {
         config.discord = { ...discord, userId: message.author.id, userName: message.author.username, pairCode: "" };
         await this.saveConfig(config);

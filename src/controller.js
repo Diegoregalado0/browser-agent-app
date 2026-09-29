@@ -9,7 +9,7 @@ const CONNECTION_TEST_TIMEOUT_MS = 15000;
 // What a remote client (a chat bridge such as Discord) may send: start a task, stop it, and
 // answer a permission prompt. Settings, keys and data change only at the computer.
 const REMOTE_MESSAGES = new Set(["run", "stop", "permission"]);
-// Prompts only the person at the Mac can approve.
+// Prompts only the person at the computer can approve.
 const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 
 
@@ -314,7 +314,7 @@ export function createController(host) {
         if (remote && msg.decision !== "deny" && LOCAL_ONLY_PROMPTS.has(pendingPermission.kind)) {
           return reply({ type: "error", text: "This one can only be approved at the computer." });
         }
-        // "Always" changes settings, which only the Mac does.
+        // "Always" changes settings, which only the computer does.
         resolvePermission(remote && msg.decision === "always" ? "once" : msg.decision);
         return;
       }

@@ -2,13 +2,13 @@
   "name": "browser-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "Internal browser agent: drives a dedicated Chrome profile and the macOS desktop with any model provider.",
+  "description": "Browsby: an AI agent Chrome extension that does tasks in your tabs with your own model provider key.",
   "type": "module",
   "bin": {
     "browser-agent": "bin/browser-agent.js"
   },
   "scripts": {
-    "start": "node bin/browser-agent.js serve",
+    "start": "node bin/browser-agent.js",
     "check": "node --check bin/browser-agent.js && for f in src/*.js src/providers/*.js ui/*.js extension/*.js scripts/*.js; do node --check $f || exit 1; done && node scripts/agent-check.js",
     "build:extension": "node scripts/build-extension.js"
   },

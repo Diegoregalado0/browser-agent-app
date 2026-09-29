@@ -252,8 +252,8 @@ function describeKey(token) {
 }
 
 export class Browser {
-  // transport: how pages are reached (CdpTransport locally, the chrome.debugger transport
-  // in the extension edition). Tab ids come from the transport.
+  // transport: how pages are reached (the chrome.debugger transport, or a test stand-in).
+  // Tab ids come from the transport.
   constructor(transport) {
     this.transport = transport;
     // While a task runs with highlighting on, its current tab sits in an "Agent" tab group.

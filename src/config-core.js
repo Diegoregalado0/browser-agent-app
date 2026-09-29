@@ -1,5 +1,4 @@
-// Settings shape, defaults, and key handling, shared by the local server and the
-// extension edition. No file or environment access here.
+// Settings shape, defaults, and key handling. No file or environment access here.
 
 // Small models used for safety checks when none is set for the provider. Empty means
 // the main model is used.
@@ -46,8 +45,8 @@ export const DEFAULTS = {
   debugMode: false,
   // Set when the first-run setup has been finished or skipped.
   setupDone: false,
-  // Remote control over the owner's Discord bot (local edition). The token never leaves this
-  // file; the UI sees only the bridge's status.
+  // Remote control over the owner's Discord bot. The token never leaves settings storage;
+  // the UI sees only the bridge's status.
   discord: { token: "", userId: "", userName: "", pairCode: "" },
 };
 

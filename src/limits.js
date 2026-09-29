@@ -1,4 +1,4 @@
-// Usage limits and site policies applied by the agent in both editions.
+// Usage limits and site policies applied by the agent.
 
 // Resolves after ms, or as soon as the signal aborts.
 export const sleep = (ms, signal) =>
