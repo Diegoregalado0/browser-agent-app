@@ -47,8 +47,11 @@ rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
 await build({
-  entryPoints: [join(ROOT, "extension", "sidepanel-main.js")],
-  outfile: join(OUT, "sidepanel.js"),
+  // Split so each provider's SDK is its own chunk, loaded only when that provider is used.
+  entryPoints: { sidepanel: join(ROOT, "extension", "sidepanel-main.js") },
+  outdir: OUT,
+  chunkNames: "chunks/[name]-[hash]",
+  splitting: true,
   bundle: true,
   format: "esm",
   platform: "browser",
