@@ -9,6 +9,7 @@ import { providers } from "../src/providers/index.js";
 import { DEFAULTS, keyProblem, mergeConfig } from "../src/config-core.js";
 import { renderMarkdown } from "../ui/markdown.js";
 import * as openai from "../src/providers/openai.js";
+import * as ollama from "../src/providers/ollama.js";
 import OpenAI from "openai";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
@@ -669,6 +670,9 @@ assert.match(sensitivePrompts[0], /left_click on a "Sign Up"\?$/);
 // A bare-number ref is read as ref_N before any check sees it.
 assert.equal(onBank.messages.at(-3).content[0].input.ref, "ref_3");
 assert.match(onBank.messages.at(-2).content[0].content[0].text, /declined acting on www\.paypal\.com\. Do not retry/);
+
+// An Ollama server that is not running, as the browser reports it.
+assert.match(ollama.describeError(new TypeError("Failed to fetch")), /Is it running/);
 
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);

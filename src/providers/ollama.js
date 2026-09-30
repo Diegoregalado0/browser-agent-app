@@ -92,7 +92,8 @@ export async function turn({ model, config, system, tools, messages, signal, onT
 }
 
 export function describeError(err) {
-  if (err?.cause?.code === "ECONNREFUSED" || /fetch failed/i.test(err?.message)) {
+  // Node says "fetch failed"; the browser, where the extension runs, says "Failed to fetch".
+  if (err?.cause?.code === "ECONNREFUSED" || /fetch failed|failed to fetch/i.test(err?.message)) {
     return "Could not reach Ollama. Is it running (ollama serve)?";
   }
   if (err?.name === "ResponseError") return `Ollama error: ${err.message}`;
