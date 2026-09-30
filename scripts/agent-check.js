@@ -24,6 +24,7 @@ import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
 import { formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
+import { readPageScript, describeTargetScript } from "../src/page-scripts.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -731,5 +732,24 @@ await titled.run("click it", config);
 assert.equal(transcriptOf(titled.messages)[0].text, "click it", "the current-tab note was not stripped");
 const userPart = guardTexts[0].split("Current page:")[0];
 assert.doesNotMatch(userPart, /evil\.example/, "the page title reached the safety check as a user request");
+
+// A filled password field is outlined and described without its value, so the password
+// reaches neither the model nor a permission prompt.
+const fakeDoc = { defaultView: { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }) } };
+const fakeField = (type, value) => ({
+  tagName: "INPUT", type, value, children: [], labels: [], innerText: "", textContent: "", ownerDocument: fakeDoc, form: null,
+  getAttribute: () => null, matches: () => true, closest() { return this; }, getBoundingClientRect: () => ({ width: 10, height: 10 }),
+});
+const pageFields = [fakeField("text", "ada@example.com"), fakeField("password", "hunter2-secret")];
+Object.assign(globalThis, {
+  window: {}, innerWidth: 800, innerHeight: 600, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
+  document: { title: "Sign in", body: { children: pageFields }, documentElement: { scrollWidth: 800, scrollHeight: 600 } },
+});
+const outline = readPageScript(false, 40000).tree;
+assert.match(outline, /ada@example\.com/);
+assert.match(outline, /type=password value=\[hidden\]/);
+assert.doesNotMatch(outline, /hunter2/, "read_page showed a password");
+assert.doesNotMatch(describeTargetScript("ref_2", 0, 0) ?? "", /hunter2/, "a target description showed a password");
+for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
 
 console.log("agent checks passed");

@@ -92,7 +92,8 @@ export function readPageScript(interactiveOnly, maxChars) {
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       if (el.type && el.tagName === "INPUT") line += ` type=${el.type}`;
       if (["checkbox", "radio"].includes(el.type)) line += el.checked ? " checked" : " unchecked";
-      else if (el.value) line += ` value="${clip(el.value, 80)}"`;
+      // A password is never read back, only whether the field is filled.
+      else if (el.value) line += el.type === "password" ? " value=[hidden]" : ` value="${clip(el.value, 80)}"`;
     }
     if (el.tagName === "SELECT") {
       const opts = [...el.options].map((o) => (o.selected ? `*${clean(o.text)}` : clean(o.text)));
@@ -230,8 +231,9 @@ export function describeTargetScript(ref, x, y) {
   if (!el) return null;
   const target = el.closest("a,button,input,select,textarea,label,[role],[onclick]") || el;
   const clean = (t) => (t || "").replace(/\s+/g, " ").trim().slice(0, 120);
-  const name =
-    target.getAttribute("aria-label") || target.getAttribute("placeholder") || target.value || target.innerText || target.getAttribute("title") || "";
+  // A password field's value would show in the permission prompt and reach the safety model.
+  const value = target.type === "password" ? "" : target.value;
+  const name = target.getAttribute("aria-label") || target.getAttribute("placeholder") || value || target.innerText || target.getAttribute("title") || "";
   const tag = target.tagName.toLowerCase();
   const role = target.getAttribute("role") || (tag === "input" ? `input[type=${target.type}]` : tag);
   const form = target.form?.getAttribute("action");
