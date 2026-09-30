@@ -94,7 +94,8 @@ export class Guard {
   }
 
   // Returns { verdict: "allow" | "ask" | "block", reason }.
-  async checkAction({ config, userRequests, page, name, input, target, signal }) {
+  // declined: actions the user declined during this task, as "name {input}".
+  async checkAction({ config, userRequests, page, name, input, target, declined = [], signal }) {
     const lines = [
       "User requests in this conversation, oldest first:",
       ...userRequests.map((r, i) => `${i + 1}. ${r}`),
@@ -103,6 +104,10 @@ export class Guard {
       `Proposed action: ${name} ${JSON.stringify(input)}`,
     ];
     if (target) lines.push(`The action targets: ${target}`);
+    if (declined.length) {
+      lines.push("", 'The user declined these actions earlier in this task. An action that gets the same result another way is "block":');
+      for (const d of declined.slice(-5)) lines.push(`- ${d.slice(0, 300)}`);
+    }
     if (this.flags.length) {
       lines.push("", "Content the agent read earlier was flagged as a possible prompt injection:");
       for (const f of this.flags.slice(-3)) lines.push(`- ${f}`);

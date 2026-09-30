@@ -789,4 +789,36 @@ await asking.run("open my mail", { ...config, permissionMode: "ask" });
 assert.equal(sitePrompts[0]?.origin, "https://evil.example", "tabs create skipped the site prompt");
 assert.equal(opened, 0, "a declined tab was opened");
 
+// A declined action cannot be retried as is or routed around within the task: the same
+// call is refused without a new prompt, navigating back to the site asks again with the
+// same local-only kind, and the safety check is told what was declined.
+const declinePrompts = [];
+const declining = new Agent({ emit: () => {}, askPermission: async (p) => (declinePrompts.push(p), "deny") });
+let bankRuns = 0;
+declining.browser = { ...onBank.browser, run: async () => (bankRuns++, "done") };
+const bankClick = { type: "tool_call", id: "b1", name: "browser", input: { action: "left_click", ref: "ref_3" } };
+replies = [
+  { content: [bankClick], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ ...bankClick, id: "b2" }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "b3", name: "navigate", input: { url: "https://www.paypal.com/signup" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await declining.run("sign up", { ...config, permissionMode: "auto" });
+assert.deepEqual(declinePrompts.map((p) => p.kind), ["sensitive", "sensitive"], "a declined action was asked again, or navigation back was not");
+assert.match(declinePrompts[1].text, /declined an action on www\.paypal\.com/);
+const declineResults = declining.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result");
+assert.match(declineResults[1].content[0].text, /already declined this exact action/);
+assert.equal(bankRuns, 0, "a declined action or navigation ran");
+const guardAsks = [];
+providers.openai.classify = async ({ text }) => (guardAsks.push(text), { verdict: "ask", reason: "not requested" });
+declining.browser = { ...agent.browser, run: async () => (bankRuns++, "done") };
+replies = [
+  { content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ ...click, id: "c2", input: { action: "double_click", coordinate: [5, 5] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await declining.run("look around", config);
+assert.doesNotMatch(guardAsks[0], /declined/, "an earlier task's decline leaked into this one");
+assert.match(guardAsks[1], /declined these actions[\s\S]*left_click/, "the safety check was not told what the user declined");
+
 console.log("agent checks passed");
