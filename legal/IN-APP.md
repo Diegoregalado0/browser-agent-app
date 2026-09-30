@@ -1,6 +1,6 @@
 # In-product text
 
-Short texts for the extension UI, in Browsby's voice. These are proposals, except the policy links, which are in Settings > Data and privacy.
+Short texts for the extension UI, in Browsby's voice. These are proposals, except the policy links, which are in Settings > Data and privacy and at the bottom of every setup screen.
 
 ## Disclaimer (onboarding, last setup step, or Settings > General)
 
@@ -18,7 +18,7 @@ Shorter, for tight spaces:
 
 > Privacy Policy · Terms of Use
 
-Settings > Data and privacy links to https://diegoregalado0.github.io/browser-agent-app/legal/PRIVACY and .../legal/TERMS (GitHub Pages, not turned on yet). The setup footer does not have them yet.
+Settings > Data and privacy links to https://diegoregalado0.github.io/browser-agent-app/legal/PRIVACY and .../legal/TERMS (GitHub Pages, not turned on yet).
 
 ## Auto mode warning (next to the Auto option, if you want it firmer)
 
