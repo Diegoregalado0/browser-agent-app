@@ -326,6 +326,9 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
 
   function render(next) {
     config = next;
+    // The provider changed elsewhere (setup, another window) while the sheet is open: the
+    // list on screen, or the one still loading, is for the previous provider.
+    if (!sheet.hidden && $("provider").value !== config.provider) loadModels(config.provider);
     for (const control of sheet.querySelectorAll("[data-setting]")) setValue(control.id, readSetting(control.dataset.setting));
     setValue("sensitiveSites", (config.sensitiveSites || []).join("\n"));
     setValue("provider", config.provider);
