@@ -90,6 +90,7 @@ Extension icon mapping: toolbar 16 and 32 use `png/toolbar-16.png` and `png/tool
 | `--muted` | `#5F6470` | `#A29C90` | Secondary text |
 | `--panel` | `#FFFFFF` | `#1B2330` | Cards, composer |
 | `--border` | `#E2DACB` | `#313B4B` | Dividers (decorative) |
+| `--field-border` | `#7F838D` | `#87847D` | Edges of inputs and switch tracks: `--muted` mixed 80% with `--panel`. 3.80 on panel, 3.37 on bg (light); 4.23 / 4.77 (dark) |
 | `--accent` | `#24507F` | `#8DB4E2` | Buttons, links, focus ring |
 | `--accent-fg` | `#FFFFFF` | `#0E1622` | Text on accent |
 | `--user` | `#E4ECF5` | `#22324A` | User message bubble |
