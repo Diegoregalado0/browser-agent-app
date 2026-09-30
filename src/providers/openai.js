@@ -120,7 +120,10 @@ function client({ apiKey, config }) {
 
 export async function listModels(opts) {
   const ids = [];
-  for await (const m of client(opts).models.list()) ids.push(m.id);
+  // Mistral lists capabilities; embedding, OCR and speech models cannot run the agent.
+  for await (const m of client(opts).models.list()) {
+    if (!m.capabilities || (m.capabilities.completion_chat && m.capabilities.function_calling)) ids.push(m.id);
+  }
   return ids.sort();
 }
 

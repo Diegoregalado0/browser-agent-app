@@ -15,6 +15,7 @@ import { createController } from "../src/controller.js";
 import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
+import { Guard } from "../src/guard.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -132,6 +133,34 @@ await agent.run("fill the form", config);
 const batchMs = Date.now() - started;
 assert.deepEqual(filled, ["a", "c"], "the blocked field ran, or an allowed one did not");
 assert.ok(batchMs < 800, `three 300ms safety checks took ${batchMs}ms, so they did not run together`);
+
+// A safety model the account cannot use (Mistral's zero quota) fails at once instead of
+// retrying, and the action falls back to asking.
+let guardCalls = 0;
+providers.openai.classify = async () => {
+  guardCalls++;
+  throw Object.assign(new Error("Rate limit exceeded"), { status: 429, headers: new Headers({ "x-ratelimit-limit-req-minute": "0" }) });
+};
+started = Date.now();
+const blocked = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://example.com/" }, name: "browser", input: {} });
+assert.equal(blocked.verdict, "ask");
+assert.equal(guardCalls, 1, `a zero-quota safety model was retried ${guardCalls - 1} times`);
+assert.ok(Date.now() - started < 500, "a zero-quota safety model was retried after a wait");
+
+// Mistral's model list: only chat models with tool support can run the agent.
+const listServer = createServer((req, res) => {
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ object: "list", data: [
+    { id: "ministral-14b-latest", capabilities: { completion_chat: true, function_calling: true } },
+    { id: "mistral-embed", capabilities: { completion_chat: false, function_calling: false } },
+    { id: "voxtral-mini-transcribe", capabilities: { completion_chat: false, function_calling: false } },
+    { id: "gpt-plain" },
+  ] }));
+});
+await new Promise((r) => listServer.listen(0, "127.0.0.1", r));
+const chatModels = await openai.listModels({ apiKey: "test", config: { ...config, openaiBaseUrl: `http://127.0.0.1:${listServer.address().port}/v1` } });
+assert.deepEqual(chatModels, ["gpt-plain", "ministral-14b-latest"]);
+listServer.close();
 
 // OpenAI pacing, against a local server that answers like the API: after a response
 // reports an empty token budget, the next request waits for it to refill, and a 429 is
