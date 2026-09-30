@@ -2,7 +2,7 @@ import { createController } from "../src/controller.js";
 import { Browser } from "../src/browser-tools.js";
 import { DebuggerTransport } from "./transport-debugger.js";
 import { DiscordBridge } from "../src/remote-discord.js";
-import { OutlookGraph } from "../src/outlook-graph.js";
+import { OutlookGraph, OUTLOOK_CLIENT_ID } from "../src/outlook-graph.js";
 import { loadConfig, saveConfig, loadUsage, saveUsage, sessions } from "./storage.js";
 
 // The extension edition runs the whole agent inside the side panel page: the panel's
@@ -21,12 +21,16 @@ const staleDetached = (async () => {
 })().catch(() => {});
 
 // Outlook on Microsoft Graph. Its tokens have their own key in chrome.storage.local (never
-// synced), apart from the settings, so they never pass through the UI.
+// synced), apart from the settings, so they never pass through the UI. chrome.identity
+// exists only when the build requests the identity permission, which it does only with a
+// client id; without it Outlook counts as not set up and sign-in is never attempted.
+const identity = chrome.identity;
 const outlook = new OutlookGraph({
   loadAuth: async () => (await chrome.storage.local.get("outlookAuth")).outlookAuth ?? null,
   saveAuth: (outlookAuth) => (outlookAuth ? chrome.storage.local.set({ outlookAuth }) : chrome.storage.local.remove("outlookAuth")),
-  launchAuth: (url, interactive) => chrome.identity.launchWebAuthFlow({ url, interactive }),
-  redirectUri: chrome.identity.getRedirectURL(),
+  launchAuth: (url, interactive) => identity.launchWebAuthFlow({ url, interactive }),
+  redirectUri: identity?.getRedirectURL() ?? "",
+  clientId: identity ? OUTLOOK_CLIENT_ID : "",
 });
 await outlook.init();
 

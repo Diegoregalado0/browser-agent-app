@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { OUTLOOK_CLIENT_ID } from "../src/outlook-graph.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "dist", "extension");
@@ -23,6 +24,9 @@ const PROVIDER_HOSTS = [
   "http://localhost/*",
 ];
 
+// Microsoft sign-in and Graph, for Outlook.
+const OUTLOOK_HOSTS = ["https://login.microsoftonline.com/*", "https://graph.microsoft.com/*"];
+
 // The public key that fixes the extension id, so Outlook's sign-in redirect
 // (https://<id>.chromiumapp.org/) is the same on every unpacked load. This development key
 // gives id fddhceodbfeklilaakgioapmildcmgjo; its private key was discarded, since unpacked
@@ -36,10 +40,10 @@ const manifest = {
   version,
   description: "An AI agent that does tasks in your browser tabs, using your own API key.",
   minimum_chrome_version: "120",
-  permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage", "identity"],
+  permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage", ...(OUTLOOK_CLIENT_ID ? ["identity"] : [])],
   // Discord's API for remote control (its gateway is a WebSocket, which needs no
-  // permission), and Microsoft sign-in and Graph for Outlook.
-  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*", "https://login.microsoftonline.com/*", "https://graph.microsoft.com/*"],
+  // permission), and, only when Outlook is set up, Microsoft sign-in and Graph.
+  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*", ...(OUTLOOK_CLIENT_ID ? OUTLOOK_HOSTS : [])],
   background: { service_worker: "background.js" },
   side_panel: { default_path: "sidepanel.html" },
   action: { default_title: "Browsby", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },

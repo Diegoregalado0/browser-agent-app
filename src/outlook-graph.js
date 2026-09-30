@@ -5,7 +5,8 @@
 // in the auth store and never reach the model, the UI or logs.
 
 // The owner's Entra app registration (README, "Outlook in the extension"). Empty means
-// Outlook is not configured in this build.
+// Outlook is not configured in this build, and the build then leaves out the identity
+// permission and the Microsoft hosts (scripts/build-extension.js).
 export const OUTLOOK_CLIENT_ID = "";
 
 import { keyProblem } from "./config-core.js";
@@ -106,14 +107,15 @@ export class OutlookGraph {
     return Boolean(this.clientId);
   }
 
+  // A sign-in stored while Outlook was set up does not count in a build where it is not.
   async init() {
-    this.signedIn = Boolean((await this.loadAuth())?.refreshToken);
+    this.signedIn = this.configured && Boolean((await this.loadAuth())?.refreshToken);
   }
 
   // What the UI shows: never a token.
   async status() {
     const auth = await this.loadAuth();
-    return { type: "outlook_status", configured: this.configured, signedIn: Boolean(auth?.refreshToken), account: auth?.account ?? "" };
+    return { type: "outlook_status", configured: this.configured, signedIn: this.configured && Boolean(auth?.refreshToken), account: auth?.account ?? "" };
   }
 
   // Microsoft's sign-in page for a PKCE challenge.

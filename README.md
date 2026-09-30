@@ -144,7 +144,7 @@ The extension build is not minified, so Chrome Web Store reviewers can read it. 
 
 ### Outlook in the extension
 
-Outlook uses Microsoft Graph directly, signed in with `chrome.identity.launchWebAuthFlow` (authorization code with PKCE). It needs an app registration owned by the maintainer; until its client ID is set in `OUTLOOK_CLIENT_ID` (`src/outlook-graph.js`), the Outlook card says it is not available.
+Outlook uses Microsoft Graph directly, signed in with `chrome.identity.launchWebAuthFlow` (authorization code with PKCE). It needs an app registration owned by the maintainer; until its client ID is set in `OUTLOOK_CLIENT_ID` (`src/outlook-graph.js`), the Outlook card says it is not available, and the build does not request the `identity` permission or the `login.microsoftonline.com` and `graph.microsoft.com` host permissions. Setting the client ID adds them back.
 
 Register the app once, in the [Microsoft Entra admin center](https://entra.microsoft.com) (or Azure portal) > App registrations > New registration:
 

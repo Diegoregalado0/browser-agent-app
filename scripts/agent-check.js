@@ -558,6 +558,12 @@ await assert.rejects(
   /unexpected answer/,
 );
 await assert.rejects(new OutlookGraph({ loadAuth: async () => null, saveAuth: async () => {}, clientId: "" }).signIn(), /not set up/);
+// Without a client id (and so without the identity permission), a sign-in stored by an
+// earlier build gives the model no Outlook tools.
+const unconfigured = new OutlookGraph({ loadAuth: async () => ({ refreshToken: "r" }), saveAuth: async () => {}, clientId: "" });
+await unconfigured.init();
+assert.equal(unconfigured.toolDefs().length, 0, "Outlook tools offered without a client id");
+assert.equal((await unconfigured.status()).signedIn, false);
 assert.ok(JSON.stringify(outlook.toolDefs()).length < 2500, "Outlook tool definitions grew past a few hundred tokens");
 assert.ok(outlook.isReadOnly("mcp__outlook__mail_read") && !outlook.isReadOnly("mcp__outlook__send"), "send must count as an action");
 const listed = (await outlook.call("mcp__outlook__mail_search", {}))[0].text;
