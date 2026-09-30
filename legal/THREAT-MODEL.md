@@ -13,7 +13,7 @@ The main threat is indirect prompt injection: every page, email and network resp
 | ASI03 Identity and privilege | High (inherent) | Per-window agent, incognito lock, tab rules, sign-in headers hidden, keys never sent to the UI | The agent uses every session the user is signed in to; other secrets shown on pages (2FA codes, card numbers) reach the provider | Fixed: password field values and network passwords and tokens no longer reach the model |
 | ASI04 Supply chain | Medium | Lockfile with `npm ci`, unminified bundle, narrow host permissions, validated base URLs | Page scripts run in the page's own JavaScript world, so a hostile page can falsify what the checks see; Ollama origin wildcard | Open (recommendations) |
 | ASI05 Code execution | Low | No code tool; fixed page scripts with JSON arguments; only http, https and about:blank can be opened; strict CSP; escaped Markdown | Page scripts grant the page user activation (`userGesture: true`) | Accepted |
-| ASI06 Memory and context poisoning | Medium | Compaction trims old output; screenshots never saved; custom instructions only from the computer | A reopened conversation replays earlier injected content, and the safety model's injection flags are lost on reopen | Open (recommendation) |
+| ASI06 Memory and context poisoning | Low | Compaction trims old output; screenshots never saved; custom instructions only from the computer; earlier tool output dropped when a conversation is reopened | Assistant replies that relayed injected text are kept on reopen | Fixed: a reopened conversation no longer replays earlier tool output |
 | ASI07 Inter-agent communication | Medium | Remote clients limited to run, stop, permission; prompt ids; owner-only Discord messages and buttons; sensitive and password prompts local only; safety model uses a strict schema and fails to "ask" | Attacker text reaches the safety model and may talk it into "allow"; a stolen Discord account can start tasks and approve safety prompts | Accepted |
 | ASI08 Cascading failures | Low | Per-minute request and action limits, task and daily token limits, max steps, loop guard, bounded retries | An unavailable safety model makes every action ask, which invites prompt fatigue | Accepted |
 | ASI09 Human-agent trust | Medium | Prompts name the target element, its link and form action; replies render only http(s) links | Target names come from the page and can lie; typed text previews go to Discord for remote tasks (never for password fields) | Open (recommendation); fixed: text typed into password fields is hidden in prompts |
@@ -38,6 +38,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js describeInput, #typesPassword | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
 | The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js #checkSite, clipAddress; src/browser-tools.js addressForToolCall | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
 | `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js navigate | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
+| A reopened conversation replayed earlier tool output, including injections, with the injection flags lost (follow-up) | src/agent.js restore | Tool results are replaced by a short stub; requests, replies and calls are kept. Chosen over saving the flags: it also covers content never scanned (Auto mode, older saves, failed scans) and needs no change to the saved format; the model reads pages again, and they are scanned again | "A reopened conversation does not replay earlier tool output" |
 
 ## Detailed threats
 
@@ -268,14 +269,14 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "affected_components": ["src/session-format.js sessionRecord", "src/agent.js restore", "src/guard.js flags"],
     "attack_scenario": "1. A task reads a hostile page and is saved\n2. Days later the user reopens it and gives a new request\n3. The old injection is back in context without its flag",
     "vulnerability_types": ["CWE-472"],
-    "mitigation": "Rescan or drop tool results on restore, or keep the flags with the session",
-    "existing_controls": ["Compaction trims old tool output (src/agent.js:129)", "Screenshots never saved (src/session-format.js:26)", "Custom instructions only settable at the computer (src/controller.js:14)"],
-    "control_effectiveness": "partial",
+    "mitigation": "Drop tool results on restore (done)",
+    "existing_controls": ["Tool output replaced by a stub on restore (src/agent.js restore)", "Compaction trims old tool output (src/agent.js #compact)", "Screenshots never saved (src/session-format.js:26)", "Custom instructions only settable at the computer (src/controller.js:14)"],
+    "control_effectiveness": "substantial",
     "attack_complexity": "medium",
     "likelihood": "low",
     "impact": "medium",
-    "risk_score": "medium",
-    "residual_risk": "Reopened conversations carry unflagged earlier content."
+    "risk_score": "low",
+    "residual_risk": "The model's earlier replies are kept and may repeat injected text; provider-native assistant content (thinking, search items) is replayed as the provider requires."
   },
   {
     "id": "THREAT-ASI07-001",
@@ -377,6 +378,6 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 3. Done: treat a click or typing target inside a frame from a sensitive site (Stripe, PayPal checkout) as sensitive, and private or loopback addresses as sensitive for navigation.
 4. Run page scripts in an isolated world, so a hostile page cannot change what the outline, target description and password check report.
 5. Done: show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
-6. Rescan or drop tool output when a saved conversation is reopened, or save the injection flags with it.
+6. Done: drop tool output when a saved conversation is reopened (chosen over saving the injection flags, which would miss content that was never scanned).
 7. Done: keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
 8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field.

@@ -22,6 +22,8 @@ const MAX_RATE_LIMIT_WAITS = 8;
 const DECLINED = "Do not retry it or work around it; tell the user what you wanted to do and ask how to proceed.";
 // A call as the declined-action records match it: its tool and exact input.
 const callKey = (call) => `${call.name} ${JSON.stringify(call.input)}`;
+// What a tool result from a reopened conversation says in place of its output.
+const RESTORED_RESULT = "[output from before this conversation was reopened is not kept; run the tool again if you need it]";
 // An address as prompts show it: whole up to ADDRESS_MAX characters (data can ride in it),
 // else its start and how much is left out. The panel wraps it.
 const ADDRESS_MAX = 300;
@@ -176,10 +178,16 @@ export class Agent {
     await this.ledger?.add(tokens).catch(() => {});
   }
 
-  // Replaces the conversation with a saved one.
+  // Replaces the conversation with a saved one. Earlier tool output is replaced by a stub:
+  // it can hold instructions planted in a page that were never scanned (Auto mode, older
+  // saves) or whose injection flags are gone, and the model can run a tool again for a
+  // fresh, scanned copy. The user's requests and the replies are kept.
   restore({ messages, usage }) {
     this.reset();
-    this.messages = messages;
+    const stub = [{ type: "text", text: RESTORED_RESULT }];
+    this.messages = messages.map((m) =>
+      m.role === "user" ? { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: stub } : b)) } : m,
+    );
     if (usage) this.usage = { ...this.usage, ...usage };
   }
 

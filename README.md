@@ -90,7 +90,7 @@ Safety checks count toward the token limits too. When a provider rate-limits a r
 
 ### Sessions and Ghost mode
 
-- Past sessions are listed in the menu. Reopen one to pick up where you left off. You can switch provider in the middle of a session.
+- Past sessions are listed in the menu. Reopen one to pick up where you left off. The model gets your requests and its replies back, but not the page contents it read before; it reads pages again when it needs them, so they are checked again. You can switch provider in the middle of a session.
 - **Ghost mode** (the ghost button): the session is not saved. It is always on in incognito windows. Chrome still keeps its own history.
 - Screenshots are never saved with sessions.
 
