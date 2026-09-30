@@ -40,6 +40,24 @@ function client(config) {
   return new Ollama({ host: config.ollamaHost });
 }
 
+// Whether a model lists the "thinking" capability, asked once per host and model. Models
+// without it reject a think field, and hybrid ones (qwen3.5, qwen3-vl) think unless told
+// not to, so only these get one. A failed lookup is not kept, so the next call asks again.
+const thinking = new Map();
+function canThink(config, model) {
+  const key = `${config.ollamaHost} ${model}`;
+  if (!thinking.has(key)) {
+    const lookup = client(config)
+      .show({ model })
+      .then(
+        (info) => Boolean(info.capabilities?.includes("thinking")),
+        () => (thinking.delete(key), false),
+      );
+    thinking.set(key, lookup);
+  }
+  return thinking.get(key);
+}
+
 export async function listModels({ config }) {
   const { models } = await client(config).list();
   return models.map((m) => m.name);
@@ -56,7 +74,7 @@ export async function turn({ model, config, system, tools, messages, signal, onT
       function: { name, description, parameters: input_schema },
     })),
     options: { num_ctx: config.ollamaContext },
-    ...(config.thinking && { think: true }),
+    ...((await canThink(config, model)) && { think: Boolean(config.thinking) }),
   });
   const onAbort = () => stream.abort();
   signal.addEventListener("abort", onAbort);
@@ -126,6 +144,7 @@ export async function classify({ model, config, system, text, images = [], schem
       { role: "user", content: text, ...(images.length && { images: images.map((b) => b.data) }) },
     ],
     options: { num_ctx: config.ollamaContext },
+    ...((await canThink(config, model)) && { think: false }),
   });
   onUsage?.((res.prompt_eval_count ?? 0) + (res.eval_count ?? 0));
   return JSON.parse(res.message.content);

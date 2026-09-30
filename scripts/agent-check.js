@@ -892,4 +892,39 @@ assert.match(refusedOrigin.text, /OLLAMA_ORIGINS/);
 assert.equal(testBodies.at(-1).body.model, "qwen3:8b", "without a chosen model, the first listed one is tried");
 standIn.close();
 
+// Ollama gets a think field only for models that list the thinking capability: the
+// user's setting in a task, off in safety checks. The capability is asked once per model.
+const ollamaChats = [];
+const shown = [];
+const fakeOllama = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const request = JSON.parse(body);
+    const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+    if (req.url === "/api/show") {
+      shown.push(request.model);
+      return json({ capabilities: request.model === "hybrid" ? ["completion", "tools", "thinking"] : ["completion", "tools"] });
+    }
+    ollamaChats.push(request);
+    const message = { role: "assistant", content: request.format ? '{"verdict":"allow","reason":"ok"}' : "hi" };
+    const reply = { model: request.model, message, done: true, done_reason: "stop", prompt_eval_count: 1, eval_count: 1 };
+    if (request.stream) return res.writeHead(200, { "content-type": "application/x-ndjson" }).end(`${JSON.stringify(reply)}\n`);
+    json(reply);
+  });
+});
+await new Promise((r) => fakeOllama.listen(0, "127.0.0.1", r));
+const ollamaConfig = { ...config, ollamaHost: `http://127.0.0.1:${fakeOllama.address().port}` };
+const ollamaTurn = (model, thinking) =>
+  ollama.turn({ model, config: { ...ollamaConfig, thinking }, system: "s", tools: [], messages: userTurn, signal: new AbortController().signal, onText: noop, onThinking: noop });
+const ollamaClassify = (model) => ollama.classify({ model, config: ollamaConfig, system: "s", text: "t", schema: {} });
+await ollamaTurn("hybrid", true);
+await ollamaTurn("hybrid", false);
+await ollamaClassify("hybrid");
+await ollamaTurn("plain", true);
+await ollamaClassify("plain");
+assert.deepEqual(ollamaChats.map((c) => c.think), [true, false, false, undefined, undefined], "wrong think field for Ollama");
+assert.deepEqual(shown, ["hybrid", "plain"], "Ollama capabilities were not asked once per model");
+fakeOllama.close();
+
 console.log("agent checks passed");
