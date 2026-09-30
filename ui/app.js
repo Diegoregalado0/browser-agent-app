@@ -75,25 +75,7 @@ function el(tag, className, text) {
   return node;
 }
 
-// Whether the selected provider can run: it has a key, or needs none (Ollama).
-const providerReady = () => config.provider === "ollama" || config.keyInfo?.[config.provider]?.source !== "none";
-
-// First run, or no key for the selected provider: ask for one before anything else.
-function onboarding() {
-  const box = el("div", "empty onboarding");
-  box.append(
-    el("h2", null, "Welcome to Browsby"),
-    el("p", null, "Describe a task and the agent does it in this window's tabs: it opens pages, clicks, types, and reports back."),
-    el("p", "empty-sub", "It uses your own API key from Anthropic, OpenAI, Google, or Mistral. The key stays in this browser profile and is sent only to that provider, which bills your account for what the agent uses."),
-  );
-  const add = el("button", "primary", "Add an API key");
-  add.onclick = () => settings.open("models");
-  box.append(add);
-  return box;
-}
-
 function emptyState() {
-  if (config && !providerReady()) return onboarding();
   const ghost = config?.ghostMode;
   const box = el("div", "empty");
   if (ghost) box.append(icon("ghost"));

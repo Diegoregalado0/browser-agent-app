@@ -9,7 +9,9 @@
 // browser-agent logs       print the browser log path and its last lines
 //
 // --port=N sets the DevTools port when the browser launches (default: any free port).
-// BROWSER_AGENT_HOME moves the profile and logs (default ~/.browser-agent).
+// BROWSER_AGENT_HOME moves the profile and logs (default ~/.browser-agent). The default is
+// refused unless the command runs in a terminal or from the Browsby app, so scripts and
+// tests must pass a throwaway BROWSER_AGENT_HOME.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -18,6 +20,12 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { HOME_DIR } from "../src/config.js";
 import { connectChrome, browserProcesses, activePort, EXTENSION_DIR, EXTENSION_ID, LOADED_FILE } from "../src/chrome.js";
+
+// The app is launched by launchd (parent pid 1) without a terminal.
+if (!process.env.BROWSER_AGENT_HOME && !process.stdin.isTTY && process.ppid !== 1) {
+  console.error(`Refusing to use the default profile at ${HOME_DIR} outside a terminal. Set BROWSER_AGENT_HOME to a separate directory.`);
+  process.exit(1);
+}
 
 const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOG_FILE = join(HOME_DIR, "chrome.log");

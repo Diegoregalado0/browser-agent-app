@@ -334,13 +334,6 @@ input.switch:checked::after { transform: translateX(16px); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 
-
-.onboarding { max-width: 320px; }
-.onboarding h2 { margin: 0 0 8px; font-size: 17px; color: var(--fg); }
-.onboarding p { margin: 0 0 8px; }
-.onboarding .empty-sub { margin-bottom: 16px; }
-.onboarding button { padding: 8px 16px; font-size: 14px; }
-
 /* Pairing codes (Discord). */
 .device-code { display: flex; flex-direction: column; gap: 6px; }
 .code-row { display: flex; gap: 8px; align-items: center; }
