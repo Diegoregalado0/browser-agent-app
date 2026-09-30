@@ -236,6 +236,14 @@ replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end"
 await looping.run("next page", loopConfig);
 const reads = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "read_page");
 assert.equal(reads.at(-1).content.at(-1).text.startsWith("[Loop check]"), true, "a repeated identical read gets a loop note");
+// So does a navigation that keeps loading the same page.
+const goCall = { type: "tool_call", id: "call_go", name: "navigate", input: { url: "https://shop.example/guessed" } };
+looping.browser.run = async () => "Loaded: Page Not Found | https://shop.example/guessed";
+replies = [goCall, click, goCall, click, goCall].map((c) => ({ content: [c], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+await looping.run("open the product", loopConfig);
+const goes = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "navigate");
+assert.equal(goes.at(-1).content.at(-1).text.startsWith("[Loop check]"), true, "a repeated identical navigation gets a loop note");
 
 // Tool servers (Outlook's interface): their tools reach the model under mcp__ names,
 // read-only tools skip the safety check while the others get it, and tool errors come

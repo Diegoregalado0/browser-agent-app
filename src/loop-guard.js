@@ -15,9 +15,10 @@ const NOTE_CONSECUTIVE = 3;
 const STOP_SAME_ERROR = 5;
 const STOP_CONSECUTIVE = 6;
 // Reads whose output reflects the page: the same read giving the same output this many
-// times means the actions between them changed nothing.
+// times means the actions between them changed nothing. A navigation that keeps loading
+// the same page (a "Page Not Found" for a guessed address) counts too.
 const NOTE_SAME_READ = 3;
-const PAGE_READS = new Set(["read_page", "get_page_text"]);
+const PAGE_READS = new Set(["read_page", "get_page_text", "navigate"]);
 
 // Errors that differ only in numbers (ref ids, line and column) count as the same.
 const errorKey = (text) => text.split("\n")[0].replace(/\d+/g, "#").slice(0, 300);
@@ -41,8 +42,8 @@ export class LoopGuard {
       this.consecutiveErrors = 0;
       if (key === null || count((e) => !e.isError && e.call === call && e.key === key) < NOTE_SAME_READ) return null;
       return (
-        "[Loop check] This exact call has returned exactly the same result several times, so the actions in between " +
-        "did not change the page. Stop repeating them. Take a screenshot to see the page as it really is, then try a " +
+        "[Loop check] This exact call has returned exactly the same result several times, so repeating it and the " +
+        "actions in between changed nothing. Stop repeating them. Take a screenshot to see the page as it really is, then try a " +
         "different approach, or tell the user what is blocking you."
       );
     }
