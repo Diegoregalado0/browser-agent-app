@@ -112,7 +112,7 @@ export const BROWSER_TOOL_DEFS = [
   },
   {
     name: "tabs",
-    description: "List, open, switch to, or close tabs in the agent browser. Switching makes that tab the target of all page tools.",
+    description: "List, open, switch to, or close tabs in this browser window. Switching makes that tab the target of all page tools.",
     input_schema: {
       type: "object",
       properties: {

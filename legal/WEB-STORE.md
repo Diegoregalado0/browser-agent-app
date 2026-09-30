@@ -4,12 +4,8 @@ Working notes for the Browsby listing in the Chrome Web Store Developer Dashboar
 
 ## Before you submit
 
-These need an owner decision or a code change first (details in the sections below):
-
-1. **Outlook client ID.** `OUTLOOK_CLIENT_ID` in `src/outlook-graph.js` is empty, so Outlook is switched off in the build, yet the manifest still requests `identity`, `https://login.microsoftonline.com/*`, and `https://graph.microsoft.com/*`. Reviewers reject permissions a build does not use. Either set the client ID before submitting (and register the store redirect URI, see README) or drop those three entries until Outlook is ready.
-2. **Developer tools (`javascript_exec`, `edit_html`).** These run model-written code in web pages through the debugger. They are off by default in the extension, but reviewers may treat model-written code as remotely hosted code. See "Remote code".
-3. **YouTube ad skipping.** "Skip YouTube ads" (Settings > Browser) is on by default and fast-forwards and skips YouTube ads in the agent's tabs. It is not in the README or the planned store description. See "Common rejection reasons".
-4. **Privacy policy URL** must be public before you submit (see the report on hosting options).
+1. **Privacy policy URL** must be public before you submit. The policy pages are prepared for GitHub Pages from `main` (see "Privacy policy URL" below); fill in the placeholders in `legal/`, then turn Pages on.
+2. **Outlook.** `OUTLOOK_CLIENT_ID` in `src/outlook-graph.js` is empty, so the build requests neither `identity` nor the Microsoft hosts, and the Outlook card says it is not available. If you set the client ID before submitting, the build adds `identity`, `https://login.microsoftonline.com/*`, and `https://graph.microsoft.com/*` back, and you need justifications for them.
 
 ## Single purpose
 
@@ -21,11 +17,11 @@ Every feature serves that purpose: the side panel is where tasks are given, the 
 
 ## Permission justifications
 
-The manifest requests these permissions. There are no optional permissions and no content scripts.
+The manifest requests these permissions (with `OUTLOOK_CLIENT_ID` empty, as it is now). There are no optional permissions and no content scripts.
 
 ### `debugger`
 
-> Browsby is a browser agent that operates web pages for the user. It attaches the Chrome debugger only to tabs in the side panel's own window, and only while a task the user started is running, to: capture screenshots of the tab so the model can see the page (Page.captureScreenshot); read the page's text and structure (Runtime.evaluate and DOM calls with scripts packaged in the extension); click, scroll, and type as the user asked (Input.dispatchMouseEvent, Input.dispatchKeyEvent, Input.insertText); navigate (Page.navigate); and list the tab's recent network requests when the model needs to diagnose a page that fails to load (Network domain). Chrome shows its debugging banner on those tabs while attached, and closing the banner stops the task. Browsby detaches when the task ends or the panel closes. It cannot attach to chrome:// pages or the Chrome Web Store. The scripting and activeTab APIs cannot deliver trusted mouse and keyboard input or screenshots of background tabs, which the agent needs to use real websites.
+> Browsby is a browser agent that operates web pages for the user. It attaches the Chrome debugger only to tabs in the side panel's own window, and only while a task the user started is running, to: capture screenshots of the tab so the model can see the page (Page.captureScreenshot); read the page's text and structure (Runtime.evaluate with scripts packaged in the extension); click, scroll, and type as the user asked (Input.dispatchMouseEvent, Input.dispatchKeyEvent, Input.insertText); navigate (Page.navigate); and list the tab's recent network requests when the model needs to diagnose a page that fails to load (Network domain). Chrome shows its debugging banner on those tabs while attached, and closing the banner stops the task. Browsby detaches when the task ends or the panel closes. It cannot attach to chrome:// pages or the Chrome Web Store. The scripting and activeTab APIs cannot deliver trusted mouse and keyboard input or screenshots of background tabs, which the agent needs to use real websites.
 
 ### `sidePanel`
 
@@ -43,18 +39,11 @@ The manifest requests these permissions. There are no optional permissions and n
 
 > Stores the user's settings, their AI provider API keys, the optional Discord bot token and Outlook sign-in, and a local daily usage counter, in chrome.storage.local on the user's computer (never synced). Saved conversations are kept in IndexedDB on the device.
 
-### `identity`
-
-> Used only for the optional Outlook connection: chrome.identity.launchWebAuthFlow opens Microsoft's sign-in page (OAuth authorization code flow with PKCE) and returns the authorization code to the extension. It is not used for Google sign-in.
-
-(Only keep this permission if Outlook is enabled in the submitted build.)
-
 ### Host permissions
 
 > - `https://api.anthropic.com/*`, `https://api.openai.com/*`, `https://generativelanguage.googleapis.com/*`, `https://api.mistral.ai/*`: the AI provider APIs that run the agent's model with the user's own API key. Only the provider the user selects is contacted.
 > - `http://127.0.0.1/*`, `http://localhost/*`: a local model server on the user's own computer (Ollama, or an OpenAI-compatible server such as LM Studio).
 > - `https://discord.com/*`: the optional Discord remote control, where the user's own bot receives tasks and sends approval prompts and results to the user.
-> - `https://login.microsoftonline.com/*`, `https://graph.microsoft.com/*`: the optional Outlook connection, for Microsoft sign-in and for reading and sending mail and calendar events the user asks the agent to handle.
 >
 > The agent does not need host permissions for the websites it operates: it reaches them through the debugger on tabs the user's task opens.
 
@@ -67,10 +56,9 @@ Checked in this repo:
 - All JavaScript is bundled by esbuild into the package (`sidepanel.js`, `background.js`, `chunks/`). Provider SDKs are bundled, not loaded from a CDN.
 - The CSP is `script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`, which blocks remote scripts and `eval` in extension pages.
 - The built bundle has no `eval(`, no `new Function(`, and no `import()` of an http(s) address.
-- Scripts the extension runs in pages (page reading, element lookup, the YouTube ad skipper) are functions in `src/page-scripts.js` and `src/browser-tools.js`, shipped in the package.
-- The bundle is not minified, so reviewers can read it.
-
-The one gray area: with developer tools turned on (off by default in the extension), the model can send JavaScript for `javascript_exec` or HTML for `edit_html`, which runs in the web page through the debugger. That code is written by the AI model at run time, not fetched from a server, and it runs in the page, not in the extension. Options, from safest for review to least: build the store edition without these two tools; keep them off by default and explain them in the listing and in the reviewer notes; or leave as is. Recommendation: build the store edition without them, or at least describe them in the reviewer notes up front.
+- Scripts the extension runs in pages (page reading, element lookup, form filling) are functions in `src/page-scripts.js` and `src/browser-tools.js`, shipped in the package.
+- The model cannot send code to run: there is no tool that evaluates model-written JavaScript or HTML, and navigation accepts only http(s) addresses.
+- The bundle is not minified, so reviewers can read it. License notices for the bundled npm packages are in `THIRD_PARTY_NOTICES.txt` in the package.
 
 ## Privacy practices tab
 
@@ -98,18 +86,18 @@ The dashboard asks what user data the extension "collects", which includes data 
 
 ### Privacy policy URL
 
-The public URL of `legal/PRIVACY.md` once hosted. The policy contains the Limited Use statement the User Data Policy asks for.
+https://diegoregalado0.github.io/browser-agent-app/legal/PRIVACY once GitHub Pages is on (Settings > Pages > Deploy from a branch > `main`, `/ (root)`). The Terms are at .../legal/TERMS. The policy contains the Limited Use statement the User Data Policy asks for.
 
 ## Common rejection reasons for agent and debugger extensions
 
 | Reason | How Browsby addresses it | Still to do |
 | --- | --- | --- |
 | `debugger` without a clear, specific justification | Detailed justification above; attaches only to tabs in the panel's window during a user-started task; banner visible; detaches on stop or panel close | Show the debugger banner and Stop in the store screenshots or video |
-| Unused permissions | Every permission maps to code | Remove `identity` and the Microsoft hosts if Outlook ships disabled |
-| Remote code | Everything bundled, strict CSP, no eval | Decide on `javascript_exec` and `edit_html` (above) |
-| Listing does not match behavior or data use | README and privacy policy describe data flows | Mention in the description: sends page content and screenshots to your chosen AI provider; optional Outlook and Discord; YouTube ad skipping if kept |
-| Single purpose violations (bundled unrelated features) | Outlook and Discord are the same agent acting in other places | YouTube ad skipping is a separate function; describe it as part of playing videos for the user, turn it off by default, or remove it from the store edition |
-| Missing or incomplete privacy policy | `legal/PRIVACY.md` covers each data type, third parties, deletion, Limited Use | Host it publicly and link it from the listing and the extension |
+| Unused permissions | Every permission maps to code; `identity` and the Microsoft hosts are requested only when Outlook is set up | None |
+| Remote code | Everything bundled, strict CSP, no eval, no tool that runs model-written code | None |
+| Listing does not match behavior or data use | README and privacy policy describe data flows | Mention in the description: sends page content and screenshots to your chosen AI provider; optional Outlook and Discord |
+| Single purpose violations (bundled unrelated features) | Outlook and Discord are the same agent acting in other places | None |
+| Missing or incomplete privacy policy | `legal/PRIVACY.md` covers each data type, third parties, deletion, Limited Use; linked from Settings > Data and privacy and the manifest's `homepage_url` | Turn on GitHub Pages and put the URL in the listing |
 | Prominent disclosure and consent for personal data | Setup explains keys stay local; Settings explains where keys go | Add a one-line data disclosure to the first-run setup (text in `legal/IN-APP.md`) |
 | Insecure handling of personal data | HTTPS to all cloud services; keys in local storage, not synced, not shown to the model | The OpenAI base URL and Ollama host settings accept any `http://` address, not only local ones; consider allowing plain HTTP only for localhost |
 | Deceptive use of third-party names | Names used only to say which provider keys work | Do not use provider logos or "Claude"/"ChatGPT" in the name, icon, or title |

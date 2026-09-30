@@ -52,6 +52,7 @@ You can run setup again from Settings > General.
 ### Watch it work, or not
 
 - The agent works in its own tabs and never takes over a tab you opened. The tab it is working in is marked with an "Agent" tab group.
+- To find its way, the model sees the titles and addresses of all tabs in the window, including yours.
 - **Show the agent's actions** (Settings > Browser, off by default): a pointer glides to each target before a click, and typing appears one character at a time.
 - **Stop** ends the task at once.
 - **Let the model search the web** (Settings > Models, on by default, Anthropic and OpenAI): the model finds pages with its provider's search, then opens them in the browser. The provider bills each search, about 1 to 1.4 cents.
@@ -100,14 +101,16 @@ Connect Outlook in the Connections panel (the plug button) and sign in on Micros
 
 ### Remote control from Discord
 
-Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets prompts and final answers, never screenshots or page contents, and sensitive-site and password prompts can only be approved at the computer.
+Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets approval prompts and final answers, never screenshots or page contents. An approval prompt includes the page address and a short preview of any text the agent wants to type. Sensitive-site and password prompts can only be approved at the computer.
 
 ## Privacy and security
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.
-- **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it. With Ollama, it stays on your computer.
+- **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it, along with the titles and addresses of the tabs in the window. With Ollama, it stays on your computer.
+- **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
 - **Nothing is sent to us.** There is no Browsby server, account, or analytics.
-- **Stored on your device:** saved sessions, without screenshots. Delete them in Settings > Data and privacy.
+- **Stored on your device:** your API keys, the Discord bot token and Outlook sign-in if you connect them, your settings, today's usage counter, and saved sessions, without screenshots. Delete sessions in Settings > Data and privacy.
+- Full details are in the [Privacy Policy](legal/PRIVACY.md) and the [Terms of Use](legal/TERMS.md).
 
 ## FAQ
 
@@ -122,6 +125,10 @@ Either you hit one of your own limits, or your provider asked it to slow down. I
 
 **Can it make mistakes?**
 Yes. Watch important tasks, keep Guarded mode on, and use Stop if it goes the wrong way.
+
+## License
+
+Copyright [PUBLISHER NAME]. All rights reserved: see [LICENSE](LICENSE). Third-party packages bundled in the extension keep their own licenses, listed in `THIRD_PARTY_NOTICES.txt` in the built extension.
 
 ## For developers
 
@@ -141,6 +148,8 @@ Layout:
 Test the extension in the sandbox (below) or another separate Chrome profile, not your real one, with a key that has a low spending limit.
 
 The extension build is not minified, so Chrome Web Store reviewers can read it. Raise `version` in `package.json` before each store upload.
+
+The build also writes `THIRD_PARTY_NOTICES.txt` into `dist/extension` (and the zip): the name, version, license, and license and notice files of every npm package the bundle includes.
 
 ### Outlook in the extension
 

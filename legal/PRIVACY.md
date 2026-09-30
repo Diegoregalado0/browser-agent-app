@@ -20,11 +20,13 @@ The short version: Browsby has no server, no account, and no analytics. I do not
 To do a task, the AI model has to see what you asked and what is on the page. When you run a task, Browsby sends the following to the AI provider you selected:
 
 - what you type (your requests), your standing instructions from Settings > General, and the setting that confirms simple age prompts if you turned it on;
-- the title and address of the current tab, and, when the agent lists tabs, the titles and addresses of the tabs in that browser window;
+- the title and address of the current tab, and, when the agent lists tabs, the titles and addresses of all tabs in that browser window, including tabs you opened;
 - content of the pages the agent reads: page text, the page's structure (buttons, links, form fields), and screenshots of the tab;
 - what the agent types or selects on your behalf, including anything you give it to type;
-- results of the agent's tools, such as network request details of a tab it is working in, and, if you turn on developer tools, results of scripts it runs in the page;
+- results of the agent's tools, such as the network requests of a tab it is working in (see below);
 - for Outlook, the mail and calendar content it reads (see below).
+
+While the agent works in a tab, Browsby records that tab's network requests in memory: their addresses, headers, and request and response content. The model can read them to look into a page that fails to load, and what it reads is sent to your provider. The recording is not saved and ends when the agent lets go of the tab.
 
 Pages can contain personal information, for example your email, account details, or messages shown on screen. Whatever is on a page the agent reads can be sent to your provider.
 
@@ -51,7 +53,7 @@ What each provider does with the data it receives is governed by that provider's
 
 ### Outlook (optional)
 
-If you connect Outlook, you sign in on Microsoft's own page. Browsby asks Microsoft Graph for these delegated permissions: `openid`, `profile`, `offline_access`, `User.Read`, `Mail.ReadWrite`, `Mail.Send`, and `Calendars.ReadWrite`. They let the agent read your profile name and address, search and read mail, save drafts and replies, send mail, and list or create calendar events, but only when a task calls for it.
+Outlook works only in versions of Browsby where it has been set up. Only those versions ask Chrome for the identity permission and for access to Microsoft's sign-in and Graph addresses. If you connect Outlook, you sign in on Microsoft's own page. Browsby asks Microsoft Graph for these delegated permissions: `openid`, `profile`, `offline_access`, `User.Read`, `Mail.ReadWrite`, `Mail.Send`, and `Calendars.ReadWrite`. They let the agent read your profile name and address, search and read mail, save drafts and replies, send mail, and list or create calendar events, but only when a task calls for it.
 
 - The sign-in tokens and your account name are stored in `chrome.storage.local` on your computer, not synced, and are never shown to the model.
 - Mail and calendar content the agent reads (senders, subjects, previews, message bodies, event details) is sent to your AI provider as part of the task, like page content.
@@ -64,7 +66,7 @@ If you set up remote control in Settings > Remote (Discord), Browsby connects to
 
 - Browsby receives the tasks and approval answers you send from your paired Discord account.
 - Browsby sends the pairing reply, approval prompts, the agent's final answers, error messages, and stop notices.
-- Screenshots and full page contents are not sent. Approval prompts and final answers can still contain details from the task, for example a page address, a short excerpt of text the agent wants to type, or information the agent found for you.
+- Screenshots and full page contents are not sent. Approval prompts include the page address and a short preview of any text the agent wants to type, and final answers can contain information the agent found for you.
 
 Discord can read messages sent by bots. Discord's own privacy policy applies to these messages.
 
@@ -114,7 +116,7 @@ Browsby uses the data it handles only to provide its single purpose: doing the b
 - Keys and tokens stay in local extension storage, are not synced, and are not shown to the model or the page.
 - Requests to cloud providers, Microsoft, and Discord use HTTPS. Requests to a local model on your own computer use plain HTTP on that computer.
 - Outlook sign-in uses the authorization code flow with PKCE, and no client secret is stored in the extension.
-- The extension ships all of its code in the package and loads no code from the internet.
+- The extension ships all of its code in the package and loads no code from the internet. It does not run code written by the AI model.
 
 No system is perfectly secure. Anyone with access to your computer and Chrome profile may be able to read the locally stored data. Use a key with a spending limit, and keep your computer and Chrome profile protected.
 
