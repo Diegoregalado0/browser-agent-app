@@ -251,6 +251,9 @@ export class Agent {
               if (signal.aborted) throw err;
             }
           }
+          // Some SDK streams (OpenAI's Chat Completions) end quietly when aborted, so a
+          // request cut short by Stop returns a partial reply as if it were complete.
+          if (signal.aborted) throw new DOMException("Stopped", "AbortError");
         } catch (err) {
           this.#dropUnansweredTurn();
           if (signal.aborted || err.name === "AbortError") {

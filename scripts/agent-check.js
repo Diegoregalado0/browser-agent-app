@@ -684,6 +684,21 @@ assert.match(ollama.describeError(new TypeError("Failed to fetch")), /Is it runn
 const ollamaError = (message, status) => Object.assign(new Error(message), { name: "ResponseError", status_code: status });
 assert.match(ollama.describeError(ollamaError("Forbidden", 403)), /OLLAMA_ORIGINS/);
 
+// Stop during a streamed reply whose SDK ends the stream quietly: the partial reply is not
+// kept as an answer, and the user is told the task stopped.
+const cutNotices = [];
+const cut = new Agent({ emit: (e) => e.type === "notice" && cutNotices.push(e.text), askPermission: async () => "allow" });
+cut.browser = agent.browser;
+const savedTurn = providers.openai.turn;
+providers.openai.turn = ({ signal }) =>
+  new Promise((resolve) => signal.addEventListener("abort", () => resolve({ content: [{ type: "text", text: "Here are the summ" }], raw: null, stop: "end", usage: null })));
+const cutRun = cut.run("summarize", config);
+setTimeout(() => cut.stop(), 20);
+await cutRun;
+providers.openai.turn = savedTurn;
+assert.deepEqual(cut.messages, [], "a reply cut short by Stop was kept");
+assert.ok(cutNotices.includes("Stopped."));
+
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
 assert.match(openai.describeError(noCredit), /^OpenAI account is out of credit/);
