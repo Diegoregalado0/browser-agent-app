@@ -26,7 +26,7 @@ To do a task, the AI model has to see what you asked and what is on the page. Wh
 - results of the agent's tools, such as the network requests of a tab it is working in (see below);
 - for Outlook, the mail and calendar content it reads (see below).
 
-While the agent works in a tab, Browsby records that tab's network requests in memory: their addresses, headers, and request and response content. The model can read them to look into a page that fails to load, and what it reads is sent to your provider. The recording is not saved and ends when the agent lets go of the tab.
+While the agent works in a tab, Browsby records that tab's network requests in memory: their addresses, headers, and request and response content. Cookies, authorization and other sign-in headers are replaced with "[hidden]" before the model sees them. The model can read them to look into a page that fails to load, and what it reads is sent to your provider. The recording is not saved and ends when the agent lets go of the tab.
 
 Pages can contain personal information, for example your email, account details, or messages shown on screen. Whatever is on a page the agent reads can be sent to your provider.
 

@@ -135,9 +135,12 @@ function formatBytes(n) {
   return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)}MB` : n >= 1024 ? `${(n / 1024).toFixed(1)}kB` : `${n}B`;
 }
 
-function formatHeaders(headers = {}) {
+// Headers that carry sign-ins and secrets; the model sees that they were sent, not their values.
+const SECRET_HEADER = /^(cookie|set-cookie|authorization|proxy-authorization)$|token|secret|api-?key|auth|session|csrf|xsrf/i;
+
+export function formatHeaders(headers = {}) {
   return Object.entries(headers)
-    .map(([k, v]) => `  ${k}: ${String(v).slice(0, 300)}`)
+    .map(([k, v]) => `  ${k}: ${SECRET_HEADER.test(k) ? "[hidden]" : String(v).slice(0, 300)}`)
     .join("\n");
 }
 

@@ -107,7 +107,7 @@ Settings > Remote (Discord) connects your own Discord bot, so you can give the a
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.
 - **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it, along with the titles and addresses of the tabs in the window. With Ollama, it stays on your computer.
-- **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
+- **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content; cookie, authorization and other sign-in headers are hidden from the model), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
 - **Nothing is sent to us.** There is no Browsby server, account, or analytics.
 - **Stored on your device:** your API keys, the Discord bot token and Outlook sign-in if you connect them, your settings, today's usage counter, and saved sessions, without screenshots. Delete sessions in Settings > Data and privacy.
 - Full details are in the [Privacy Policy](legal/PRIVACY.md) and the [Terms of Use](legal/TERMS.md).

@@ -20,6 +20,7 @@ import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
+import { formatHeaders } from "../src/browser-tools.js";
 
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const click = { type: "tool_call", id: "call_click", name: "browser", input: { action: "left_click", coordinate: [5, 5] } };
@@ -150,6 +151,11 @@ const blocked = await new Guard().checkAction({ config, userRequests: ["x"], pag
 assert.equal(blocked.verdict, "ask");
 assert.equal(guardCalls, 1, `a zero-quota safety model was retried ${guardCalls - 1} times`);
 assert.ok(Date.now() - started < 500, "a zero-quota safety model was retried after a wait");
+
+// Network recording hides sign-in headers from the model.
+const shownHeaders = formatHeaders({ Cookie: "sid=1", Authorization: "Bearer x", "X-CSRF-Token": "t", "x-api-key": "k", "Content-Type": "text/html" });
+assert.ok(!/sid=1|Bearer x|: t$|: k$/m.test(shownHeaders), shownHeaders);
+assert.match(shownHeaders, /Content-Type: text\/html/);
 
 // Mistral's model list: only chat models with tool support can run the agent.
 const listServer = createServer((req, res) => {
