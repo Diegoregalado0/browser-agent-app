@@ -18,6 +18,8 @@
 
 /* Elements hidden with the hidden attribute stay hidden whatever their display rule. */
 [hidden] { display: none !important; }
+/* Read by screen readers, not shown. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #121822;

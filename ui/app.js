@@ -176,6 +176,7 @@ function renderBlocks(container, blocks) {
   for (const b of blocks) {
     if (b.type === "image") {
       const img = el("img");
+      img.alt = "Screenshot";
       img.src = `data:${b.mediaType};base64,${b.data}`;
       container.append(img);
     } else container.append(el("div", null, b.text));
@@ -188,6 +189,7 @@ function setRunning(value) {
   const noKey = config && config.provider !== "ollama" && config.keyInfo?.[config.provider]?.source === "none";
   $("dot").className = `dot ${running ? "running" : noKey ? "no-key" : "idle"}`;
   $("dot").title = noKey && !running ? "No API key for this provider" : "";
+  $("dot").ariaLabel = running ? "Running" : noKey ? "No API key for this provider" : "Ready";
 }
 
 function renderHeader() {
@@ -408,11 +410,13 @@ const handlers = {
     renderHistory();
   },
   status(msg) {
+    const finished = running && !msg.running;
     setRunning(msg.running);
     if (msg.running) activity.start();
     else {
       activity.stop();
       closeGroup();
+      if (finished) announceReply();
     }
   },
   assistant_start() {
@@ -492,9 +496,10 @@ const handlers = {
   },
   permission_request(msg) {
     $("permission").dataset.id = msg.id;
+    // Shown before the text is set, so screen readers announce the question.
+    $("permission").hidden = false;
     $("perm-text").textContent = msg.text;
     document.querySelector('#permission [data-decision="always"]').hidden = !msg.allowAlways;
-    $("permission").hidden = false;
     activity.set("Waiting for your approval…");
   },
   permission_closed() {
@@ -512,6 +517,14 @@ const handlers = {
     activity.setOutputTokens(msg.taskOutput ?? 0);
   },
 };
+
+// When a task ends, screen readers hear its last reply or error; the log itself is not a
+// live region, since streamed replies would be read over and over.
+function announceReply() {
+  const msgs = [...log.querySelectorAll(".msg:not(.debug)")];
+  const reply = msgs.slice(msgs.findLastIndex((m) => m.classList.contains("user")) + 1).at(-1);
+  $("announce").textContent = reply?.textContent || "Task finished";
+}
 
 function receive(msg) {
   for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers]) group[msg.type]?.(msg);

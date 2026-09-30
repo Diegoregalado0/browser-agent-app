@@ -119,7 +119,7 @@ export function createMcpPanel({ $, el, send, setInertBehind, toast }) {
   // Microsoft's page opens in a Chrome window (chrome.identity).
   function graphSignInStep(note = "") {
     const body = [el("p", null, "Microsoft's sign-in page opens in a new window. Sign in with your Microsoft account and accept.")];
-    if (note) body.push(el("p", "field-note error", note));
+    if (note) body.push(Object.assign(el("p", "field-note error", note), { role: "alert" }));
     showStep("signin", {
       title: "Sign in to Microsoft",
       body,

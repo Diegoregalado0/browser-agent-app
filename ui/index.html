@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <span class="dot" id="dot"></span>
+    <span class="dot" id="dot" role="img" aria-label="Connecting"></span>
     <span id="model" class="model">connecting…</span>
     <button id="toggle-ghost" class="icon-btn" data-icon="ghost" aria-pressed="false" title="Ghost mode" aria-label="Ghost mode"></button>
     <button id="open-mcp" class="icon-btn" data-icon="plug" title="Connections" aria-label="Connections"></button>
@@ -17,8 +17,8 @@
 
   <main id="log"></main>
 
-  <div id="permission" hidden>
-    <div id="perm-text"></div>
+  <div id="permission" hidden role="group" aria-labelledby="perm-text">
+    <div id="perm-text" role="alert"></div>
     <div class="row">
       <button data-decision="once" class="primary">Allow once</button>
       <button data-decision="always">Always allow site</button>
@@ -33,7 +33,7 @@
   </div>
 
   <form id="composer">
-    <textarea id="input" rows="3" placeholder="What should it do?"></textarea>
+    <textarea id="input" rows="3" placeholder="What should it do?" aria-label="Task for the agent"></textarea>
     <button id="send" type="submit" class="primary">Send</button>
   </form>
 
@@ -56,7 +56,7 @@
     <section class="menu-bottom" aria-label="Sessions">
       <div class="menu-label">Sessions</div>
       <button id="new-chat" class="menu-new" data-icon="compose"><span>New session</span></button>
-      <input id="history-search" type="search" placeholder="Search sessions" autocomplete="off" />
+      <input id="history-search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off" />
       <div id="history-list"></div>
     </section>
   </aside>
@@ -152,7 +152,7 @@
                 <p class="setting-desc">The model id for this provider. Load the list to pick from the models your key can use.</p>
               </div>
               <div class="control-row">
-                <input id="model-input" list="model-list" placeholder="Model id" autocomplete="off" spellcheck="false" />
+                <input id="model-input" list="model-list" placeholder="Model id" autocomplete="off" spellcheck="false" aria-describedby="models-hint" />
                 <button id="refresh-models" type="button">Load list</button>
               </div>
               <datalist id="model-list"></datalist>
@@ -366,7 +366,7 @@
             <div class="setting stack">
               <div class="setting-text">
                 <span class="setting-title">Status</span>
-                <p class="setting-desc" id="discord-status">Not set up.</p>
+                <p class="setting-desc" id="discord-status" aria-live="polite">Not set up.</p>
               </div>
               <div class="device-code" id="discord-pair" hidden>
                 <p class="setting-desc">Send the bot a direct message with this code to pair your Discord account:</p>
@@ -389,7 +389,7 @@
                 <li>Paste it below and save. Then use "Add the bot to your server" with a server of your own (a private one works), since Discord only lets you message bots you share a server with.</li>
                 <li>Send the bot the pairing code shown above as a direct message.</li>
               </ol>
-              <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
+              <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" aria-describedby="discord-status" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
               <p class="field-note">The token stays in this Chrome profile on this computer (never synced) and is never shown again.</p>
               <div class="row"><button type="submit" class="primary">Save and connect</button></div>
             </div>
@@ -415,7 +415,7 @@
                 <p class="setting-desc">Tests the model provider and the agent browser.</p>
               </div>
               <div class="row"><button type="button" id="run-checks">Run checks</button></div>
-              <ul class="check-list" id="check-results"></ul>
+              <ul class="check-list" id="check-results" aria-live="polite"></ul>
             </div>
             <div class="setting">
               <div class="setting-text">
@@ -467,7 +467,7 @@
       <div id="wizard-providers" class="onboard-providers" hidden></div>
       <div id="wizard-key-field" class="card-field" hidden>
         <label class="card-label" for="wizard-key">API key</label>
-        <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" />
+        <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="wizard-key-note wizard-result" />
         <p class="field-note" id="wizard-key-note"></p>
       </div>
       <p class="pc-result" id="wizard-result" aria-live="polite"></p>
@@ -484,6 +484,7 @@
   </div>
 
   <div id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="announce" class="sr-only" role="status"></div>
 
   <script type="module" src="app.js"></script>
 </body>

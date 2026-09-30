@@ -97,6 +97,15 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
   let onBack = null;
   $("settings-back").onclick = () => (onBack ? onBack() : showNav());
 
+  // Each setting's description is read with its control.
+  for (const label of sheet.querySelectorAll(".setting-text > label.setting-title[for]")) {
+    const desc = label.parentElement.querySelector(".setting-desc");
+    const control = $(label.htmlFor);
+    if (!desc || !control) continue;
+    desc.id ||= `${label.htmlFor}-desc`;
+    control.setAttribute("aria-describedby", [desc.id, control.getAttribute("aria-describedby")].filter(Boolean).join(" "));
+  }
+
   // Simple options: every [data-setting] control saves itself on change.
 
   // A setting's key may name a field of a nested object, as in "limits.taskTokens".
@@ -202,7 +211,10 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     const label = el("label", "card-label", labelText);
     label.htmlFor = id;
     wrap.append(label, input);
-    if (note) wrap.append(el("p", "field-note", note));
+    if (note) {
+      wrap.append(Object.assign(el("p", "field-note", note), { id: `${id}-note` }));
+      input.setAttribute("aria-describedby", `${id}-note`);
+    }
     return wrap;
   }
 
@@ -290,7 +302,10 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
         });
       actions.append(remove);
     }
-    card.append(actions, el("p", "pc-result"));
+    const result = Object.assign(el("p", "pc-result"), { id: `pc-result-${p}` });
+    result.setAttribute("aria-live", "polite");
+    keyInput?.setAttribute("aria-describedby", result.id);
+    card.append(actions, result);
     return card;
   }
 
