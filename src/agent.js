@@ -440,33 +440,40 @@ export class Agent {
       .flatMap((m) => m.content.filter((b) => b.type === "text").map((b) => b.text.replace(CURRENT_TAB_TAG, "")));
   }
 
-  // Throws when the action must not run. Sensitive sites and password fields always need
-  // the user's approval, in every mode. Site prompts apply in "ask" mode; the safety check
-  // applies to state-changing actions in every mode except "auto".
+  // Throws when the action must not run. Sensitive sites, password fields, sending mail and
+  // inviting people always need the user's approval, in every mode. Site prompts apply in
+  // "ask" mode; the safety check applies to state-changing actions in every mode except
+  // "auto".
   // precheck: this call's safety check, already started (see #runTools).
   async #authorize(call, config, signal, precheck) {
     await this.#checkSensitive(call, config);
     if (config.permissionMode === "ask") await this.#checkSite(call, config);
-    if (config.permissionMode === "auto" || !this.#changesState(call)) return;
+    const isMcp = Boolean(this.mcp?.has(call.name));
+    // What the call would do, when its tool server says it always asks (Outlook send).
+    const confirm = (isMcp && this.mcp.confirmation?.(call.name, call.input)) || null;
+    let check = null;
+    if (config.permissionMode !== "auto" && this.#changesState(call)) {
+      check = await (precheck ?? this.#safetyCheck(call, config, signal));
+      // A check cut short by Stop is not a reason to ask; the action is not going to run.
+      if (signal.aborted) throw new Error("Cancelled by the user.");
+      const { page, target, verdict, reason } = check;
+      this.emit({ type: "guard", name: call.name, input: call.input, target, page: page.url, verdict, reason });
+      if (verdict === "block") {
+        this.emit({ type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
+        throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);
+      }
+      if (verdict === "allow" && !confirm) return;
+    } else if (!confirm) return;
 
-    const { page, target, verdict, reason } = await (precheck ?? this.#safetyCheck(call, config, signal));
-    // A check cut short by Stop is not a reason to ask; the action is not going to run.
-    if (signal.aborted) throw new Error("Cancelled by the user.");
-    this.emit({ type: "guard", name: call.name, input: call.input, target, page: page.url, verdict, reason });
-    if (verdict === "allow") return;
-    if (verdict === "block") {
-      this.emit({ type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
-      throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);
-    }
-    const decision = await this.askPermission({
-      text: `Safety check: ${reason} Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
-      allowAlways: false,
-      kind: "safety",
-    });
+    const flagged = check && check.verdict !== "allow" ? check.reason : null;
+    const action = confirm ? `the agent to ${confirm}` : `${call.name} ${describeInput(call.name, call.input)}${check.target ? ` on ${check.target}` : ""}`;
+    // A remote client may answer this kind, as it may any safety prompt, since tasks
+    // started remotely send mail too; sensitive-site and password prompts stay local.
+    const decision = await this.askPermission({ text: `${flagged ? `Safety check: ${flagged} ` : ""}Allow ${action}?`, allowAlways: false, kind: "safety" });
     if (decision === "deny") {
       // A navigation's site is where it goes; an Outlook tool acts on no site.
-      this.#decline(call, this.mcp?.has(call.name) ? null : originForToolCall(call.name, call.input, page.url), "safety");
-      throw new Error(`The user declined this action (${reason}). ${DECLINED}`);
+      this.#decline(call, isMcp ? null : originForToolCall(call.name, call.input, check.page.url), "safety");
+      throw new Error(`The user declined this action${flagged ? ` (${flagged})` : ""}. ${DECLINED}`);
     }
   }
 

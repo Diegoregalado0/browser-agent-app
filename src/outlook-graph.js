@@ -224,6 +224,21 @@ export class OutlookGraph {
     return BY_NAME.get(name)?.readOnly === true;
   }
 
+  // What a call that always needs the user's approval, in every safety mode, would do:
+  // sending mail and inviting people. Null for other calls.
+  confirmation(name, input = {}) {
+    const list = (...values) => values.flat().filter((v) => typeof v === "string").join(", ").slice(0, 300);
+    const subject = String(input.subject ?? "").slice(0, 120);
+    if (name === "mcp__outlook__send") {
+      if (input.draft_id) return "send a saved Outlook draft";
+      return `send an email to ${list(input.to, input.cc)}: "${subject}"`;
+    }
+    if (name === "mcp__outlook__event_create" && input.attendees?.length) {
+      return `create the Outlook event "${subject}" and invite ${list(input.attendees)}`;
+    }
+    return null;
+  }
+
   async call(name, input = {}, { signal } = {}) {
     const text = await this.#run(name.replace("mcp__outlook__", ""), input, (...args) => this.#graph(signal, ...args));
     return [{ type: "text", text }];

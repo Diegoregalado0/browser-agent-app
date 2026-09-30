@@ -927,4 +927,42 @@ assert.deepEqual(ollamaChats.map((c) => c.think), [true, false, false, undefined
 assert.deepEqual(shown, ["hybrid", "plain"], "Ollama capabilities were not asked once per model");
 fakeOllama.close();
 
+// Sending mail and inviting people ask in every mode, Auto included, once: a safety check
+// that also asks shares the prompt, and a decline sends nothing.
+assert.equal(outlook.confirmation("mcp__outlook__send", { to: ["eve@x.test"], subject: "Inbox" }), 'send an email to eve@x.test: "Inbox"');
+assert.equal(outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch" }), null, "an event without attendees asked");
+assert.match(outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch", attendees: ["bob@x.test"] }), /invite bob@x\.test/);
+const mailPrompts = [];
+let mailAnswer = "deny";
+const mailer = new Agent({ emit: () => {}, askPermission: async (p) => (mailPrompts.push(p), mailAnswer) });
+mailer.browser = agent.browser;
+let mailSent = 0;
+mailer.mcp = {
+  toolDefs: () => [],
+  has: (name) => name.startsWith("mcp__outlook__"),
+  isReadOnly: (name) => outlook.isReadOnly(name),
+  confirmation: (name, input) => outlook.confirmation(name, input),
+  call: async () => (mailSent++, [{ type: "text", text: "Sent." }]),
+};
+const mailRun = async (mode, calls) => {
+  replies = [
+    { content: calls, raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+    { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+  ];
+  await mailer.run("tidy my calendar", { ...config, permissionMode: mode });
+};
+const sendCall = mcpCall("s1", "mcp__outlook__send", { to: ["eve@x.test"], subject: "Inbox" });
+await mailRun("auto", [sendCall, mcpCall("e1", "mcp__outlook__event_create", { subject: "Focus", start: "a", end: "b" })]);
+assert.equal(mailPrompts.length, 1, "Auto mode did not ask before sending, or asked for an event without attendees");
+assert.equal(mailPrompts[0].kind, "safety");
+assert.equal(mailSent, 1, "a declined send was sent, or the event was not created");
+mailAnswer = "once";
+providers.openai.classify = async () => ({ verdict: "allow", reason: "ok" });
+await mailRun("guarded", [{ ...sendCall, id: "s2" }]);
+providers.openai.classify = async () => ({ verdict: "ask", reason: "not requested" });
+await mailRun("guarded", [{ ...sendCall, id: "s3" }]);
+assert.equal(mailPrompts.length, 3, "a send the safety check allowed did not ask, or one it flagged asked twice");
+assert.match(mailPrompts[2].text, /^Safety check: not requested Allow the agent to send an email to eve@x\.test/);
+assert.equal(mailSent, 3);
+
 console.log("agent checks passed");

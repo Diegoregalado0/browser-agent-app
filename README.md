@@ -69,6 +69,7 @@ In every mode, including Auto:
 
 - On sensitive sites (banks, payments, crypto exchanges, password managers, account security, some government sites) it asks before any click or typing. You can add your own sites.
 - It asks before typing into a password field, and never shows the model what a password field holds.
+- With Outlook connected, it asks before sending mail and before adding an event that invites people.
 - Once you decline an action, the task does not ask for it again, and going back to that site asks you first.
 - It is told to ask before purchases, payments, sending messages, posting, deleting data, or changing account settings you did not request, and not to solve CAPTCHAs for you.
 
@@ -98,7 +99,7 @@ Settings > General holds instructions sent with every task, for facts and prefer
 
 ### Outlook
 
-Connect Outlook in the Connections panel (the plug button) and sign in on Microsoft's own page with a work, school or personal Microsoft account. The agent can then search and read your mail, save drafts and replies, send, and list or add calendar events. Sending mail and adding events go through the safety check. The sign-in stays in this Chrome profile, never synced, and is never shown to the model. Sign out in the same panel.
+Connect Outlook in the Connections panel (the plug button) and sign in on Microsoft's own page with a work, school or personal Microsoft account. The agent can then search and read your mail, save drafts and replies, send, and list or add calendar events. Browsby asks you before it sends mail or adds an event that invites people, in every safety mode; saving drafts and adding events without attendees go through the safety check. The sign-in stays in this Chrome profile, never synced, and is never shown to the model. Sign out in the same panel.
 
 ### Remote control from Discord
 
