@@ -9,8 +9,10 @@ const KEYED_PROVIDERS = ["anthropic", "openai", "gemini", "mistral"];
 const WIDE = window.matchMedia("(min-width: 640px)");
 
 // getDebugLines(): the chat's recent debug lines, for Copy diagnostics.
-export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) {
+export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [] }) {
   const sheet = $("settings");
+  // Where focus goes back to when the sheet closes.
+  let opener = null;
   let config = null;
   let page = "general";
   let pendingToast = null;
@@ -47,6 +49,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     yes.onclick = () => {
       bar.remove();
       button.hidden = false;
+      button.focus();
       onConfirm();
     };
     no.onclick = close;
@@ -71,11 +74,14 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     if (name === "data") send({ type: "data_info" });
     if (name === "remote") send({ type: "discord_status" });
     if (name === "safety") send({ type: "data_info" });
+    // In the side panel the section list is gone now, and focus with it.
+    if (!WIDE.matches) $("settings-title").focus();
   }
 
   function showNav() {
     sheet.classList.remove("page-open");
     $("settings-title").textContent = "Settings";
+    sheet.querySelector(`.settings-nav [data-page="${page}"]`).focus();
   }
 
   function layout() {
@@ -90,6 +96,15 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
   // Where the back button goes: the menu when a page was opened from it, else the list.
   let onBack = null;
   $("settings-back").onclick = () => (onBack ? onBack() : showNav());
+
+  // Each setting's description is read with its control.
+  for (const label of sheet.querySelectorAll(".setting-text > label.setting-title[for]")) {
+    const desc = label.parentElement.querySelector(".setting-desc");
+    const control = $(label.htmlFor);
+    if (!desc || !control) continue;
+    desc.id ||= `${label.htmlFor}-desc`;
+    control.setAttribute("aria-describedby", [desc.id, control.getAttribute("aria-describedby")].filter(Boolean).join(" "));
+  }
 
   // Simple options: every [data-setting] control saves itself on change.
 
@@ -133,9 +148,13 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       yes.type = no.type = "button";
       yes.onclick = () => {
         bar.remove();
+        radio.focus();
         save({ permissionMode: "auto" }, "Auto mode on. Safety checks are off.");
       };
-      no.onclick = () => bar.remove();
+      no.onclick = () => {
+        bar.remove();
+        sheet.querySelector('input[name="permissionMode"]:checked')?.focus();
+      };
       bar.append(el("span", null, "Turn off the safety checks for every task?"), yes, no);
       group.append(bar);
       no.focus();
@@ -192,7 +211,10 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     const label = el("label", "card-label", labelText);
     label.htmlFor = id;
     wrap.append(label, input);
-    if (note) wrap.append(el("p", "field-note", note));
+    if (note) {
+      wrap.append(Object.assign(el("p", "field-note", note), { id: `${id}-note` }));
+      input.setAttribute("aria-describedby", `${id}-note`);
+    }
     return wrap;
   }
 
@@ -210,7 +232,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       saveKey.type = "button";
       const commit = () => {
         const key = keyInput.value.trim();
-        if (!key) return keyInput.focus();
         if (showKeyProblem(card, key)) return keyInput.focus();
         keyInput.value = "";
         save({ keys: { [p]: key } }, `${PROVIDER_NAMES[p]} key saved`);
@@ -280,7 +301,10 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
         });
       actions.append(remove);
     }
-    card.append(actions, el("p", "pc-result"));
+    const result = Object.assign(el("p", "pc-result"), { id: `pc-result-${p}` });
+    result.setAttribute("aria-live", "polite");
+    keyInput?.setAttribute("aria-describedby", result.id);
+    card.append(actions, result);
     return card;
   }
 
@@ -371,7 +395,6 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
   $("discord-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const token = $("discord-token").value.trim();
-    if (!token) return;
     const problem = keyProblem(token, "bot token");
     if (problem) {
       $("discord-status").textContent = problem;
@@ -413,14 +436,21 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     open(name, options = {}) {
       onBack = options.onBack ?? null;
       $("settings-back").title = $("settings-back").ariaLabel = onBack ? "Back to the menu" : "All settings";
+      if (sheet.hidden) opener = document.activeElement;
       sheet.hidden = false;
+      setInertBehind(sheet, true);
       if (name) showPage(name);
       else if (WIDE.matches) showPage(page);
       else showNav();
+      $("settings-title").focus();
       if (config) loadModels(config.provider);
     },
     close() {
+      if (sheet.hidden) return;
+      const hadFocus = sheet.contains(document.activeElement) || document.activeElement === document.body;
       sheet.hidden = true;
+      setInertBehind(sheet, false);
+      if (hadFocus) (opener?.isConnected && opener.offsetParent ? opener : $("input")).focus();
     },
     get isOpen() {
       return !sheet.hidden;

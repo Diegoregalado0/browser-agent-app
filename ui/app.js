@@ -57,8 +57,8 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines });
-const mcpPanel = createMcpPanel({ $, el, send, toast: (text, kind) => settings.toast(text, kind) });
+const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines });
+const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
 const wizard = createWizard({
   $,
   el,
@@ -67,6 +67,14 @@ const wizard = createWizard({
   mcp: mcpPanel,
   openModels: () => settings.open("models"),
 });
+
+// While an overlay is open, the page behind it is inert, so neither focus nor a screen
+// reader reaches it. The scrim, toasts, and the connect flow above it stay live.
+function setInertBehind(overlay, on) {
+  for (const node of document.body.children) {
+    if (node !== overlay && !["menu-scrim", "toast", "connect-flow"].includes(node.id)) node.inert = on;
+  }
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -168,6 +176,7 @@ function renderBlocks(container, blocks) {
   for (const b of blocks) {
     if (b.type === "image") {
       const img = el("img");
+      img.alt = "Screenshot";
       img.src = `data:${b.mediaType};base64,${b.data}`;
       container.append(img);
     } else container.append(el("div", null, b.text));
@@ -180,6 +189,7 @@ function setRunning(value) {
   const noKey = config && config.provider !== "ollama" && config.keyInfo?.[config.provider]?.source === "none";
   $("dot").className = `dot ${running ? "running" : noKey ? "no-key" : "idle"}`;
   $("dot").title = noKey && !running ? "No API key for this provider" : "";
+  $("dot").ariaLabel = running ? "Running" : noKey ? "No API key for this provider" : "Ready";
 }
 
 function renderHeader() {
@@ -261,6 +271,7 @@ function renderHistory() {
       closeMenu();
     };
     const del = el("button", "icon-btn history-delete");
+    del.dataset.id = s.id;
     del.append(icon("trash"));
     del.title = "Delete session";
     del.setAttribute("aria-label", `Delete ${s.title}`);
@@ -268,8 +279,14 @@ function renderHistory() {
       const confirm = el("div", "history-confirm");
       const yes = el("button", "danger", "Delete");
       const no = el("button", null, "Cancel");
-      yes.onclick = () => send({ type: "delete_session", id: s.id });
-      no.onclick = () => renderHistory();
+      yes.onclick = () => {
+        $("history-search").focus();
+        send({ type: "delete_session", id: s.id });
+      };
+      no.onclick = () => {
+        renderHistory();
+        list.querySelector(`[data-id="${CSS.escape(s.id)}"]`)?.focus();
+      };
       confirm.append(el("span", null, "Delete this session?"), yes, no);
       row.replaceChildren(confirm);
       no.focus();
@@ -300,7 +317,7 @@ function describeAction(name, input) {
       double_click: `Double-clicking${target}`,
       triple_click: `Selecting${target}`,
       hover: `Hovering${target}`,
-      type: `Typing "${(input.text || "").slice(0, 30)}"`,
+      type: `Typing “${(input.text || "").slice(0, 30)}”`,
       key: `Pressing ${input.text || ""}`,
       scroll: `Scrolling ${input.scroll_direction || "down"}`,
       left_click_drag: "Dragging",
@@ -311,7 +328,7 @@ function describeAction(name, input) {
   return (
     {
       read_page: "Reading the page…",
-      find: `Finding "${input.query || ""}"…`,
+      find: `Finding “${input.query || ""}”…`,
       form_input: `Filling${target}…`,
       get_page_text: "Reading the page text…",
       network_requests: "Checking network requests…",
@@ -323,6 +340,8 @@ function describeAction(name, input) {
 // Drives the status line: animated glyph, current verb, elapsed time, output tokens.
 const activity = (() => {
   const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+  // With reduced motion the glyph holds still; the elapsed time still counts.
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
   let frame = 0;
   let started = 0;
   let timer = null;
@@ -331,7 +350,7 @@ const activity = (() => {
 
   const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const render = () => {
-    $("spinner").textContent = GLYPHS[(frame = (frame + 1) % GLYPHS.length)];
+    if (!still.matches) $("spinner").textContent = GLYPHS[(frame = (frame + 1) % GLYPHS.length)];
     const secs = Math.floor((Date.now() - started) / 1000);
     const tokens = reportedTokens + Math.round(streamedChars / 4);
     $("activity-meta").textContent = `(${secs}s${tokens ? ` · ↓ ${fmt(tokens)} tokens` : ""})`;
@@ -393,11 +412,13 @@ const handlers = {
     renderHistory();
   },
   status(msg) {
+    const finished = running && !msg.running;
     setRunning(msg.running);
     if (msg.running) activity.start();
     else {
       activity.stop();
       closeGroup();
+      if (finished) announceReply();
     }
   },
   assistant_start() {
@@ -477,12 +498,14 @@ const handlers = {
   },
   permission_request(msg) {
     $("permission").dataset.id = msg.id;
+    // Shown before the text is set, so screen readers announce the question.
+    $("permission").hidden = false;
     $("perm-text").textContent = msg.text;
     document.querySelector('#permission [data-decision="always"]').hidden = !msg.allowAlways;
-    $("permission").hidden = false;
     activity.set("Waiting for your approval…");
   },
   permission_closed() {
+    if ($("permission").contains(document.activeElement)) $("input").focus();
     $("permission").hidden = true;
   },
   debug(msg) {
@@ -496,6 +519,14 @@ const handlers = {
     activity.setOutputTokens(msg.taskOutput ?? 0);
   },
 };
+
+// When a task ends, screen readers hear its last reply or error; the log itself is not a
+// live region, since streamed replies would be read over and over.
+function announceReply() {
+  const msgs = [...log.querySelectorAll(".msg:not(.debug)")];
+  const reply = msgs.slice(msgs.findLastIndex((m) => m.classList.contains("user")) + 1).at(-1);
+  $("announce").textContent = reply?.textContent || "Task finished";
+}
 
 function receive(msg) {
   for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers]) group[msg.type]?.(msg);
@@ -540,13 +571,18 @@ function openMenu() {
   $("history-search").value = "";
   renderHistory();
   send({ type: "list_sessions" });
+  setInertBehind($("menu"), true);
   $("close-menu").focus();
 }
 
 function closeMenu() {
+  if ($("menu").hidden) return;
+  const hadFocus = $("menu").contains(document.activeElement);
   $("menu").hidden = true;
   $("menu-scrim").hidden = true;
   $("open-menu").setAttribute("aria-expanded", "false");
+  setInertBehind($("menu"), false);
+  if (hadFocus) $("open-menu").focus();
 }
 
 $("open-menu").onclick = () => ($("menu").hidden ? openMenu() : closeMenu());
