@@ -177,12 +177,15 @@ function renderBlocks(container, blocks) {
 function setRunning(value) {
   running = value;
   $("send").textContent = running ? "Stop" : "Send";
-  $("dot").className = `dot ${running ? "running" : "idle"}`;
+  const noKey = config && config.provider !== "ollama" && config.keyInfo?.[config.provider]?.source === "none";
+  $("dot").className = `dot ${running ? "running" : noKey ? "no-key" : "idle"}`;
+  $("dot").title = noKey && !running ? "No API key for this provider" : "";
 }
 
 function renderHeader() {
   if (!config) return;
   $("model").textContent = config.models[config.provider] || "No model selected";
+  setRunning(running);
   const ghost = Boolean(config.ghostMode);
   document.documentElement.classList.toggle("ghost", ghost);
   $("toggle-ghost").setAttribute("aria-pressed", String(ghost));
@@ -463,7 +466,14 @@ const handlers = {
     if (settings.isOpen) return settings.toast(msg.text, "error");
     closeGroup();
     textNode = null;
-    append(el("div", "msg error", msg.text));
+    const node = el("div", "msg error", msg.text);
+    if (/Settings > Models/.test(msg.text)) {
+      const open = el("button", "link", "Open Settings > Models");
+      open.type = "button";
+      open.onclick = () => settings.open("models");
+      node.append(" ", open);
+    }
+    append(node);
   },
   permission_request(msg) {
     $("permission").dataset.id = msg.id;

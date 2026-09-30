@@ -61,6 +61,7 @@ header .dot { margin-right: 6px; }
 #toggle-ghost[aria-pressed="true"] { background: var(--ghost-bg); color: var(--ghost-fg); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.idle { background: var(--ok); }
+.dot.no-key { background: #e0a23b; }
 .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
 @keyframes pulse { to { opacity: 0.3; } }
 .model { flex: 1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
