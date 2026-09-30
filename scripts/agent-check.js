@@ -699,6 +699,17 @@ providers.openai.turn = savedTurn;
 assert.deepEqual(cut.messages, [], "a reply cut short by Stop was kept");
 assert.ok(cutNotices.includes("Stopped."));
 
+// A safety check that cannot run names the safety model and the provider's explanation.
+const { classify: savedClassify, describeError: savedDescribe } = providers.openai;
+providers.openai.classify = async () => {
+  throw Object.assign(new Error("429 Rate limit exceeded"), { status: 400 });
+};
+providers.openai.describeError = () => "This model is not enabled for your account.";
+const unavailable = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} });
+Object.assign(providers.openai, { classify: savedClassify, describeError: savedDescribe });
+assert.equal(unavailable.verdict, "ask");
+assert.equal(unavailable.reason, "Safety check unavailable (gpt-6-luna: This model is not enabled for your account).");
+
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
 assert.match(openai.describeError(noCredit), /^OpenAI account is out of credit/);

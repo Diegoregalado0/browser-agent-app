@@ -110,7 +110,10 @@ export class Guard {
     try {
       return await this.#classify(config, { system: ACTION_SYSTEM, text: lines.join("\n"), schema: ACTION_SCHEMA }, signal);
     } catch (err) {
-      return { verdict: "ask", reason: `Safety check unavailable (${err.message.slice(0, 80)}).` };
+      // Named, so the user can tell a safety model their account cannot use (Mistral's
+      // zero-quota 429) from a passing failure.
+      const { impl, model } = this.#resolve(config);
+      return { verdict: "ask", reason: `Safety check unavailable (${model}: ${(impl.describeError(err) || err.message).slice(0, 160).replace(/\.$/, "")}).` };
     }
   }
 
