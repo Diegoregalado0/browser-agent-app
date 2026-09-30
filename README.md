@@ -62,7 +62,7 @@ You can run setup again from Settings > General.
 Choose a mode in Settings > Permissions and safety:
 
 - **Guarded** (default). A small, fast model checks each action that changes something against your requests, and scans what the agent reads for text that tries to take it over. If an action looks off, you are asked. If it clearly serves another goal, it is blocked. If the check itself fails, you are asked.
-- **Guarded, and ask for each new site.** Also asks before the agent acts on a site for the first time.
+- **Guarded, and ask for each new site.** Also asks before the agent acts on a site for the first time. The prompt shows the full address, so you can see data the agent would send along in it.
 - **Auto.** No safety checks or site prompts. Faster, but nothing stops the agent from following instructions planted in a page.
 
 In every mode, including Auto:

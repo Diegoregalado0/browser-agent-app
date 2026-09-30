@@ -873,14 +873,18 @@ export class Browser {
   }
 }
 
-// The origin a tool call acts on, for site permission checks; null when it touches no page.
-export function originForToolCall(name, input, currentUrl) {
+// The address a tool call acts on, for permission checks; null when it touches no page.
+export function addressForToolCall(name, input, currentUrl) {
   // Opening a tab at an address acts on that address, like navigate.
   const opens = name === "tabs" && input.action === "create" && typeof input.url === "string" && input.url;
   if ((name === "tabs" && !opens) || (name === "browser" && input.action === "wait")) return null;
-  const url = opens || (name === "navigate" && !["back", "forward"].includes(input.url)) ? normalizeUrl(input.url) : currentUrl;
+  return opens || (name === "navigate" && !["back", "forward"].includes(input.url)) ? normalizeUrl(input.url) : currentUrl;
+}
+
+// The origin a tool call acts on, for site permission checks; null when it touches no page.
+export function originForToolCall(name, input, currentUrl) {
   try {
-    return new URL(url).origin;
+    return new URL(addressForToolCall(name, input, currentUrl)).origin;
   } catch {
     return null;
   }

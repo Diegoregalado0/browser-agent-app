@@ -36,6 +36,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | Outlook send and event_create with attendees ran unchecked in Auto mode (owner decision, follow-up) | src/agent.js:453 to 477, src/outlook-graph.js:229 | Always asked, in every mode, as one prompt with the safety check's reason when it also asks; kind "safety", so a remote client may answer it (tasks started from Discord send mail too); sensitive and password prompts stay local only | "Sending mail and inviting people ask in every mode" |
 | A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (owner decision, follow-up) | src/agent.js:510 to 568, src/page-scripts.js:267, src/browser-tools.js targetFrame, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
 | Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js describeInput, #typesPassword | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
+| The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js #checkSite, clipAddress; src/browser-tools.js addressForToolCall | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
 
 ## Detailed threats
 
@@ -111,7 +112,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "likelihood": "medium",
     "impact": "high",
     "risk_score": "high",
-    "residual_risk": "Depends on the safety model; the Ask mode prompt names only the origin, not the address carrying the data."
+    "residual_risk": "Depends on the safety model; the Ask mode prompt now shows the full address (clipped past 300 characters), but Guarded and Auto modes do not ask for new sites."
   },
   {
     "id": "THREAT-ASI02-002",
@@ -374,7 +375,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 2. Done: always ask before Outlook send and event_create with attendees, in every mode including Auto.
 3. Done: treat a click or typing target inside a frame from a sensitive site (Stripe, PayPal checkout) as sensitive, and private or loopback addresses as sensitive for navigation.
 4. Run page scripts in an isolated world, so a hostile page cannot change what the outline, target description and password check report.
-5. Show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
+5. Done: show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Rescan or drop tool output when a saved conversation is reopened, or save the injection flags with it.
 7. Keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
 8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field.

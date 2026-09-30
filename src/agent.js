@@ -1,5 +1,5 @@
 import { providers } from "./providers/index.js";
-import { BROWSER_TOOL_DEFS, originForToolCall } from "./browser-tools.js";
+import { BROWSER_TOOL_DEFS, addressForToolCall, originForToolCall } from "./browser-tools.js";
 import { apiKeyFor } from "./config-core.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { Guard, isStateChanging } from "./guard.js";
@@ -22,6 +22,10 @@ const MAX_RATE_LIMIT_WAITS = 8;
 const DECLINED = "Do not retry it or work around it; tell the user what you wanted to do and ask how to proceed.";
 // A call as the declined-action records match it: its tool and exact input.
 const callKey = (call) => `${call.name} ${JSON.stringify(call.input)}`;
+// An address as prompts show it: whole up to ADDRESS_MAX characters (data can ride in it),
+// else its start and how much is left out. The panel wraps it.
+const ADDRESS_MAX = 300;
+const clipAddress = (url) => (url.length <= ADDRESS_MAX ? url : `${url.slice(0, ADDRESS_MAX)}… (${url.length - ADDRESS_MAX} more characters)`);
 
 // Screenshots and long tool output stay in the history and are sent again with every
 // request, which is what makes long tasks large. Once a request passes COMPACT_MIN_TOKENS
@@ -499,7 +503,7 @@ export class Agent {
     const kind = host && this.declinedHosts.get(host);
     if (!kind) return;
     const decision = await this.askPermission({
-      text: `You declined an action on ${host} earlier in this task. Allow the agent to open ${String(call.input.url).slice(0, 200)}?`,
+      text: `You declined an action on ${host} earlier in this task. Allow the agent to open ${clipAddress(String(call.input.url))}?`,
       allowAlways: false,
       kind,
     });
@@ -516,7 +520,7 @@ export class Agent {
     if (!origin || !isPrivateAddress(origin)) return false;
     const host = new URL(origin).hostname;
     const decision = await this.askPermission({
-      text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${String(call.input.url).slice(0, 200)}?`,
+      text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${clipAddress(String(call.input.url))}?`,
       allowAlways: false,
       kind: "sensitive",
     });
@@ -595,11 +599,14 @@ export class Agent {
 
   async #checkSite(call, config) {
     if (this.mcp?.has(call.name)) return;
-    const origin = originForToolCall(call.name, call.input, await this.browser.currentUrl());
+    const address = addressForToolCall(call.name, call.input, await this.browser.currentUrl());
+    const origin = originForToolCall(call.name, call.input, address);
     if (!origin || !/^https?:/.test(origin)) return;
     if (this.sessionOrigins.has(origin) || config.approvedOrigins.includes(origin)) return;
 
-    const decision = await this.askPermission({ text: `Allow the agent to use ${call.name} on ${origin}?`, allowAlways: true, origin, kind: "site" });
+    // The site is what gets approved; the full address shows any data riding along.
+    const full = address === origin || address === `${origin}/` ? "" : ` Full address: ${clipAddress(address)}`;
+    const decision = await this.askPermission({ text: `Allow the agent to use ${call.name} on ${origin}?${full}`, allowAlways: true, origin, kind: "site" });
     // The site prompt asks again on its own, so only the exact call is recorded.
     if (decision === "deny") {
       this.declinedCalls.add(callKey(call));
