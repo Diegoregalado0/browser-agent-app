@@ -39,6 +39,8 @@ const manifest = {
   name: "Browsby",
   version,
   description: "An AI agent that does tasks in your browser tabs, using your own API key.",
+  // The GitHub Pages site of the repository, which links the Privacy Policy and Terms of Use.
+  homepage_url: "https://diegoregalado0.github.io/browser-agent-app/",
   minimum_chrome_version: "120",
   permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage", ...(OUTLOOK_CLIENT_ID ? ["identity"] : [])],
   // Discord's API for remote control (its gateway is a WebSocket, which needs no

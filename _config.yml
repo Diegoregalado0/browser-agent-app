@@ -1,0 +1,16 @@
+# GitHub Pages (default Jekyll build from the main branch root): only the README, the
+# Privacy Policy, the Terms of Use and SECURITY.md are published as pages.
+title: Browsby
+exclude:
+  - bin
+  - brand
+  - dist
+  - extension
+  - node_modules
+  - scripts
+  - src
+  - ui
+  - package.json
+  - package-lock.json
+  - legal/IN-APP.md
+  - legal/WEB-STORE.md

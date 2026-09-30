@@ -5,3 +5,5 @@ dist/
 .env.*
 *.md
 !README.md
+!SECURITY.md
+!legal/*.md

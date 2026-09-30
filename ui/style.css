@@ -241,6 +241,8 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .setting[hidden] { display: none; }
 .setting-text { flex: 1; min-width: 0; }
 .setting-title { display: block; font-size: 14px; font-weight: 500; }
+a.setting-title { color: var(--accent); text-decoration: none; }
+a.setting-title:hover { text-decoration: underline; }
 .setting-desc { display: block; margin: 2px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .setting-desc code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .setting.stack { flex-direction: column; align-items: stretch; }
