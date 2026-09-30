@@ -28,6 +28,12 @@ Everything left before Browsby goes to the Chrome Web Store. Not published on Gi
 - [ ] Raise `version` in package.json.
 - [ ] First upload as a draft. Then put the store's public key in `EXTENSION_KEY` (scripts/build-extension.js).
 
+## Real-task testing
+
+- [ ] Run the real-task pass on OpenAI (gpt-6-sol with gpt-6-luna for safety checks). The 2026-09-30 pass could not: the test account had no credit left, so only Mistral (Ministral 14B) ran tasks end to end.
+- [ ] Run a few tasks on an Ollama model that supports tools. Not tested end to end: the test Mac had too little free disk to pull a model.
+- [ ] Once the store id exists, narrow the Ollama command in setup and Settings to `OLLAMA_ORIGINS=chrome-extension://<store id>`: the `chrome-extension://*` shown now lets every installed extension call the user's Ollama.
+
 ## Outlook (optional for launch)
 
 - [ ] Register the Entra app (README, "Outlook in the extension") and set `OUTLOOK_CLIENT_ID`.
