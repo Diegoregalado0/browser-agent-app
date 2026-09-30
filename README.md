@@ -68,7 +68,8 @@ Choose a mode in Settings > Permissions and safety:
 In every mode, including Auto:
 
 - On sensitive sites (banks, payments, crypto exchanges, password managers, account security, some government sites) it asks before any click or typing. You can add your own sites.
-- It asks before typing into a password field.
+- It asks before typing into a password field, and never shows the model what a password field holds.
+- Once you decline an action, the task does not ask for it again, and going back to that site asks you first.
 - It is told to ask before purchases, payments, sending messages, posting, deleting data, or changing account settings you did not request, and not to solve CAPTCHAs for you.
 
 ### Usage limits
@@ -107,7 +108,7 @@ Settings > Remote (Discord) connects your own Discord bot, so you can give the a
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.
 - **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it, along with the titles and addresses of the tabs in the window. With Ollama, it stays on your computer.
-- **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content; cookie, authorization and other sign-in headers are hidden from the model), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
+- **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content; cookie, authorization and other sign-in headers, and password and token values in addresses and content, are hidden from the model), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
 - **Nothing is sent to us.** There is no Browsby server, account, or analytics.
 - **Stored on your device:** your API keys, the Discord bot token and Outlook sign-in if you connect them, your settings, today's usage counter, and saved sessions, without screenshots. Delete sessions in Settings > Data and privacy.
 - Full details are in the [Privacy Policy](legal/PRIVACY.md) and the [Terms of Use](legal/TERMS.md).
