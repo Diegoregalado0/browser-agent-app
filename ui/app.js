@@ -57,8 +57,8 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, getDebugLines: () => debugLines });
-const mcpPanel = createMcpPanel({ $, el, send, toast: (text, kind) => settings.toast(text, kind) });
+const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines });
+const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
 const wizard = createWizard({
   $,
   el,
@@ -67,6 +67,14 @@ const wizard = createWizard({
   mcp: mcpPanel,
   openModels: () => settings.open("models"),
 });
+
+// While an overlay is open, the page behind it is inert, so neither focus nor a screen
+// reader reaches it. The scrim, toasts, and the connect flow above it stay live.
+function setInertBehind(overlay, on) {
+  for (const node of document.body.children) {
+    if (node !== overlay && !["menu-scrim", "toast", "connect-flow"].includes(node.id)) node.inert = on;
+  }
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -261,6 +269,7 @@ function renderHistory() {
       closeMenu();
     };
     const del = el("button", "icon-btn history-delete");
+    del.dataset.id = s.id;
     del.append(icon("trash"));
     del.title = "Delete session";
     del.setAttribute("aria-label", `Delete ${s.title}`);
@@ -268,8 +277,14 @@ function renderHistory() {
       const confirm = el("div", "history-confirm");
       const yes = el("button", "danger", "Delete");
       const no = el("button", null, "Cancel");
-      yes.onclick = () => send({ type: "delete_session", id: s.id });
-      no.onclick = () => renderHistory();
+      yes.onclick = () => {
+        $("history-search").focus();
+        send({ type: "delete_session", id: s.id });
+      };
+      no.onclick = () => {
+        renderHistory();
+        list.querySelector(`[data-id="${CSS.escape(s.id)}"]`)?.focus();
+      };
       confirm.append(el("span", null, "Delete this session?"), yes, no);
       row.replaceChildren(confirm);
       no.focus();
@@ -483,6 +498,7 @@ const handlers = {
     activity.set("Waiting for your approval…");
   },
   permission_closed() {
+    if ($("permission").contains(document.activeElement)) $("input").focus();
     $("permission").hidden = true;
   },
   debug(msg) {
@@ -540,13 +556,18 @@ function openMenu() {
   $("history-search").value = "";
   renderHistory();
   send({ type: "list_sessions" });
+  setInertBehind($("menu"), true);
   $("close-menu").focus();
 }
 
 function closeMenu() {
+  if ($("menu").hidden) return;
+  const hadFocus = $("menu").contains(document.activeElement);
   $("menu").hidden = true;
   $("menu-scrim").hidden = true;
   $("open-menu").setAttribute("aria-expanded", "false");
+  setInertBehind($("menu"), false);
+  if (hadFocus) $("open-menu").focus();
 }
 
 $("open-menu").onclick = () => ($("menu").hidden ? openMenu() : closeMenu());

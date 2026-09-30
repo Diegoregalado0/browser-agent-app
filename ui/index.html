@@ -38,7 +38,7 @@
   </form>
 
   <div id="menu-scrim" hidden></div>
-  <aside id="menu" class="menu" hidden aria-label="Menu">
+  <aside id="menu" class="menu" hidden role="dialog" aria-modal="true" aria-label="Menu">
     <nav class="menu-top" aria-label="Settings">
       <div class="menu-label menu-label-row">
         <span>Settings</span>
@@ -61,10 +61,10 @@
     </section>
   </aside>
 
-  <aside id="settings" class="settings" hidden aria-label="Settings">
+  <aside id="settings" class="settings" hidden role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <div class="settings-head">
       <button id="settings-back" class="icon-btn" data-icon="back" title="All settings" aria-label="All settings"></button>
-      <h2 id="settings-title">Settings</h2>
+      <h2 id="settings-title" tabindex="-1">Settings</h2>
       <button id="close-settings" class="icon-btn" data-icon="close" title="Close" aria-label="Close settings"></button>
     </div>
 
@@ -430,9 +430,9 @@
     </div>
   </aside>
 
-  <aside id="mcp-panel" class="settings mcp-panel" hidden aria-labelledby="mcp-title">
+  <aside id="mcp-panel" class="settings mcp-panel" hidden role="dialog" aria-modal="true" aria-labelledby="mcp-title">
     <div class="settings-head">
-      <h2 id="mcp-title">Connections</h2>
+      <h2 id="mcp-title" tabindex="-1">Connections</h2>
       <button id="close-mcp" class="icon-btn" data-icon="close" title="Close" aria-label="Close connections"></button>
     </div>
     <div class="mcp-body">
@@ -444,7 +444,7 @@
     </div>
   </aside>
 
-  <div id="connect-flow" class="wizard" hidden role="dialog" aria-modal="true" aria-labelledby="connect-title">
+  <dialog id="connect-flow" class="wizard" aria-labelledby="connect-title">
     <div class="wizard-card">
       <div class="connect-head"><span id="connect-logo"></span><p class="wizard-step" id="connect-step"></p></div>
       <h2 id="connect-title"></h2>
@@ -456,7 +456,7 @@
         <button type="button" id="connect-primary" class="primary"></button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <div id="wizard" class="onboard" hidden role="dialog" aria-modal="true" aria-labelledby="wizard-title">
     <div class="onboard-screen">

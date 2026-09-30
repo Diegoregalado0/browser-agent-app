@@ -9,8 +9,10 @@ const KEYED_PROVIDERS = ["anthropic", "openai", "gemini", "mistral"];
 const WIDE = window.matchMedia("(min-width: 640px)");
 
 // getDebugLines(): the chat's recent debug lines, for Copy diagnostics.
-export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) {
+export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [] }) {
   const sheet = $("settings");
+  // Where focus goes back to when the sheet closes.
+  let opener = null;
   let config = null;
   let page = "general";
   let pendingToast = null;
@@ -47,6 +49,7 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     yes.onclick = () => {
       bar.remove();
       button.hidden = false;
+      button.focus();
       onConfirm();
     };
     no.onclick = close;
@@ -71,11 +74,14 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     if (name === "data") send({ type: "data_info" });
     if (name === "remote") send({ type: "discord_status" });
     if (name === "safety") send({ type: "data_info" });
+    // In the side panel the section list is gone now, and focus with it.
+    if (!WIDE.matches) $("settings-title").focus();
   }
 
   function showNav() {
     sheet.classList.remove("page-open");
     $("settings-title").textContent = "Settings";
+    sheet.querySelector(`.settings-nav [data-page="${page}"]`).focus();
   }
 
   function layout() {
@@ -133,9 +139,13 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
       yes.type = no.type = "button";
       yes.onclick = () => {
         bar.remove();
+        radio.focus();
         save({ permissionMode: "auto" }, "Auto mode on. Safety checks are off.");
       };
-      no.onclick = () => bar.remove();
+      no.onclick = () => {
+        bar.remove();
+        sheet.querySelector('input[name="permissionMode"]:checked')?.focus();
+      };
       bar.append(el("span", null, "Turn off the safety checks for every task?"), yes, no);
       group.append(bar);
       no.focus();
@@ -413,14 +423,21 @@ export function createSettings({ $, el, icon, send, getDebugLines = () => [] }) 
     open(name, options = {}) {
       onBack = options.onBack ?? null;
       $("settings-back").title = $("settings-back").ariaLabel = onBack ? "Back to the menu" : "All settings";
+      if (sheet.hidden) opener = document.activeElement;
       sheet.hidden = false;
+      setInertBehind(sheet, true);
       if (name) showPage(name);
       else if (WIDE.matches) showPage(page);
       else showNav();
+      $("settings-title").focus();
       if (config) loadModels(config.provider);
     },
     close() {
+      if (sheet.hidden) return;
+      const hadFocus = sheet.contains(document.activeElement) || document.activeElement === document.body;
       sheet.hidden = true;
+      setInertBehind(sheet, false);
+      if (hadFocus) (opener?.isConnected && opener.offsetParent ? opener : $("input")).focus();
     },
     get isOpen() {
       return !sheet.hidden;

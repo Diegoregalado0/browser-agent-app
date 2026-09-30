@@ -15,7 +15,7 @@ export const OUTLOOK_LOGO = `<svg class="logo" viewBox="0 0 40 40" aria-hidden="
 <ellipse cx="14" cy="20" rx="3.4" ry="4.4" class="logo-o"/>
 </svg>`;
 
-export function createMcpPanel({ $, el, send, toast }) {
+export function createMcpPanel({ $, el, send, setInertBehind, toast }) {
   const panel = $("mcp-panel");
   const flow = $("connect-flow");
   // Outlook's sign-in: null until outlook_status arrives, then { signedIn, account }.
@@ -27,6 +27,8 @@ export function createMcpPanel({ $, el, send, toast }) {
   // The last outlook_status ({ configured, signedIn, account }).
   let graph = null;
   const signedIn = () => Boolean(graph?.signedIn);
+  // Where focus goes back to when the panel closes.
+  let opener = null;
 
   // Integrations list.
 
@@ -70,23 +72,24 @@ export function createMcpPanel({ $, el, send, toast }) {
     setButton($("connect-secondary"), secondary);
     $("connect-cancel").textContent = cancel;
     $("connect-cancel").hidden = !cancel;
-    flow.hidden = false;
+    // A modal dialog: the page behind is inert, and focus returns to the opener on close.
+    if (!flow.open) flow.showModal();
     $("connect-primary").hidden || $("connect-primary").disabled ? $("connect-cancel").focus() : $("connect-primary").focus();
   }
 
   function closeFlow() {
-    flow.hidden = true;
+    flow.close();
+  }
+  // Runs however the flow closes: its buttons, or Escape (the dialog's own cancel).
+  flow.addEventListener("close", () => {
     step = null;
     const done = onFlowClosed;
     onFlowClosed = null;
     done?.(signedIn());
-  }
-  $("connect-cancel").onclick = closeFlow;
-  flow.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
-    closeFlow();
   });
+  $("connect-cancel").onclick = closeFlow;
+  // Escape closes only the flow, not the panel under it.
+  flow.addEventListener("keydown", (e) => e.key === "Escape" && e.stopPropagation());
 
   // The flow step that fits Outlook's current state.
   function startOutlook() {
@@ -163,12 +166,19 @@ export function createMcpPanel({ $, el, send, toast }) {
 
   return {
     open() {
+      if (panel.hidden) opener = document.activeElement;
       panel.hidden = false;
+      setInertBehind(panel, true);
+      $("mcp-title").focus();
       send({ type: "outlook_status" });
     },
     close() {
       closeFlow();
+      if (panel.hidden) return;
+      const hadFocus = panel.contains(document.activeElement) || document.activeElement === document.body;
       panel.hidden = true;
+      setInertBehind(panel, false);
+      if (hadFocus) (opener?.isConnected && opener.offsetParent ? opener : $("input")).focus();
     },
     get isOpen() {
       return !panel.hidden;

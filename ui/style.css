@@ -191,6 +191,7 @@ details.steps details.thinking summary { font-style: italic; }
 @media (hover: none) { .history-delete { opacity: 1; } }
 .history-confirm { flex: 1; display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 13px; }
 .history-confirm span { flex: 1; }
+#history-list :focus-visible { outline-offset: -2px; }
 .history-empty { color: var(--muted); text-align: center; padding: 32px 16px; font-size: 13px; }
 button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 
@@ -201,6 +202,7 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 }
 .settings[hidden] { display: none; }
 .settings-head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--border); min-height: 49px; }
+.settings-head h2:focus { outline: none; }
 .settings-head h2 { flex: 1; margin: 0 0 0 4px; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings-back { display: none; margin-left: -4px; }
 .settings.page-open #settings-back { display: inline-flex; }
@@ -349,8 +351,12 @@ button.link:hover { color: var(--fg); text-decoration: underline; }
 .spacer { flex: 1; }
 
 /* Dialog cards (Outlook connect flow). */
-.wizard { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.35); }
-.wizard[hidden] { display: none; }
+.wizard {
+  position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.35);
+  width: auto; height: auto; max-width: none; max-height: none; margin: 0; border: none; color: inherit;
+}
+.wizard:not([open]) { display: none; }
+.wizard::backdrop { background: none; }
 .wizard-card { width: 100%; max-width: 440px; max-height: 100%; overflow: auto; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
 .wizard-card h2 { margin: 0; font-size: 18px; }
 .wizard-step { margin: 0; font-size: 12px; color: var(--muted); }
