@@ -651,6 +651,23 @@ rmSync(sandboxHome, { recursive: true, force: true });
 assert.equal(allowed.status, 0, allowed.stderr);
 assert.match(allowed.stdout, /Not running/);
 
+// A sensitive-site prompt names what the action targets, and a decline tells the model to ask.
+const sensitivePrompts = [];
+const onBank = new Agent({ emit: () => {}, askPermission: async ({ text }) => (sensitivePrompts.push(text), "deny") });
+onBank.browser = {
+  ...agent.browser,
+  currentUrl: async () => "https://www.paypal.com/us/home",
+  currentPage: async () => ({ id: "t1", title: "PayPal", url: "https://www.paypal.com/us/home" }),
+  describeTarget: async () => 'a "Sign Up"',
+};
+replies = [
+  { content: [{ type: "tool_call", id: "c1", name: "browser", input: { action: "left_click", ref: "ref_3" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await onBank.run("sign up", { ...config, permissionMode: "auto" });
+assert.match(sensitivePrompts[0], /left_click on a "Sign Up"\?$/);
+assert.match(onBank.messages.at(-2).content[0].content[0].text, /declined acting on www\.paypal\.com\. Do not retry/);
+
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
 assert.match(openai.describeError(noCredit), /^OpenAI account is out of credit/);

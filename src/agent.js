@@ -18,6 +18,8 @@ const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ?
 // (thinking blocks, thought signatures) while the same model is in use.
 
 const MAX_RATE_LIMIT_WAITS = 8;
+// Follows a decline, so the model asks instead of retrying the action another way.
+const DECLINED = "Do not retry it or work around it; tell the user what you wanted to do and ask how to proceed.";
 
 // Screenshots and long tool output stay in the history and are sent again with every
 // request, which is what makes long tasks large. Once a request passes COMPACT_MIN_TOKENS
@@ -428,7 +430,7 @@ export class Agent {
       allowAlways: false,
       kind: "safety",
     });
-    if (decision === "deny") throw new Error(`The user declined this action (${reason}).`);
+    if (decision === "deny") throw new Error(`The user declined this action (${reason}). ${DECLINED}`);
   }
 
   // The safety model's verdict on an action, with the page and target it was judged on.
@@ -452,12 +454,13 @@ export class Agent {
     const url = await this.browser.currentUrl();
     if (config.confirmSensitiveSites && isSensitiveSite(url, config.sensitiveSites)) {
       const site = new URL(url).hostname;
+      const target = await this.browser.describeTarget(call.input);
       const decision = await this.askPermission({
-        text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}?`,
+        text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
         allowAlways: false,
         kind: "sensitive",
       });
-      if (decision === "deny") throw new Error(`The user declined acting on ${site}.`);
+      if (decision === "deny") throw new Error(`The user declined acting on ${site}. ${DECLINED}`);
       return;
     }
     // Typing, single keys (a password can be typed a key at a time) and pasting all count.
