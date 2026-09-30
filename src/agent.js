@@ -355,6 +355,9 @@ export class Agent {
         results.push({ ...base, isError: true, content: [{ type: "text", text }] });
         continue;
       }
+      // Small models (Ministral) often send a ref as its bare number, "3" for "ref_3". This
+      // runs before the permission checks, so they judge the element the action will hit.
+      if (/^\d+$/.test(call.input?.ref)) call.input.ref = `ref_${call.input.ref}`;
       this.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input });
       // Declined or blocked actions are the user's and the safety check's decisions, not loops.
       let authorizing = false;

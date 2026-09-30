@@ -661,11 +661,13 @@ onBank.browser = {
   describeTarget: async () => 'a "Sign Up"',
 };
 replies = [
-  { content: [{ type: "tool_call", id: "c1", name: "browser", input: { action: "left_click", ref: "ref_3" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "c1", name: "browser", input: { action: "left_click", ref: "3" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
   { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
 ];
 await onBank.run("sign up", { ...config, permissionMode: "auto" });
 assert.match(sensitivePrompts[0], /left_click on a "Sign Up"\?$/);
+// A bare-number ref is read as ref_N before any check sees it.
+assert.equal(onBank.messages.at(-3).content[0].input.ref, "ref_3");
 assert.match(onBank.messages.at(-2).content[0].content[0].text, /declined acting on www\.paypal\.com\. Do not retry/);
 
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
