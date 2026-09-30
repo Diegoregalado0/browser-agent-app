@@ -51,7 +51,7 @@ You can run setup again from Settings > General.
 
 ### Watch it work, or not
 
-- The agent works in its own tabs and never takes over a tab you opened. The tab it is working in is marked with an "Agent" tab group.
+- The agent works in its own tabs and never takes over a tab you opened, not even to go back or forward in its history. The tab it is working in is marked with an "Agent" tab group.
 - With each request, the model gets the current tab's title and address. It sees the titles and addresses of the other tabs in the window, including yours, only when it calls its tabs tool to list them.
 - **Show the agent's actions** (Settings > Browser, off by default): a pointer glides to each target before a click, and typing appears one character at a time.
 - **Stop** ends the task at once.

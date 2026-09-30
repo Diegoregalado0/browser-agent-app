@@ -58,7 +58,7 @@ export const BROWSER_TOOL_DEFS = [
   {
     name: "navigate",
     description:
-      "Load a URL, or pass 'back' / 'forward' to move through history. Waits for the page to load. Reuses the current tab " +
+      "Load a URL, or pass 'back' / 'forward' to move through the history of a tab this task opened. Waits for the page to load. Reuses the current tab " +
       "when this task opened it; set new_tab to keep the current tab as it is and load the URL in a new one. Tabs this " +
       "task did not open are never reused.",
     input_schema: {
@@ -783,6 +783,11 @@ export class Browser {
           }
         }
         if (input.url === "back" || input.url === "forward") {
+          // Like loading an address: the user's own tabs and earlier tasks' tabs keep their history.
+          const { id } = await this.currentPage();
+          if (!this.taskTabs.has(id)) {
+            throw new Error(`navigate ${input.url} works only in tabs opened during this task, and tab ${id} was not. Load the address you want with navigate instead.`);
+          }
           const { currentIndex, entries } = await this.send("Page.getNavigationHistory");
           const entry = entries[currentIndex + (input.url === "back" ? -1 : 1)];
           if (!entry) throw new Error(`No ${input.url} history entry`);

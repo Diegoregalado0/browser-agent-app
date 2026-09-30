@@ -777,6 +777,24 @@ assert.match(netDetail, /user=ada/);
 assert.match(netDetail, /"user":"ada"/);
 assert.match(await netBrowser.run("network_requests", { url_contains: "session_id=s" }), /showing 0 of 0/, "a filter matched a hidden value");
 
+// navigate back and forward work only in tabs this task opened.
+const historySent = [];
+const historyTransport = {
+  pages: async () => [{ id: "u1", title: "Mail", url: "https://mail.example/" }, { id: "t9", title: "", url: "about:blank" }],
+  activeId: async () => "u1",
+  openTab: async () => "t9",
+  activate: async () => {},
+  navigate: async () => null,
+  send: async (id, method) => (historySent.push(`${id} ${method}`), method === "Page.getNavigationHistory" ? { currentIndex: 1, entries: [{ id: 1 }, { id: 2 }] } : {}),
+};
+const historyBrowser = new Browser(historyTransport);
+await historyBrowser.startTask();
+await assert.rejects(historyBrowser.run("navigate", { url: "back" }), /only in tabs opened during this task/);
+assert.ok(!historySent.includes("u1 Page.navigateToHistoryEntry"), "went back in the user's own tab");
+await historyBrowser.run("tabs", { action: "create" });
+await historyBrowser.run("navigate", { url: "back" }).catch(() => {});
+assert.ok(historySent.includes("t9 Page.navigateToHistoryEntry"), "could not go back in the task's own tab");
+
 // In Ask mode, opening a tab at an address asks for that site like navigate does.
 const sitePrompts = [];
 const asking = new Agent({ emit: () => {}, askPermission: async (p) => (sitePrompts.push(p), "deny") });

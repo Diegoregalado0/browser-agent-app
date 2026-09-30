@@ -37,6 +37,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (owner decision, follow-up) | src/agent.js:510 to 568, src/page-scripts.js:267, src/browser-tools.js targetFrame, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
 | Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js describeInput, #typesPassword | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
 | The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js #checkSite, clipAddress; src/browser-tools.js addressForToolCall | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
+| `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js navigate | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
 
 ## Detailed threats
 
@@ -196,7 +197,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "attack_scenario": "1. A hijacked agent opens any site the user is signed in to\n2. It acts with the user's full account rights",
     "vulnerability_types": ["CWE-250", "CWE-269"],
     "mitigation": "Inherent to the product; keep sensitive-site prompts, recommend a separate Chrome profile for agent work",
-    "existing_controls": ["Agent limited to its panel's window (extension/transport-debugger.js:12, 40)", "Incognito windows get their own agent and Ghost mode lock", "Tab rules: navigate opens a new tab instead of reusing the user's, close only task tabs (src/browser-tools.js:743, 770)", "Sensitive-site list (src/limits.js:42-54)", "Chrome's debugging banner while attached"],
+    "existing_controls": ["Agent limited to its panel's window (extension/transport-debugger.js:12, 40)", "Incognito windows get their own agent and Ghost mode lock", "Tab rules: navigate opens a new tab instead of reusing the user's, back and forward only in task tabs, close only task tabs (src/browser-tools.js:743, 770)", "Sensitive-site list (src/limits.js:42-54)", "Chrome's debugging banner while attached"],
     "control_effectiveness": "partial",
     "attack_complexity": "medium",
     "likelihood": "medium",
@@ -377,5 +378,5 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 4. Run page scripts in an isolated world, so a hostile page cannot change what the outline, target description and password check report.
 5. Done: show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Rescan or drop tool output when a saved conversation is reopened, or save the injection flags with it.
-7. Keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
+7. Done: keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
 8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field.
