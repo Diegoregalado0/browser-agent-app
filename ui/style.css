@@ -99,7 +99,7 @@ details.thinking div { white-space: pre-wrap; padding: 4px 0 0 12px; }
 .tool .body { padding: 6px 8px; border-top: 1px solid var(--border); white-space: pre-wrap; max-height: 260px; overflow: auto; font-family: ui-monospace, Menlo, monospace; }
 .tool img { max-width: 100%; border-radius: 4px; display: block; }
 #permission { border-top: 1px solid var(--border); padding: 10px 12px; background: var(--panel); }
-#perm-text { margin-bottom: 8px; }
+#perm-text { margin-bottom: 8px; max-height: 40vh; overflow-y: auto; overflow-wrap: anywhere; }
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .row input { flex: 1; min-width: 0; }
 #composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }

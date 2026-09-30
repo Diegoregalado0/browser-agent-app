@@ -232,7 +232,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
       saveKey.type = "button";
       const commit = () => {
         const key = keyInput.value.trim();
-        if (!key) return keyInput.focus();
         if (showKeyProblem(card, key)) return keyInput.focus();
         keyInput.value = "";
         save({ keys: { [p]: key } }, `${PROVIDER_NAMES[p]} key saved`);
@@ -396,7 +395,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
   $("discord-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const token = $("discord-token").value.trim();
-    if (!token) return;
     const problem = keyProblem(token, "bot token");
     if (problem) {
       $("discord-status").textContent = problem;

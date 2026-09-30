@@ -317,7 +317,7 @@ function describeAction(name, input) {
       double_click: `Double-clicking${target}`,
       triple_click: `Selecting${target}`,
       hover: `Hovering${target}`,
-      type: `Typing "${(input.text || "").slice(0, 30)}"`,
+      type: `Typing “${(input.text || "").slice(0, 30)}”`,
       key: `Pressing ${input.text || ""}`,
       scroll: `Scrolling ${input.scroll_direction || "down"}`,
       left_click_drag: "Dragging",
@@ -328,7 +328,7 @@ function describeAction(name, input) {
   return (
     {
       read_page: "Reading the page…",
-      find: `Finding "${input.query || ""}"…`,
+      find: `Finding “${input.query || ""}”…`,
       form_input: `Filling${target}…`,
       get_page_text: "Reading the page text…",
       network_requests: "Checking network requests…",
