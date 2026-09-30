@@ -91,14 +91,20 @@ export async function turn({ model, config, system, tools, messages, signal, onT
   return { content, raw: null, stop, usage };
 }
 
+// The connection test's one real request: the chosen model, one output token. A POST, so
+// it meets the origin check that listing models (a GET) does not.
+export async function ping({ model, config }) {
+  await client(config).chat({ model, stream: false, messages: [{ role: "user", content: "Hi" }], options: { num_predict: 1 } });
+}
+
 export function describeError(err) {
   // Node says "fetch failed"; the browser, where the extension runs, says "Failed to fetch".
   if (err?.cause?.code === "ECONNREFUSED" || /fetch failed|failed to fetch/i.test(err?.message)) {
     return "Could not reach Ollama. Is it running (ollama serve)?";
   }
   // Ollama answers 403 to requests from origins it does not allow, and a browser extension
-  // is not one of its defaults. Listing models is a GET without an Origin check, so the
-  // connection test passes and only the first task fails.
+  // is not one of its defaults. Listing models is a GET without an Origin check, which is
+  // why the connection test also sends one chat request.
   if (err?.name === "ResponseError" && err.status_code === 403) {
     return "Ollama refused the request from this extension (403). Quit Ollama and start it with OLLAMA_ORIGINS=chrome-extension://* ollama serve.";
   }

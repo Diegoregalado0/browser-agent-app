@@ -5,9 +5,40 @@ import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { today } from "./limits.js";
 
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
+// A local model may first have to load into memory.
+const MODEL_TEST_TIMEOUT_MS = 60000;
 // The longest task request accepted, from the prompt box or a remote client.
 const PROMPT_MAX_CHARS = 50000;
 const hasProvider = (id) => typeof id === "string" && Object.hasOwn(providers, id);
+
+// Rejects with `message` when the promise has not settled within ms.
+function within(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(message)), ms)));
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Lists the provider's models, then sends one tiny real request with the chosen model (or
+// the first listed), so an account without credit or an Ollama server that refuses the
+// extension fails here rather than on the first task. Returns the success text; throws
+// with the provider's own explanation.
+async function testConnection(id, apiKey, config) {
+  const provider = providers[id];
+  const started = Date.now();
+  try {
+    const models = await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
+    const model = config.models[id] || models[0];
+    if (!model) {
+      if (id === "ollama") throw new Error("Ollama is running but has no models yet. Pull one that supports tools with ollama pull <model>, then test again.");
+      throw new Error("The provider lists no models for this key.");
+    }
+    await within(provider.ping({ apiKey, model, config }), MODEL_TEST_TIMEOUT_MS, `${model} did not answer within 60 seconds.`);
+    const count = `${models.length} model${models.length === 1 ? "" : "s"} available`;
+    return `Connected in ${((Date.now() - started) / 1000).toFixed(1)}s. ${count}; ${model} answered.`;
+  } catch (err) {
+    throw new Error(provider.describeError(err) || err.message);
+  }
+}
 
 // What a remote client (a chat bridge such as Discord) may send: start a task, stop it, and
 // answer a permission prompt. Settings, keys and data change only at the computer.
@@ -231,8 +262,7 @@ export function createController(host) {
         await check(`Model provider (${config.provider})`, async () => {
           const apiKey = apiKeyFor(config, config.provider);
           if (config.provider !== "ollama" && !apiKey) throw new Error("No API key. Add one in Settings > Models.");
-          const models = await providers[config.provider].listModels({ apiKey, config });
-          return `reachable, ${models.length} models; using ${config.models[config.provider] || "no model selected"}`;
+          return testConnection(config.provider, apiKey, config);
         });
         await check("Agent browser", async () => {
           await host.ensureBrowser(agent);
@@ -301,7 +331,6 @@ export function createController(host) {
       case "test_provider": {
         // Tests the typed (unsaved) key or endpoint when given, else the saved one.
         if (!hasProvider(msg.provider)) return;
-        const provider = providers[msg.provider];
         const config = await host.loadConfig();
         const result = (ok, text) => reply({ type: "provider_test", provider: msg.provider, ok, text });
         try {
@@ -318,15 +347,10 @@ export function createController(host) {
         }
         const apiKey = apiKeyFor(config, msg.provider);
         if (msg.provider !== "ollama" && !apiKey) return result(false, "No key to test. Paste a key first.");
-        const started = Date.now();
         try {
-          const models = await Promise.race([
-            provider.listModels({ apiKey, config }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("No response within 15 seconds.")), CONNECTION_TEST_TIMEOUT_MS)),
-          ]);
-          result(true, `Connected in ${((Date.now() - started) / 1000).toFixed(1)}s. ${models.length} model${models.length === 1 ? "" : "s"} available.`);
+          result(true, await testConnection(msg.provider, apiKey, config));
         } catch (err) {
-          result(false, provider.describeError(err) || err.message);
+          result(false, err.message);
         }
         return;
       }

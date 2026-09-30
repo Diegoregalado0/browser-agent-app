@@ -14,6 +14,7 @@ const withEndpoint = (opts) => ({
 export const turn = (opts) => openai.turn(withEndpoint(opts));
 export const classify = (opts) => openai.classify(withEndpoint(opts));
 export const listModels = (opts) => openai.listModels(withEndpoint(opts));
+export const ping = (opts) => openai.ping(withEndpoint(opts));
 
 export function describeError(err) {
   if (err?.status === 429 && err.headers?.get?.("x-ratelimit-limit-req-minute") === "0") {

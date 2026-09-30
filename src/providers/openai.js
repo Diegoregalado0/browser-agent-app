@@ -288,6 +288,23 @@ export function turn(opts) {
   return opts.config.openaiBaseUrl ? chatTurn(opts) : responsesTurn(opts);
 }
 
+// The connection test's one real request: the chosen model and the fewest output tokens
+// each API accepts (Responses allows no fewer than 16).
+export async function ping({ apiKey, model, config }) {
+  const openai = client({ apiKey, config });
+  if (config.openaiBaseUrl) {
+    await openai.chat.completions.create({ model, messages: [{ role: "user", content: "Hi" }], max_tokens: 1 });
+    return;
+  }
+  await openai.responses.create({
+    model,
+    input: "Hi",
+    max_output_tokens: 16,
+    ...(REASONING_MODEL.test(model) && { reasoning: { effort: "low" } }),
+    store: false,
+  });
+}
+
 export function describeError(err) {
   if (err instanceof OpenAI.AuthenticationError) return "OpenAI rejected the API key (401).";
   if (err instanceof OpenAI.NotFoundError) return `OpenAI: model or endpoint not found (404). ${err.message}`;

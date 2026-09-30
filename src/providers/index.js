@@ -18,6 +18,7 @@ function lazy(name, load) {
     turn: call("turn"),
     classify: call("classify"),
     listModels: call("listModels"),
+    ping: call("ping"),
     // Errors come from the calls above, so the module has loaded by the time this runs.
     describeError: (err) => module?.describeError(err) ?? null,
   };

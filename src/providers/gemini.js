@@ -113,6 +113,11 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
   return { content, raw: { provider: "gemini", model, data: parts }, stop, usage };
 }
 
+// The connection test's one real request: the chosen model, one output token.
+export async function ping({ apiKey, model }) {
+  await new GoogleGenAI({ apiKey }).models.generateContent({ model, contents: "Hi", config: { maxOutputTokens: 1 } });
+}
+
 export function describeError(err) {
   if (err instanceof ApiError) {
     if (err.status === 400 && /API key/i.test(err.message)) return "Gemini rejected the API key.";

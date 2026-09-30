@@ -98,6 +98,11 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
   return { content, raw: { provider: "anthropic", model, data: message.content }, stop: stop || "end", usage };
 }
 
+// The connection test's one real request: the chosen model, one output token.
+export async function ping({ apiKey, model }) {
+  await createClient({ apiKey }).messages.create({ model, max_tokens: 1, messages: [{ role: "user", content: "Hi" }] });
+}
+
 export function describeError(err) {
   if (err instanceof Anthropic.AuthenticationError) return "Anthropic rejected the API key (401).";
   if (err instanceof Anthropic.NotFoundError) return `Anthropic: model not found (404). ${err.message}`;

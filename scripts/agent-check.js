@@ -849,4 +849,47 @@ replies = [
 await moving.run("click next", config);
 assert.equal(movedRuns, 1, "an action on an unchanged site did not run");
 
+// The connection test sends one tiny real request after listing models, so an account
+// out of credit or an Ollama server that refuses the extension fails setup with the
+// provider's own explanation, and an Ollama with no models says how to pull one.
+const testBodies = [];
+let ollamaModels = [];
+const standIn = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const json = (status, value) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+    if (req.method === "POST") testBodies.push({ path: req.url, body: JSON.parse(body) });
+    if (req.url === "/api/tags") return json(200, { models: ollamaModels });
+    if (req.url === "/api/chat") return res.writeHead(403).end();
+    if (req.url === "/v1/models") return json(200, { object: "list", data: [{ id: "gpt-cheap" }] });
+    json(429, { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } });
+  });
+});
+await new Promise((r) => standIn.listen(0, "127.0.0.1", r));
+const standInUrl = `http://127.0.0.1:${standIn.address().port}`;
+const testResult = async (msg) => {
+  localEvents.length = 0;
+  await fromLocal({ type: "test_provider", ...msg });
+  return localEvents.find((e) => e.type === "provider_test");
+};
+const stubOpenai = { ...providers.openai };
+Object.assign(providers.openai, { listModels: openai.listModels, ping: openai.ping, describeError: openai.describeError });
+hostConfig.models.openai = "gpt-chosen";
+const outOfCredit = await testResult({ provider: "openai", baseUrl: `${standInUrl}/v1` });
+Object.assign(providers.openai, stubOpenai);
+assert.equal(outOfCredit.ok, false, "an out-of-credit account passed the connection test");
+assert.match(outOfCredit.text, /out of credit/);
+assert.equal(testBodies.at(-1).body.model, "gpt-chosen", "the test request did not use the chosen model");
+assert.equal(testBodies.at(-1).body.max_tokens, 1, "the test request was not the smallest one");
+const noModels = await testResult({ provider: "ollama", host: standInUrl });
+assert.equal(noModels.ok, false);
+assert.match(noModels.text, /ollama pull <model>/);
+ollamaModels = [{ name: "qwen3:8b" }];
+const refusedOrigin = await testResult({ provider: "ollama", host: standInUrl });
+assert.equal(refusedOrigin.ok, false, "an Ollama that refuses the extension passed the connection test");
+assert.match(refusedOrigin.text, /OLLAMA_ORIGINS/);
+assert.equal(testBodies.at(-1).body.model, "qwen3:8b", "without a chosen model, the first listed one is tried");
+standIn.close();
+
 console.log("agent checks passed");
