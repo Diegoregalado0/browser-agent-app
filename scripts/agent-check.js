@@ -40,7 +40,6 @@ let actions = 0;
 let prompts = 0;
 const agent = new Agent({ emit: () => {}, askPermission: async () => (prompts++, "allow") });
 agent.browser = {
-  setAdSkipping: async () => {},
   startTask: async () => {},
   endTask: async () => {},
   currentPage: async () => ({ id: "t1", title: "Page", url: "https://example.com/" }),
@@ -319,6 +318,10 @@ assert.deepEqual(loaded.approvedOrigins, []);
 assert.equal(loaded.limits.requestsPerMinute, DEFAULTS.limits.requestsPerMinute);
 assert.equal(loaded.ollamaHost, DEFAULTS.ollamaHost);
 assert.equal(loaded.maxSteps, 5);
+// Settings from older versions that no longer exist are dropped on load.
+const retired = mergeConfig({ skipYoutubeAds: true, maxSteps: 7 });
+assert.ok(!("skipYoutubeAds" in retired), "a retired setting survived loading");
+assert.equal(retired.maxSteps, 7);
 // Sensitive sites saved before these checks keep working: addresses become hostnames and
 // only unusable entries are dropped.
 assert.deepEqual(mergeConfig({ sensitiveSites: ["https://MyBank.example/login", "*.pay.example", "not a site", 7] }).sensitiveSites, ["mybank.example", "*.pay.example"]);

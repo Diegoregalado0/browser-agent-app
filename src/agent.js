@@ -194,7 +194,6 @@ export class Agent {
       );
     }
 
-    await this.browser.setAdSkipping(config.skipYoutubeAds);
     this.browser.showActions = config.showActions;
     await this.browser.startTask({ highlight: config.highlightTab });
     const page = await this.browser.currentPage();

@@ -4,15 +4,11 @@ import {
   formInputScript,
   pageTextScript,
   describeTargetScript,
-  youtubeAdSkipperScript,
-  adOverlayRemoverScript,
   hitTestScript,
   resolveElementScript,
   agentCursorScript,
 } from "./page-scripts.js";
 import { sleep } from "./limits.js";
-
-const AD_SKIPPER_SOURCE = `(${youtubeAdSkipperScript.toString()})();(${adOverlayRemoverScript.toString()})()`;
 
 // Screenshots are scaled to at most this width; coordinates the model sends back are in
 // screenshot pixels and are mapped to CSS pixels before input is dispatched.
@@ -262,9 +258,6 @@ export class Browser {
     // Tabs opened during the current task; the agent may navigate and close only these.
     this.taskTabs = new Set();
     this.currentId = null;
-    this.skipYoutubeAds = false;
-    this.attached = new Set();
-    this.adSkipperIds = new Map();
     // Network requests per attached tab: { since, seq, entries, byRequestId }.
     this.networkLogs = new Map();
     // With showActions on, a visible pointer glides to each target and typing appears
@@ -274,8 +267,6 @@ export class Browser {
     transport.onAttach = (id) => this.#prepareTab(id);
     transport.onEvent = (id, method, params) => this.#onNetworkEvent(id, method, params);
     transport.onDetach = (id) => {
-      this.attached.delete(id);
-      this.adSkipperIds.delete(id);
       this.networkLogs.delete(id);
       this.pointers.delete(id);
     };
@@ -283,10 +274,8 @@ export class Browser {
 
   // Runs once each time the transport attaches to a tab.
   async #prepareTab(id) {
-    this.attached.add(id);
     this.networkLogs.set(id, { since: Date.now(), seq: 0, entries: [], byRequestId: new Map() });
     await this.transport.send(id, "Network.enable").catch(() => {});
-    if (this.skipYoutubeAds) await this.#installAdSkipper(id);
   }
 
   #onNetworkEvent(id, method, p) {
@@ -378,16 +367,6 @@ export class Browser {
     return (await this.currentPage()).url;
   }
 
-  async #installAdSkipper(id) {
-    try {
-      // New-document scripts only run once the Page domain is enabled on the session.
-      await this.transport.send(id, "Page.enable");
-      const { identifier } = await this.transport.send(id, "Page.addScriptToEvaluateOnNewDocument", { source: AD_SKIPPER_SOURCE });
-      this.adSkipperIds.set(id, identifier);
-      await this.transport.send(id, "Runtime.evaluate", { expression: AD_SKIPPER_SOURCE });
-    } catch {}
-  }
-
   // Called at the start of every task: tabs from earlier tasks and the user's own tabs
   // become protected, so this task opens new tabs instead of taking them over.
   // Also points the agent at the tab the user is looking at, so "this page" means it,
@@ -422,19 +401,6 @@ export class Browser {
     this.taskTabs.add(id);
     await this.bringToFront();
     return id;
-  }
-
-  // Turns the YouTube ad skipper on or off for tabs the agent has attached to.
-  async setAdSkipping(enabled) {
-    this.skipYoutubeAds = enabled;
-    for (const id of this.attached) {
-      const scriptId = this.adSkipperIds.get(id);
-      if (enabled && !scriptId) await this.#installAdSkipper(id);
-      if (!enabled && scriptId) {
-        await this.transport.send(id, "Page.removeScriptToEvaluateOnNewDocument", { identifier: scriptId }).catch(() => {});
-        this.adSkipperIds.delete(id);
-      }
-    }
   }
 
   async send(method, params = {}) {
