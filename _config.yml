@@ -14,3 +14,4 @@ exclude:
   - package-lock.json
   - legal/IN-APP.md
   - legal/WEB-STORE.md
+  - legal/PUBLISH-CHECKLIST.md
