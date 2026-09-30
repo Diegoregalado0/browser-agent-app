@@ -4,6 +4,14 @@
 const TRANSCRIPT_RESULT_MAX_CHARS = 4000;
 // The current-tab note the agent appends to each request.
 export const CURRENT_TAB_TAG = /\n*<current_tab[^>]*\/>$/;
+
+// The current-tab note for a request. Its title and address come from the page, so they
+// are shortened and escaped: page text cannot close the tag, and the tag is always found
+// again by CURRENT_TAB_TAG, so the page's title never counts as the user's words.
+export function currentTabTag(page) {
+  const attr = (text, max) => String(text ?? "").slice(0, max).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+  return `<current_tab id="${attr(page.id, 40)}" title="${attr(page.title, 200)}" url="${attr(page.url, 300)}" />`;
+}
 export const SESSION_ID_PATTERN = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
 
 export function newSessionId(date = new Date()) {

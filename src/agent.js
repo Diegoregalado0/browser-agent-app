@@ -5,7 +5,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { Guard, isStateChanging } from "./guard.js";
 import { RateLimiter, isSensitiveSite, sleep } from "./limits.js";
 import { passwordTargetScript } from "./page-scripts.js";
-import { CURRENT_TAB_TAG } from "./session-format.js";
+import { CURRENT_TAB_TAG, currentTabTag } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
 
@@ -201,7 +201,7 @@ export class Agent {
     }
     this.messages.push({
       role: "user",
-      content: [{ type: "text", text: `${userText}\n\n<current_tab id="${page.id}" title="${page.title}" url="${page.url.slice(0, 300)}" />` }],
+      content: [{ type: "text", text: `${userText}\n\n${currentTabTag(page)}` }],
     });
 
     const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
