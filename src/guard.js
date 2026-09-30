@@ -78,12 +78,16 @@ export class Guard {
 
   async #classify(config, args, signal) {
     const { impl, model, apiKey } = this.#resolve(config);
-    // Brief retries cover rate limits and transient errors on the small model.
+    // Brief retries cover rate limits and transient errors on the small model. Other client
+    // errors (bad key, model not in the plan) and a zero quota fail at once.
     for (let attempt = 0; ; attempt++) {
       try {
         return await impl.classify({ apiKey, model, config, signal, onUsage: this.onUsage, ...args });
       } catch (err) {
-        if (attempt >= 2 || signal?.aborted) throw err;
+        const status = err?.status;
+        const zeroQuota = status === 429 && err.headers?.get?.("x-ratelimit-limit-req-minute") === "0";
+        const permanent = zeroQuota || (status >= 400 && status < 500 && status !== 429);
+        if (attempt >= 2 || signal?.aborted || permanent) throw err;
         await sleep(err?.status === 429 ? 8000 : 1000);
       }
     }
