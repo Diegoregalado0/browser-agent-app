@@ -55,7 +55,7 @@ Browsby is free and provided "as is" and "as available", without warranties of a
 
 ## 9. Limitation of liability
 
-To the fullest extent the law allows, I am not liable for any indirect, incidental, special, consequential, or punitive damages, or for any loss of data, money, profits, or accounts, arising from your use of Browsby or from actions the agent takes, including charges from your AI provider and actions on third-party websites. To the fullest extent the law allows, my total liability for any claim about Browsby is limited to the greater of the amount you paid me for Browsby (which is zero) or [LIABILITY CAP AMOUNT].
+To the fullest extent the law allows, I am not liable for any indirect, incidental, special, consequential, or punitive damages, or for any loss of data, money, profits, or accounts, arising from your use of Browsby or from actions the agent takes, including charges from your AI provider and actions on third-party websites. To the maximum extent permitted by law, my total liability for all claims about Browsby, taken together, is zero dollars (USD $0). Browsby is free, and you pay me nothing for it.
 
 Some places do not allow some of these exclusions or limits. In those places, they apply only as far as the law allows, and nothing in these terms limits rights you have that cannot be waived.
 
@@ -73,7 +73,7 @@ I may update these terms. I will change the effective date above and describe ma
 
 ## 13. Governing law
 
-These terms are governed by the laws of [GOVERNING LAW JURISDICTION], without regard to its conflict of law rules. Disputes will be handled in the courts of [VENUE], unless the law of the place where you live gives you the right to bring a claim where you live.
+These terms are governed by the laws of the State of California, United States, excluding its conflict-of-law rules. Disputes will be handled in the state and federal courts located in California, unless the law of the place where you live gives you the right to bring a claim where you live. Consumer protections that the law of the place where you live makes mandatory still apply to you.
 
 ## 14. Contact
 
