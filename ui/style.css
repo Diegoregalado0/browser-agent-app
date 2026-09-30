@@ -13,6 +13,8 @@
   --ghost-bg: #f3e6c8;
   --ghost-fg: #6a4a0c;
   --danger: #b42318;
+  /* Edges of inputs and switch tracks: 3:1 on panel and bg in both themes. */
+  --field-border: color-mix(in srgb, var(--muted) 80%, var(--panel));
   color-scheme: light;
 }
 
@@ -66,6 +68,7 @@ header .dot { margin-right: 6px; }
 .dot.no-key { background: #e0a23b; }
 .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
 @keyframes pulse { to { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
 .model { flex: 1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button {
   font: inherit; font-size: 13px;
@@ -74,6 +77,8 @@ button {
 }
 button:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled:not(.icon-btn) { opacity: 0.55; cursor: not-allowed; filter: none; }
 #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .empty { color: var(--muted); margin: auto; text-align: center; max-width: 300px; }
 .empty p { margin: 0; }
@@ -100,7 +105,7 @@ details.thinking div { white-space: pre-wrap; padding: 4px 0 0 12px; }
 #composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
 textarea, input, select {
   font: inherit; padding: 6px 8px; border-radius: 6px;
-  border: 1px solid var(--border); background: var(--panel); color: var(--fg);
+  border: 1px solid var(--field-border); background: var(--panel); color: var(--fg);
 }
 #composer textarea { flex: 1; resize: none; }
 
@@ -195,7 +200,7 @@ details.steps details.thinking summary { font-style: italic; }
 .history-confirm span { flex: 1; }
 #history-list :focus-visible { outline-offset: -2px; }
 .history-empty { color: var(--muted); text-align: center; padding: 32px 16px; font-size: 13px; }
-button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.danger { background: var(--danger); border-color: var(--danger); color: var(--panel); }
 
 /* Settings: section list and pages. */
 .settings {
@@ -280,7 +285,7 @@ button[hidden] { display: none; }
 /* Switches: checkboxes with role=switch. */
 input.switch {
   appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 0; padding: 0;
-  border: none; border-radius: 999px; background: var(--border); cursor: pointer; transition: background 0.15s;
+  border: none; border-radius: 999px; background: var(--field-border); cursor: pointer; transition: background 0.15s;
 }
 input.switch::after {
   content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
@@ -335,7 +340,7 @@ input.switch:checked::after { transform: translateX(16px); }
 }
 .toast[hidden] { display: none; }
 .toast .icon { width: 16px; height: 16px; }
-.toast.error { background: var(--error); color: #fff; }
+.toast.error { background: var(--error); color: var(--panel); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 

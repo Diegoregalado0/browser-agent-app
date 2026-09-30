@@ -340,6 +340,8 @@ function describeAction(name, input) {
 // Drives the status line: animated glyph, current verb, elapsed time, output tokens.
 const activity = (() => {
   const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+  // With reduced motion the glyph holds still; the elapsed time still counts.
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
   let frame = 0;
   let started = 0;
   let timer = null;
@@ -348,7 +350,7 @@ const activity = (() => {
 
   const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const render = () => {
-    $("spinner").textContent = GLYPHS[(frame = (frame + 1) % GLYPHS.length)];
+    if (!still.matches) $("spinner").textContent = GLYPHS[(frame = (frame + 1) % GLYPHS.length)];
     const secs = Math.floor((Date.now() - started) / 1000);
     const tokens = reportedTokens + Math.round(streamedChars / 4);
     $("activity-meta").textContent = `(${secs}s${tokens ? ` · ↓ ${fmt(tokens)} tokens` : ""})`;
