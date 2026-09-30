@@ -104,7 +104,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     provider = p;
     $("wizard-key").value = "";
     if (p.id === "ollama") {
-      const cmd = el("code", null, "ollama serve");
+      const cmd = el("code", null, "OLLAMA_ORIGINS=chrome-extension://* ollama serve");
       return show("key", {
         title: "Use a local model",
         lead: ["Start your model with ", cmd, ", then test the connection."],

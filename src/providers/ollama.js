@@ -96,6 +96,15 @@ export function describeError(err) {
   if (err?.cause?.code === "ECONNREFUSED" || /fetch failed|failed to fetch/i.test(err?.message)) {
     return "Could not reach Ollama. Is it running (ollama serve)?";
   }
+  // Ollama answers 403 to requests from origins it does not allow, and a browser extension
+  // is not one of its defaults. Listing models is a GET without an Origin check, so the
+  // connection test passes and only the first task fails.
+  if (err?.name === "ResponseError" && err.status_code === 403) {
+    return "Ollama refused the request from this extension (403). Quit Ollama and start it with OLLAMA_ORIGINS=chrome-extension://* ollama serve.";
+  }
+  if (err?.name === "ResponseError" && err.status_code === 404 && /model .* not found/i.test(err.message)) {
+    return `Ollama error: ${err.message}. Pull it with ollama pull, or pick another model in Settings > Models.`;
+  }
   if (err?.name === "ResponseError") return `Ollama error: ${err.message}`;
   return null;
 }

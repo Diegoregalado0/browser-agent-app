@@ -673,6 +673,8 @@ assert.match(onBank.messages.at(-2).content[0].content[0].text, /declined acting
 
 // An Ollama server that is not running, as the browser reports it.
 assert.match(ollama.describeError(new TypeError("Failed to fetch")), /Is it running/);
+const ollamaError = (message, status) => Object.assign(new Error(message), { name: "ResponseError", status_code: status });
+assert.match(ollama.describeError(ollamaError("Forbidden", 403)), /OLLAMA_ORIGINS/);
 
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
