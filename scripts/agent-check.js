@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline checks of the agent loop with a scripted provider and browser: Stop while an
 // action's safety check runs, and a history that ends in tool calls without results. Also
-// the checks on keys, settings and reply rendering.
+// the checks on keys, settings and reply rendering, and the sandbox's default-profile guard.
 
 import assert from "node:assert/strict";
 import { Agent } from "../src/agent.js";
@@ -12,6 +12,10 @@ import * as openai from "../src/providers/openai.js";
 import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createController } from "../src/controller.js";
 import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
@@ -590,5 +594,19 @@ assert.equal(signInPage.searchParams.get("prompt"), "none", "a failed refresh di
 assert.equal(outlookAuth, null);
 assert.equal(outlook.has("mcp__outlook__mail_search"), false);
 graphServer.close();
+
+// The sandbox refuses the default profile when run without a terminal and no
+// BROWSER_AGENT_HOME, and runs on a separate home.
+const launcher = (env) =>
+  spawnSync(process.execPath, [new URL("../bin/browser-agent.js", import.meta.url).pathname, "status"], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const { BROWSER_AGENT_HOME: _, ...defaultEnv } = process.env;
+const refused = launcher(defaultEnv);
+assert.equal(refused.status, 1);
+assert.match(refused.stderr, /Refusing to use the default profile/);
+const sandboxHome = mkdtempSync(join(tmpdir(), "browser-agent-check-"));
+const allowed = launcher({ ...defaultEnv, BROWSER_AGENT_HOME: sandboxHome });
+rmSync(sandboxHome, { recursive: true, force: true });
+assert.equal(allowed.status, 0, allowed.stderr);
+assert.match(allowed.stdout, /Not running/);
 
 console.log("agent checks passed");
