@@ -776,4 +776,17 @@ assert.match(netDetail, /user=ada/);
 assert.match(netDetail, /"user":"ada"/);
 assert.match(await netBrowser.run("network_requests", { url_contains: "session_id=s" }), /showing 0 of 0/, "a filter matched a hidden value");
 
+// In Ask mode, opening a tab at an address asks for that site like navigate does.
+const sitePrompts = [];
+const asking = new Agent({ emit: () => {}, askPermission: async (p) => (sitePrompts.push(p), "deny") });
+let opened = 0;
+asking.browser = { ...agent.browser, run: async () => (opened++, "opened") };
+replies = [
+  { content: [{ type: "tool_call", id: "tc", name: "tabs", input: { action: "create", url: "evil.example/collect" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await asking.run("open my mail", { ...config, permissionMode: "ask" });
+assert.equal(sitePrompts[0]?.origin, "https://evil.example", "tabs create skipped the site prompt");
+assert.equal(opened, 0, "a declined tab was opened");
+
 console.log("agent checks passed");
