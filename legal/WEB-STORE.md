@@ -74,7 +74,7 @@ The dashboard asks what user data the extension "collects", which includes data 
 | Authentication information | Yes | API keys, Discord bot token, Microsoft tokens are stored and sent to their own services. Passwords only if the user approves the agent typing into a password field. |
 | Personal communications | Yes | Outlook mail (read and sent) and Discord messages when those are connected. |
 | Location | No | No location access. The time zone is sent to Microsoft only for calendar times. |
-| Web history | Yes | The current tab's title and address, and the titles and addresses of tabs in the window, are sent to the AI provider. |
+| Web history | Yes | The current tab's title and address are sent to the AI provider with each request; the titles and addresses of all tabs in the window are sent only when the agent lists them with its tabs tool. |
 | User activity | Yes | The network_requests tool records network activity of tabs the agent works in and can send it to the AI provider. The agent's own clicks and typing are sent as part of the task. |
 | Website content | Yes | Page text, structure, and screenshots are sent to the AI provider. |
 

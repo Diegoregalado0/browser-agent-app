@@ -52,7 +52,7 @@ You can run setup again from Settings > General.
 ### Watch it work, or not
 
 - The agent works in its own tabs and never takes over a tab you opened. The tab it is working in is marked with an "Agent" tab group.
-- To find its way, the model sees the titles and addresses of all tabs in the window, including yours.
+- With each request, the model gets the current tab's title and address. It sees the titles and addresses of the other tabs in the window, including yours, only when it calls its tabs tool to list them.
 - **Show the agent's actions** (Settings > Browser, off by default): a pointer glides to each target before a click, and typing appears one character at a time.
 - **Stop** ends the task at once.
 - **Let the model search the web** (Settings > Models, on by default, Anthropic and OpenAI): the model finds pages with its provider's search, then opens them in the browser. The provider bills each search, about 1 to 1.4 cents.
@@ -107,7 +107,7 @@ Settings > Remote (Discord) connects your own Discord bot, so you can give the a
 ## Privacy and security
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.
-- **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it, along with the titles and addresses of the tabs in the window. With Ollama, it stays on your computer.
+- **Page content** the agent reads, including screenshots, is sent to your chosen provider so the model can act on it, along with the current tab's title and address with each request, and the titles and addresses of all tabs in the window when the model lists them with its tabs tool. With Ollama, it stays on your computer.
 - **Network requests** of the tabs the agent works in are recorded in memory while it works there (addresses, headers, and request and response content; cookie, authorization and other sign-in headers, and password and token values in addresses and content, are hidden from the model), so the model can look into a page that fails to load. What the model reads of them is sent to your provider. The recording ends when the agent lets go of the tab.
 - **Nothing is sent to us.** There is no Browsby server, account, or analytics.
 - **Stored on your device:** your API keys, the Discord bot token and Outlook sign-in if you connect them, your settings, today's usage counter, and saved sessions, without screenshots. Delete sessions in Settings > Data and privacy.

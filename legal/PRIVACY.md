@@ -20,7 +20,8 @@ The short version: Browsby has no server, no account, and no analytics. I do not
 To do a task, the AI model has to see what you asked and what is on the page. When you run a task, Browsby sends the following to the AI provider you selected:
 
 - what you type (your requests), your standing instructions from Settings > General, and the setting that confirms simple age prompts if you turned it on;
-- the title and address of the current tab, and, when the agent lists tabs, the titles and addresses of all tabs in that browser window, including tabs you opened;
+- the title and address of the current tab, with each request;
+- the titles and addresses of all tabs in that browser window, including tabs you opened, only when the agent calls its tabs tool to list them;
 - content of the pages the agent reads: page text, the page's structure (buttons, links, form fields), and screenshots of the tab;
 - what the agent types or selects on your behalf, including anything you give it to type;
 - results of the agent's tools, such as the network requests of a tab it is working in (see below);
