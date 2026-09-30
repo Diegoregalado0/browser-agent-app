@@ -61,10 +61,12 @@ function rateLimitDelay(err) {
   return 20000;
 }
 
-function describeInput(name, input) {
-  if (input.action) return [input.action, input.text && `"${input.text.slice(0, 60)}"`].filter(Boolean).join(" ");
+// An action as prompts show it, locally and in Discord. secret: the text goes into a
+// password field, so it is not shown.
+function describeInput(name, input, secret = false) {
+  if (input.action) return [input.action, input.text && (secret ? "[hidden]" : `"${input.text.slice(0, 60)}"`)].filter(Boolean).join(" ");
   if (name === "navigate") return `to ${input.url}`;
-  if (name === "form_input") return `= ${JSON.stringify(input.value).slice(0, 60)}`;
+  if (name === "form_input") return `= ${secret ? "[hidden]" : JSON.stringify(input.value).slice(0, 60)}`;
   return "";
 }
 
@@ -466,7 +468,9 @@ export class Agent {
     } else if (!confirm) return;
 
     const flagged = check && check.verdict !== "allow" ? check.reason : null;
-    const action = confirm ? `the agent to ${confirm}` : `${call.name} ${describeInput(call.name, call.input)}${check.target ? ` on ${check.target}` : ""}`;
+    const action = confirm
+      ? `the agent to ${confirm}`
+      : `${call.name} ${describeInput(call.name, call.input, await this.#typesPassword(call))}${check.target ? ` on ${check.target}` : ""}`;
     // A remote client may answer this kind, as it may any safety prompt, since tasks
     // started remotely send mail too; sensitive-site and password prompts stay local.
     const decision = await this.askPermission({ text: `${flagged ? `Safety check: ${flagged} ` : ""}Allow ${action}?`, allowAlways: false, kind: "safety" });
@@ -557,7 +561,7 @@ export class Agent {
       const where = sensitive === url ? "" : ` (in a frame on ${new URL(url).hostname})`;
       const target = await this.browser.describeTarget(call.input);
       const decision = await this.askPermission({
-        text: `${site}${where} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
+        text: `${site}${where} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input, await this.#typesPassword(call))}${target ? ` on ${target}` : ""}?`,
         allowAlways: false,
         kind: "sensitive",
       });
@@ -567,15 +571,20 @@ export class Agent {
       }
       return;
     }
-    // Typing, single keys (a password can be typed a key at a time) and pasting all count.
-    const typing = (call.name === "browser" && ["type", "key"].includes(call.input.action)) || call.name === "form_input";
-    if (typing && (await this.browser.callInPage(passwordTargetScript, call.input.ref || null).catch(() => false))) {
+    if (await this.#typesPassword(call)) {
       const decision = await this.askPermission({ text: "The agent wants to type into a password field. Allow it?", allowAlways: false, kind: "password" });
       if (decision === "deny") {
         this.#decline(call, url, "password");
         throw new Error("The user declined entering a password. Ask them to sign in themselves.");
       }
     }
+  }
+
+  // Whether the call types into a password field. Typing, single keys (a password can be
+  // typed a key at a time) and pasting all count.
+  async #typesPassword(call) {
+    const typing = (call.name === "browser" && ["type", "key"].includes(call.input.action)) || call.name === "form_input";
+    return typing && (await this.browser.callInPage(passwordTargetScript, call.input.ref || null).catch(() => false));
   }
 
   // MCP tools act outside the browser; the ones their server does not mark read-only are

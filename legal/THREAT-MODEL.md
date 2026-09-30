@@ -16,7 +16,7 @@ The main threat is indirect prompt injection: every page, email and network resp
 | ASI06 Memory and context poisoning | Medium | Compaction trims old output; screenshots never saved; custom instructions only from the computer | A reopened conversation replays earlier injected content, and the safety model's injection flags are lost on reopen | Open (recommendation) |
 | ASI07 Inter-agent communication | Medium | Remote clients limited to run, stop, permission; prompt ids; owner-only Discord messages and buttons; sensitive and password prompts local only; safety model uses a strict schema and fails to "ask" | Attacker text reaches the safety model and may talk it into "allow"; a stolen Discord account can start tasks and approve safety prompts | Accepted |
 | ASI08 Cascading failures | Low | Per-minute request and action limits, task and daily token limits, max steps, loop guard, bounded retries | An unavailable safety model makes every action ask, which invites prompt fatigue | Accepted |
-| ASI09 Human-agent trust | Medium | Prompts name the target element, its link and form action; replies render only http(s) links | Target names come from the page and can lie; typed text previews go to Discord for remote tasks | Open (recommendation) |
+| ASI09 Human-agent trust | Medium | Prompts name the target element, its link and form action; replies render only http(s) links | Target names come from the page and can lie; typed text previews go to Discord for remote tasks (never for password fields) | Open (recommendation); fixed: text typed into password fields is hidden in prompts |
 | ASI10 Rogue agent | Low | Stop button, closing the panel or Chrome's debugging banner stops the task, Discord `stop`, Agent tab group, no sub-agents | Auto mode acts without review by design | Accepted |
 
 ## Detection
@@ -35,6 +35,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | A page that redirected to another site, or a current tab that closed, while checks or prompts ran got a click it was never checked for | src/agent.js:386 to 391, 427 | Tab and origin compared before and after the checks; a change refuses the action | "A page that goes to another site while an action is being checked" |
 | Outlook send and event_create with attendees ran unchecked in Auto mode (owner decision, follow-up) | src/agent.js:453 to 477, src/outlook-graph.js:229 | Always asked, in every mode, as one prompt with the safety check's reason when it also asks; kind "safety", so a remote client may answer it (tasks started from Discord send mail too); sensitive and password prompts stay local only | "Sending mail and inviting people ask in every mode" |
 | A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (owner decision, follow-up) | src/agent.js:510 to 568, src/page-scripts.js:267, src/browser-tools.js targetFrame, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
+| Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js describeInput, #typesPassword | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
 
 ## Detailed threats
 
@@ -218,7 +219,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "likelihood": "medium",
     "impact": "high",
     "risk_score": "medium",
-    "residual_risk": "Secrets shown as page text (2FA codes, recovery codes, card numbers) still reach the provider; typed text previews in prompts go to Discord for remote tasks, as the README says."
+    "residual_risk": "Secrets shown as page text (2FA codes, recovery codes, card numbers) still reach the provider; typed text previews in prompts go to Discord for remote tasks, as the README says, except text typed into a password field, which is shown as [hidden]."
   },
   {
     "id": "THREAT-ASI04-001",
@@ -376,4 +377,4 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 5. Show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Rescan or drop tool output when a saved conversation is reopened, or save the injection flags with it.
 7. Keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
-8. Consider hiding typed text in Discord prompt previews when the target is a password field.
+8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field.

@@ -992,6 +992,25 @@ await frameRun([goTo("n1", "http://192.168.1.1/apply?dns=1.2.3.4"), goTo("n2", "
 assert.deepEqual(framePrompts.slice(1).map((p) => p.kind), ["sensitive", "sensitive", "sensitive"], "a private address did not ask, or a public one did");
 assert.match(framePrompts[1].text, /192\.168\.1\.1 is on this computer or your local network/);
 assert.equal(frameRuns, 2, "a declined action ran, or an allowed one did not");
+// Text typed into a password field is not shown in prompts, which Discord gets verbatim.
+const secretPrompts = [];
+const typist = new Agent({ emit: () => {}, askPermission: async (p) => (secretPrompts.push(p.text), "once") });
+typist.browser = { ...agent.browser, callInPage: async () => true, run: async () => "typed" };
+providers.openai.classify = async () => ({ verdict: "ask", reason: "a password" });
+replies = [
+  { content: [{ type: "tool_call", id: "pw1", name: "browser", input: { action: "type", text: "hunter2-secret" } }, { type: "tool_call", id: "pw2", name: "form_input", input: { ref: "ref_1", value: "hunter2-secret" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await typist.run("sign in", config);
+typist.browser.currentUrl = async () => "https://www.paypal.com/signin";
+replies = [
+  { content: [{ type: "tool_call", id: "pw3", name: "browser", input: { action: "type", text: "hunter2-secret" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await typist.run("sign in", { ...config, permissionMode: "auto" });
+assert.ok(secretPrompts.some((t) => /Safety check: .*type \[hidden\]/.test(t)) && secretPrompts.some((t) => /sensitive site.*type \[hidden\]/.test(t)), secretPrompts.join("\n"));
+assert.ok(!secretPrompts.some((t) => t.includes("hunter2")), "a prompt showed text typed into a password field");
+
 // The frame script finds the frame at a point or with focus, through same-origin frames.
 const { targetFrameScript } = await import("../src/page-scripts.js");
 const stripe = { tagName: "IFRAME", contentDocument: null, src: "https://js.stripe.com/v3/card" };

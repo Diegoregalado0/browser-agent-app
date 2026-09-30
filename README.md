@@ -104,7 +104,7 @@ Connect Outlook in the Connections panel (the plug button) and sign in on Micros
 
 ### Remote control from Discord
 
-Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets approval prompts and final answers, never screenshots or page contents. An approval prompt includes the page address and a short preview of any text the agent wants to type. Sensitive-site and password prompts can only be approved at the computer.
+Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets approval prompts and final answers, never screenshots or page contents. An approval prompt includes the page address and a short preview of any text the agent wants to type, except into a password field. Sensitive-site and password prompts can only be approved at the computer.
 
 ## Privacy and security
 
