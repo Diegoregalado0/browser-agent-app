@@ -44,7 +44,9 @@ Everything left before Browsby goes to the Chrome Web Store. Not published on Gi
 
 - [ ] In a real browser with a throwaway profile, check the review's fixes: a filled password field shows as `value=[hidden]` in read_page; a login request's body shows `password=[hidden]` in network_requests; a denied sensitive-site click followed by navigating to its address asks again at the computer; a page that redirects during a safety check does not get the click.
 - [ ] Repeat the Ministral decline test from the 2026-09-30 pass with this branch.
-- [ ] Decide the security recommendations in legal/THREAT-MODEL.md: end the task after a Deny, always ask before Outlook send, sensitive checks for payment iframes and private addresses, page scripts in an isolated world.
+- [x] Decide the security recommendations in legal/THREAT-MODEL.md. Decided: tasks keep running after a Deny (per-task decline memory); done on `follow-ups`: always ask before Outlook send and invitations, sensitive checks for payment iframes and private addresses, full address in the Ask mode site prompt, back and forward only in task tabs, no replay of tool output on reopen, password text hidden in prompt previews.
+- [ ] Run page scripts in an isolated world (THREAT-MODEL recommendation 4), planned as a separate task.
+- [ ] In a real browser, check the follow-ups: typing into a Stripe card frame on a shop asks as a sensitive site; opening http://192.168.1.1 asks at the computer; in Auto mode an Outlook send asks; the Ask mode site prompt shows a long address clipped.
 
 ## Open product questions
 

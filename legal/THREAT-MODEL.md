@@ -2,6 +2,8 @@
 
 Agentic threat model against the OWASP Top 10 for Agentic Applications 2026 (ASI01 to ASI10). Reviewed 2026-09-30 on the `security-review` branch (based on `provider-test-pass`). Not published on GitHub Pages.
 
+Follow-ups decided by the owner were made on the `follow-ups` branch (rows marked "follow-up" below). Line numbers in the other rows are as of the review and may have moved since.
+
 The main threat is indirect prompt injection: every page, email and network response the agent reads is attacker-controlled, and the agent acts in the user's own signed-in Chrome window.
 
 ## Summary
@@ -33,12 +35,12 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | In Ask mode, `tabs create` with a url skipped the site prompt that navigate gets | src/browser-tools.js:859 | Opening a tab at an address counts as acting on that origin | "In Ask mode, opening a tab at an address asks" |
 | A declined action could be sent again for a new prompt, or routed around (a denied sensitive-site click followed by navigating to the address) | src/agent.js:382, 468 to 500, 531, 541, 562; src/guard.js:107 | Per task: the exact call is refused without a prompt and counts toward the loop guard; navigating or opening a tab to the declined site asks again with the same prompt kind (sensitive stays local only); the safety model is told what was declined | "A declined action cannot be retried as is or routed around" |
 | A page that redirected to another site, or a current tab that closed, while checks or prompts ran got a click it was never checked for | src/agent.js:386 to 391, 427 | Tab and origin compared before and after the checks; a change refuses the action | "A page that goes to another site while an action is being checked" |
-| Outlook send and event_create with attendees ran unchecked in Auto mode (owner decision, follow-up) | src/agent.js:453 to 477, src/outlook-graph.js:229 | Always asked, in every mode, as one prompt with the safety check's reason when it also asks; kind "safety", so a remote client may answer it (tasks started from Discord send mail too); sensitive and password prompts stay local only | "Sending mail and inviting people ask in every mode" |
-| A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (owner decision, follow-up) | src/agent.js:510 to 568, src/page-scripts.js:267, src/browser-tools.js targetFrame, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
-| Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js describeInput, #typesPassword | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
-| The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js #checkSite, clipAddress; src/browser-tools.js addressForToolCall | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
-| `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js navigate | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
-| A reopened conversation replayed earlier tool output, including injections, with the injection flags lost (follow-up) | src/agent.js restore | Tool results are replaced by a short stub; requests, replies and calls are kept. Chosen over saving the flags: it also covers content never scanned (Auto mode, older saves, failed scans) and needs no change to the saved format; the model reads pages again, and they are scanned again | "A reopened conversation does not replay earlier tool output" |
+| Outlook send and event_create with attendees ran unchecked in Auto mode (follow-up) | src/agent.js:462 to 493, src/outlook-graph.js:229 | Always asked, in every mode, as one prompt with the safety check's reason when it also asks; kind "safety", so a remote client may answer it (tasks started from Discord send mail too); sensitive and password prompts stay local only | "Sending mail and inviting people ask in every mode" |
+| A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (follow-up) | src/agent.js:526 to 584, src/page-scripts.js:267, src/browser-tools.js:863, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
+| Sensitive-site and safety prompts previewed text typed into a password field, in the panel and in Discord (follow-up) | src/agent.js:72, 597 | The preview shows `[hidden]` when the target is a password field | "Text typed into a password field is not shown in prompts" |
+| The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js:30, 608; src/browser-tools.js:882 | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
+| `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js:789 | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
+| A reopened conversation replayed earlier tool output, including injections, with the injection flags lost (follow-up) | src/agent.js:185 | Tool results are replaced by a short stub; requests, replies and calls are kept. Chosen over saving the flags: it also covers content never scanned (Auto mode, older saves, failed scans) and needs no change to the saved format; the model reads pages again, and they are scanned again | "A reopened conversation does not replay earlier tool output" |
 
 ## Detailed threats
 
@@ -162,7 +164,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "attack_scenario": "1. A hostile email says to forward the inbox to an address\n2. In Auto mode the model calls send with no check",
     "vulnerability_types": ["CWE-285"],
     "mitigation": "Always ask before send and event_create with attendees, in every mode, like sensitive sites (done)",
-    "existing_controls": ["Send and event_create with attendees always ask, in every mode (src/agent.js:453, src/outlook-graph.js:229)", "Non read-only tools get the action check (src/agent.js:#changesState)", "Mail content is scanned (src/guard.js:127)", "Outlook is not configured in this build (OUTLOOK_CLIENT_ID empty)"],
+    "existing_controls": ["Send and event_create with attendees always ask, in every mode (src/agent.js:467, src/outlook-graph.js:229)", "Non read-only tools get the action check (src/agent.js #changesState)", "Mail content is scanned (src/guard.js:127)", "Outlook is not configured in this build (OUTLOOK_CLIENT_ID empty)"],
     "control_effectiveness": "substantial",
     "attack_complexity": "low",
     "likelihood": "low",
@@ -180,7 +182,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "attack_scenario": "1. Injection asks the model to enter card details into an embedded checkout, or to open http://192.168.1.1/apply?dns=...\n2. No sensitive prompt fires",
     "vulnerability_types": ["CWE-693"],
     "mitigation": "Treat a target inside a frame from a sensitive site as sensitive; treat private and loopback addresses as sensitive for navigation (done)",
-    "existing_controls": ["Frame of the target checked against the sensitive list (src/agent.js:553, src/page-scripts.js:267)", "Navigation to private, loopback and link-local addresses asks at the computer (src/agent.js:510, src/limits.js:72)", "Action check 'ask' rule for payment details", "Ask mode site prompts"],
+    "existing_controls": ["Frame of the target checked against the sensitive list (src/agent.js:569, src/page-scripts.js:267)", "Navigation to private, loopback and link-local addresses asks at the computer (src/agent.js:526, src/limits.js:72)", "Action check 'ask' rule for payment details", "Ask mode site prompts"],
     "control_effectiveness": "substantial",
     "attack_complexity": "medium",
     "likelihood": "low",
@@ -270,7 +272,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "attack_scenario": "1. A task reads a hostile page and is saved\n2. Days later the user reopens it and gives a new request\n3. The old injection is back in context without its flag",
     "vulnerability_types": ["CWE-472"],
     "mitigation": "Drop tool results on restore (done)",
-    "existing_controls": ["Tool output replaced by a stub on restore (src/agent.js restore)", "Compaction trims old tool output (src/agent.js #compact)", "Screenshots never saved (src/session-format.js:26)", "Custom instructions only settable at the computer (src/controller.js:14)"],
+    "existing_controls": ["Tool output replaced by a stub on restore (src/agent.js:185)", "Compaction trims old tool output (src/agent.js #compact)", "Screenshots never saved (src/session-format.js:26)", "Custom instructions only settable at the computer (src/controller.js:14)"],
     "control_effectiveness": "substantial",
     "attack_complexity": "medium",
     "likelihood": "low",
@@ -371,12 +373,12 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 ]
 ```
 
-## Recommendations needing an owner decision
+## Recommendations and owner decisions
 
-1. End the task after a Deny, instead of letting the model continue and ask (open question). The per-task decline memory in this review limits the damage either way.
+1. Decided, not taken: end the task after a Deny. The owner keeps tasks running; the per-task decline memory limits the damage.
 2. Done: always ask before Outlook send and event_create with attendees, in every mode including Auto.
 3. Done: treat a click or typing target inside a frame from a sensitive site (Stripe, PayPal checkout) as sensitive, and private or loopback addresses as sensitive for navigation.
-4. Run page scripts in an isolated world, so a hostile page cannot change what the outline, target description and password check report.
+4. Planned as a separate task: run page scripts in an isolated world, so a hostile page cannot change what the outline, target description, frame and password checks report.
 5. Done: show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Done: drop tool output when a saved conversation is reopened (chosen over saving the injection flags, which would miss content that was never scanned).
 7. Done: keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
