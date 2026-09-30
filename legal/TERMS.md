@@ -47,7 +47,7 @@ Browsby is an independent project. It is not affiliated with, endorsed by, or sp
 ## 7. Your content and the software
 
 - Your tasks, settings, and sessions are yours. Browsby stores them only on your computer (see the Privacy Policy).
-- Browsby is provided to you for your personal use under these terms. The source code is published at https://github.com/Diegoregalado0/browser-agent-app under [LICENSE: see repository], which governs copying and changing the code.
+- Browsby is provided to you for your personal use under these terms. Its source code is published at https://github.com/Diegoregalado0/browser-agent-app so it can be read, but all rights are reserved: the LICENSE file in the repository grants no right to copy, modify, or redistribute it. Third-party components included in Browsby are licensed under their own terms, listed in THIRD_PARTY_NOTICES.txt in the extension package.
 
 ## 8. Provided as is, with no warranty
 

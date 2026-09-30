@@ -2,6 +2,7 @@
   "name": "browser-agent",
   "version": "1.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "description": "Browsby: an AI agent Chrome extension that does tasks in your tabs with your own model provider key.",
   "type": "module",
   "bin": {
