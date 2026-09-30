@@ -260,6 +260,26 @@ export function hitTestScript(ref) {
   return desc;
 }
 
+// The address of the frame an action lands in, when that is an iframe rather than the top
+// page: the frame of the ref'd element, of the element at (x, y), or of the focused element
+// when neither is given (typing). Same-origin frames are followed down; a cross-origin
+// frame is known by its src.
+export function targetFrameScript(ref, x, y) {
+  const atPoint = !ref && x !== null;
+  let el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : atPoint ? document.elementFromPoint(x, y) : document.activeElement;
+  while (el && (el.tagName === "IFRAME" || el.tagName === "FRAME")) {
+    const doc = el.contentDocument;
+    if (!doc) return el.src || null;
+    if (atPoint) {
+      const r = el.getBoundingClientRect();
+      x -= r.left;
+      y -= r.top;
+      el = doc.elementFromPoint(x, y);
+    } else el = doc.activeElement || doc.body;
+  }
+  return el && el.ownerDocument !== document ? el.ownerDocument.URL : null;
+}
+
 // Whether typing would go into a password field: the ref'd element, or the focused one.
 export function passwordTargetScript(ref) {
   let el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : document.activeElement;

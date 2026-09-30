@@ -4,6 +4,7 @@ import {
   formInputScript,
   pageTextScript,
   describeTargetScript,
+  targetFrameScript,
   hitTestScript,
   agentCursorScript,
 } from "./page-scripts.js";
@@ -848,6 +849,25 @@ export class Browser {
         const [x, y] = input.coordinate.map((v) => Math.round(v * this.cssPerPixel));
         return await this.callInPage(describeTargetScript, null, x, y);
       }
+    } catch {}
+    return null;
+  }
+
+  // The address of the iframe a browser/form_input action lands in (a payment form
+  // embedded in a shop), or null for the top page or when unknown.
+  async targetFrame(input) {
+    try {
+      if (input.ref) return await this.callInPage(targetFrameScript, input.ref, null, null);
+      if (Array.isArray(input.coordinate)) {
+        // As #point scales it, so the frame checked is the one the click lands in.
+        if (!this.cssPerPixel) {
+          const vp = await this.#viewport();
+          this.cssPerPixel = vp.w / Math.min(vp.w, SCREENSHOT_MAX_WIDTH);
+        }
+        const [x, y] = input.coordinate.map((v) => Math.round(v * this.cssPerPixel));
+        return await this.callInPage(targetFrameScript, null, x, y);
+      }
+      return await this.callInPage(targetFrameScript, null, null, null);
     } catch {}
     return null;
   }

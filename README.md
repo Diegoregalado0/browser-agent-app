@@ -67,7 +67,8 @@ Choose a mode in Settings > Permissions and safety:
 
 In every mode, including Auto:
 
-- On sensitive sites (banks, payments, crypto exchanges, password managers, account security, some government sites) it asks before any click or typing. You can add your own sites.
+- On sensitive sites (banks, payments, crypto exchanges, password managers, account security, some government sites) it asks before any click or typing, also inside their forms embedded on other sites (a card form in a shop's checkout). You can add your own sites.
+- It asks before opening an address on your computer or local network (localhost, a router, a printer, an intranet page).
 - It asks before typing into a password field, and never shows the model what a password field holds.
 - With Outlook connected, it asks before sending mail and before adding an event that invites people.
 - Once you decline an action, the task does not ask for it again, and going back to that site asks you first.

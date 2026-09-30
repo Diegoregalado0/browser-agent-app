@@ -3,7 +3,7 @@ import { BROWSER_TOOL_DEFS, originForToolCall } from "./browser-tools.js";
 import { apiKeyFor } from "./config-core.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { Guard, isStateChanging } from "./guard.js";
-import { RateLimiter, isSensitiveSite, sleep } from "./limits.js";
+import { RateLimiter, isPrivateAddress, isSensitiveSite, sleep } from "./limits.js";
 import { passwordTargetScript } from "./page-scripts.js";
 import { CURRENT_TAB_TAG, currentTabTag } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
@@ -505,6 +505,24 @@ export class Agent {
     }
   }
 
+  // Opening an address on this computer or the local network (a router, a printer, an
+  // intranet page) asks at the computer, like a sensitive site. Returns whether it asked.
+  async #checkPrivateAddress(call) {
+    const origin = originForToolCall(call.name, call.input, "");
+    if (!origin || !isPrivateAddress(origin)) return false;
+    const host = new URL(origin).hostname;
+    const decision = await this.askPermission({
+      text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${String(call.input.url).slice(0, 200)}?`,
+      allowAlways: false,
+      kind: "sensitive",
+    });
+    if (decision === "deny") {
+      this.#decline(call, origin, "sensitive");
+      throw new Error(`The user declined opening ${host}. ${DECLINED}`);
+    }
+    return true;
+  }
+
   // The safety model's verdict on an action, with the page and target it was judged on.
   async #safetyCheck(call, config, signal) {
     const page = await this.browser.currentPage();
@@ -523,19 +541,28 @@ export class Agent {
   }
 
   async #checkSensitive(call, config) {
-    if (call.name === "navigate" || call.name === "tabs") return this.#checkDeclinedSite(call);
+    if (call.name === "navigate" || call.name === "tabs") {
+      // One prompt is enough when the address is private and was declined before too.
+      if (config.confirmSensitiveSites && (await this.#checkPrivateAddress(call))) return;
+      return this.#checkDeclinedSite(call);
+    }
     if (!isStateChanging(call.name, call.input)) return;
     const url = await this.browser.currentUrl();
-    if (config.confirmSensitiveSites && isSensitiveSite(url, config.sensitiveSites)) {
-      const site = new URL(url).hostname;
+    // A payment or sign-in form embedded from a sensitive site (a Stripe or PayPal
+    // checkout on a shop) counts as that site.
+    const frame = config.confirmSensitiveSites && ["browser", "form_input"].includes(call.name) ? await this.browser.targetFrame(call.input) : null;
+    const sensitive = config.confirmSensitiveSites && [url, frame].find((u) => u && isSensitiveSite(u, config.sensitiveSites));
+    if (sensitive) {
+      const site = new URL(sensitive).hostname;
+      const where = sensitive === url ? "" : ` (in a frame on ${new URL(url).hostname})`;
       const target = await this.browser.describeTarget(call.input);
       const decision = await this.askPermission({
-        text: `${site} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
+        text: `${site}${where} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input)}${target ? ` on ${target}` : ""}?`,
         allowAlways: false,
         kind: "sensitive",
       });
       if (decision === "deny") {
-        this.#decline(call, url, "sensitive");
+        this.#decline(call, sensitive, "sensitive");
         throw new Error(`The user declined acting on ${site}. ${DECLINED}`);
       }
       return;

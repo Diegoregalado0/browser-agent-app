@@ -54,6 +54,7 @@ agent.browser = {
   currentPage: async () => ({ id: "t1", title: "Page", url: "https://example.com/" }),
   currentUrl: async () => "https://example.com/",
   describeTarget: async () => null,
+  targetFrame: async () => null,
   callInPage: async () => false,
   run: async () => (actions++, "clicked"),
 };
@@ -964,5 +965,51 @@ await mailRun("guarded", [{ ...sendCall, id: "s3" }]);
 assert.equal(mailPrompts.length, 3, "a send the safety check allowed did not ask, or one it flagged asked twice");
 assert.match(mailPrompts[2].text, /^Safety check: not requested Allow the agent to send an email to eve@x\.test/);
 assert.equal(mailSent, 3);
+
+// A click or typing inside a sensitive site's frame (a Stripe checkout on a shop) asks
+// like the site itself, and so does opening an address on this computer or the local
+// network; ordinary frames and public addresses do not.
+const framePrompts = [];
+const framed = new Agent({ emit: () => {}, askPermission: async (p) => (framePrompts.push(p), "deny") });
+let frameRuns = 0;
+let frameUrl = "https://js.stripe.com/v3/elements-inner-card.html";
+framed.browser = { ...agent.browser, targetFrame: async () => frameUrl, run: async () => (frameRuns++, "done") };
+const frameRun = async (calls) => {
+  replies = [
+    { content: calls, raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+    { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+  ];
+  await framed.run("buy it", { ...config, permissionMode: "auto" });
+};
+await frameRun([{ type: "tool_call", id: "k1", name: "browser", input: { action: "type", text: "4242 4242 4242 4242" } }]);
+assert.equal(framePrompts[0]?.kind, "sensitive", "typing into a payment frame did not ask");
+assert.match(framePrompts[0].text, /^js\.stripe\.com \(in a frame on example\.com\) is a sensitive site/);
+frameUrl = "https://www.youtube.com/embed/x";
+await frameRun([click]);
+assert.equal(framePrompts.length, 1, "a click in an ordinary frame asked");
+const goTo = (id, url) => ({ type: "tool_call", id, name: "navigate", input: { url } });
+await frameRun([goTo("n1", "http://192.168.1.1/apply?dns=1.2.3.4"), goTo("n2", "http://[::1]:8080/"), goTo("n3", "http://localhost:3000"), goTo("n4", "https://example.org/")]);
+assert.deepEqual(framePrompts.slice(1).map((p) => p.kind), ["sensitive", "sensitive", "sensitive"], "a private address did not ask, or a public one did");
+assert.match(framePrompts[1].text, /192\.168\.1\.1 is on this computer or your local network/);
+assert.equal(frameRuns, 2, "a declined action ran, or an allowed one did not");
+// The frame script finds the frame at a point or with focus, through same-origin frames.
+const { targetFrameScript } = await import("../src/page-scripts.js");
+const stripe = { tagName: "IFRAME", contentDocument: null, src: "https://js.stripe.com/v3/card" };
+const innerDoc = { URL: "https://shop.example/pay", elementFromPoint: () => stripe, activeElement: stripe };
+const sameOrigin = { tagName: "IFRAME", contentDocument: innerDoc, getBoundingClientRect: () => ({ left: 10, top: 10 }) };
+const button = { tagName: "BUTTON" };
+globalThis.document = { elementFromPoint: (x) => (x > 100 ? button : sameOrigin), activeElement: sameOrigin };
+button.ownerDocument = globalThis.document;
+assert.equal(targetFrameScript(null, 50, 50), "https://js.stripe.com/v3/card");
+assert.equal(targetFrameScript(null, null, null), "https://js.stripe.com/v3/card");
+assert.equal(targetFrameScript(null, 200, 50), null, "the top page was taken for a frame");
+delete globalThis.document;
+const { isPrivateAddress } = await import("../src/limits.js");
+for (const url of ["http://2130706433/", "http://10.0.0.8/", "http://172.20.1.1/", "http://169.254.169.254/", "http://[fd00::1]/", "http://[fe80::1]/", "http://printer.local/", "http://[::ffff:192.168.0.1]/"]) {
+  assert.ok(isPrivateAddress(url), `${url} was not seen as private`);
+}
+for (const url of ["https://example.com/", "http://172.32.0.1/", "http://[2001:db8::1]/", "https://local.example.com/"]) {
+  assert.ok(!isPrivateAddress(url), `${url} was seen as private`);
+}
 
 console.log("agent checks passed");

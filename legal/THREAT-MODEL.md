@@ -9,7 +9,7 @@ The main threat is indirect prompt injection: every page, email and network resp
 | Category | Risk after this review | Existing controls | Residual risk | Status |
 |---|---|---|---|---|
 | ASI01 Goal hijack | High | System prompt treats content as data; safety model scans what the agent reads and checks every state-changing action; injection flags passed to the action check | A small or unavailable safety model lets injected goals through in Guarded mode; Auto mode has no check; provider web search results are not scanned | Fixed: page title no longer passes as the user's request |
-| ASI02 Tool misuse | High | Sensitive-site and password prompts in every mode; site prompts in Ask mode; tab rules; bot-check detection; hit test for covered elements | Exfiltration by typing or navigating depends on the safety model; payment iframes are not seen as sensitive | Fixed: declined actions can no longer be retried or routed around; tabs create asks for the site; a page that changes site during the checks does not get the action; Outlook send and invitations always ask |
+| ASI02 Tool misuse | High | Sensitive-site and password prompts in every mode; site prompts in Ask mode; tab rules; bot-check detection; hit test for covered elements | Exfiltration by typing or navigating depends on the safety model | Fixed: declined actions can no longer be retried or routed around; tabs create asks for the site; a page that changes site during the checks does not get the action; Outlook send and invitations always ask; sensitive-site frames and private addresses ask |
 | ASI03 Identity and privilege | High (inherent) | Per-window agent, incognito lock, tab rules, sign-in headers hidden, keys never sent to the UI | The agent uses every session the user is signed in to; other secrets shown on pages (2FA codes, card numbers) reach the provider | Fixed: password field values and network passwords and tokens no longer reach the model |
 | ASI04 Supply chain | Medium | Lockfile with `npm ci`, unminified bundle, narrow host permissions, validated base URLs | Page scripts run in the page's own JavaScript world, so a hostile page can falsify what the checks see; Ollama origin wildcard | Open (recommendations) |
 | ASI05 Code execution | Low | No code tool; fixed page scripts with JSON arguments; only http, https and about:blank can be opened; strict CSP; escaped Markdown | Page scripts grant the page user activation (`userGesture: true`) | Accepted |
@@ -34,6 +34,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | A declined action could be sent again for a new prompt, or routed around (a denied sensitive-site click followed by navigating to the address) | src/agent.js:382, 468 to 500, 531, 541, 562; src/guard.js:107 | Per task: the exact call is refused without a prompt and counts toward the loop guard; navigating or opening a tab to the declined site asks again with the same prompt kind (sensitive stays local only); the safety model is told what was declined | "A declined action cannot be retried as is or routed around" |
 | A page that redirected to another site, or a current tab that closed, while checks or prompts ran got a click it was never checked for | src/agent.js:386 to 391, 427 | Tab and origin compared before and after the checks; a change refuses the action | "A page that goes to another site while an action is being checked" |
 | Outlook send and event_create with attendees ran unchecked in Auto mode (owner decision, follow-up) | src/agent.js:453 to 477, src/outlook-graph.js:229 | Always asked, in every mode, as one prompt with the safety check's reason when it also asks; kind "safety", so a remote client may answer it (tasks started from Discord send mail too); sensitive and password prompts stay local only | "Sending mail and inviting people ask in every mode" |
+| A click or typing in a sensitive site's iframe (a Stripe or PayPal checkout on a shop), and navigation to loopback, private and link-local addresses, got no sensitive prompt (owner decision, follow-up) | src/agent.js:510 to 568, src/page-scripts.js:267, src/browser-tools.js targetFrame, src/limits.js:72 | The frame an action lands in (by ref, point, or focus for typing) is checked against the sensitive list; navigate and tabs create to 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 0/8, ::1, fc00::/7, fe80::/10, localhost and .local ask; both use the local-only sensitive kind and the sensitive-sites switch | "A click or typing inside a sensitive site's frame" |
 
 ## Detailed threats
 
@@ -174,14 +175,14 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "affected_components": ["src/agent.js #checkSensitive", "src/limits.js isSensitiveSite", "src/page-scripts.js passwordTargetScript"],
     "attack_scenario": "1. Injection asks the model to enter card details into an embedded checkout, or to open http://192.168.1.1/apply?dns=...\n2. No sensitive prompt fires",
     "vulnerability_types": ["CWE-693"],
-    "mitigation": "Treat a target inside a frame from a sensitive site as sensitive; treat private and loopback addresses as sensitive for navigation",
-    "existing_controls": ["Action check 'ask' rule for payment details", "Ask mode site prompts"],
-    "control_effectiveness": "partial",
+    "mitigation": "Treat a target inside a frame from a sensitive site as sensitive; treat private and loopback addresses as sensitive for navigation (done)",
+    "existing_controls": ["Frame of the target checked against the sensitive list (src/agent.js:553, src/page-scripts.js:267)", "Navigation to private, loopback and link-local addresses asks at the computer (src/agent.js:510, src/limits.js:72)", "Action check 'ask' rule for payment details", "Ask mode site prompts"],
+    "control_effectiveness": "substantial",
     "attack_complexity": "medium",
     "likelihood": "low",
     "impact": "high",
-    "risk_score": "medium",
-    "residual_risk": "Auto mode has no prompt for these."
+    "risk_score": "low",
+    "residual_risk": "The frame is found by a script in the page's own world, which a hostile page can falsify (see ASI04); a cross-origin frame is known by its src; a public address that redirects to a private one, or a DNS name that resolves to one, does not ask; clicks on a private-address page after it is open do not ask."
   },
   {
     "id": "THREAT-ASI03-001",
@@ -370,7 +371,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 
 1. End the task after a Deny, instead of letting the model continue and ask (open question). The per-task decline memory in this review limits the damage either way.
 2. Done: always ask before Outlook send and event_create with attendees, in every mode including Auto.
-3. Treat a click or typing target inside a frame from a sensitive site (Stripe, PayPal checkout) as sensitive, and private or loopback addresses as sensitive for navigation.
+3. Done: treat a click or typing target inside a frame from a sensitive site (Stripe, PayPal checkout) as sensitive, and private or loopback addresses as sensitive for navigation.
 4. Run page scripts in an isolated world, so a hostile page cannot change what the outline, target description and password check report.
 5. Show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Rescan or drop tool output when a saved conversation is reopened, or save the injection flags with it.

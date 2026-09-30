@@ -66,6 +66,35 @@ export function isSensitiveSite(url, extra = []) {
   return domains.some((d) => host === d || host.endsWith(`.${d}`)) || SENSITIVE_WORDS.test(host);
 }
 
+// Whether a URL points at this computer or the local network: loopback, private and
+// link-local addresses, localhost and .local names. A page there (a router, a printer, an
+// intranet or a local server) trusts whoever reaches it, so navigating there asks.
+export function isPrivateAddress(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  if (host.startsWith("[")) {
+    const ip = host.slice(1, -1);
+    // An IPv4 address written as IPv6 (::ffff:c0a8:101) is checked as IPv4.
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ip);
+    if (mapped) {
+      const [hi, lo] = mapped.slice(1).map((h) => parseInt(h, 16));
+      host = [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
+    } else {
+      return ip === "::1" || ip === "::" || /^f[cd][0-9a-f]{2}:/.test(ip) || /^fe[89ab][0-9a-f]:/.test(ip);
+    }
+  }
+  // The URL parser has already turned other IPv4 spellings (2130706433, 0x7f.1) into this form.
+  const v4 = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(host);
+  if (!v4) return false;
+  const [a, b] = [Number(v4[1]), Number(v4[2])];
+  return a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
 // The local date, as the key for daily usage.
 export function today() {
   const d = new Date();
