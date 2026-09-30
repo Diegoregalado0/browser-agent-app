@@ -291,14 +291,12 @@ export function turn(opts) {
 export function describeError(err) {
   if (err instanceof OpenAI.AuthenticationError) return "OpenAI rejected the API key (401).";
   if (err instanceof OpenAI.NotFoundError) return `OpenAI: model or endpoint not found (404). ${err.message}`;
-  if (err instanceof OpenAI.RateLimitError) {
-    return err.code === "insufficient_quota" || err.type === "insufficient_quota"
-      ? `OpenAI account is out of credit: ${err.message}`
-      : `OpenAI rate limit hit (429): ${err.message}`;
-  }
+  // A streamed request reports running out of credit as an in-stream error with no status.
+  if (err?.code === "insufficient_quota" || err?.type === "insufficient_quota") return `OpenAI account is out of credit: ${err.message}`;
+  if (err instanceof OpenAI.RateLimitError) return `OpenAI rate limit hit (429): ${err.message}`;
   if (err instanceof OpenAI.BadRequestError) return `OpenAI bad request (400): ${err.message}`;
   if (err instanceof OpenAI.APIConnectionError) return "Could not reach the OpenAI endpoint.";
-  if (err instanceof OpenAI.APIError) return `OpenAI error ${err.status ?? ""}: ${err.message}`;
+  if (err instanceof OpenAI.APIError) return `OpenAI error${err.status ? ` ${err.status}` : ""}: ${err.message}`;
   return null;
 }
 

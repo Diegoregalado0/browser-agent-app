@@ -9,6 +9,7 @@ import { providers } from "../src/providers/index.js";
 import { DEFAULTS, keyProblem, mergeConfig } from "../src/config-core.js";
 import { renderMarkdown } from "../ui/markdown.js";
 import * as openai from "../src/providers/openai.js";
+import OpenAI from "openai";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -649,5 +650,10 @@ const allowed = launcher({ ...defaultEnv, BROWSER_AGENT_HOME: sandboxHome });
 rmSync(sandboxHome, { recursive: true, force: true });
 assert.equal(allowed.status, 0, allowed.stderr);
 assert.match(allowed.stdout, /Not running/);
+
+// Running out of credit mid-stream arrives as an error event with no HTTP status.
+const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
+assert.match(openai.describeError(noCredit), /^OpenAI account is out of credit/);
+assert.equal(openai.describeError(new OpenAI.APIError(undefined, { message: "x" }, "x", undefined)), "OpenAI error: x");
 
 console.log("agent checks passed");
