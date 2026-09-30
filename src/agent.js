@@ -183,9 +183,9 @@ export class Agent {
     const provider = providers[config.provider];
     if (!provider) throw new Error(`Unknown provider ${config.provider}`);
     const model = config.models[config.provider];
-    if (!model) throw new Error(`Pick a ${config.provider} model in Settings.`);
+    if (!model) throw new Error("No model selected. Pick one in Settings > Models.");
     const apiKey = apiKeyFor(config, config.provider);
-    if (config.provider !== "ollama" && !apiKey) throw new Error(`Add a ${config.provider} API key in Settings.`);
+    if (config.provider !== "ollama" && !apiKey) throw new Error("No API key for the selected provider. Add one in Settings > Models.");
     const limits = config.limits;
     if (limits.dailyTokens && this.ledger && (await this.ledger.used()) >= limits.dailyTokens) {
       throw new Error(
