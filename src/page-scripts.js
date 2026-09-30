@@ -258,15 +258,6 @@ export function hitTestScript(ref) {
   return desc;
 }
 
-// Returns the element a ref or CSS selector names, as a live object for DOM edits.
-export function resolveElementScript(ref, selector) {
-  const el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : document.querySelector(selector);
-  if (!el || !el.isConnected) {
-    throw new Error(ref ? `${ref} not found; call read_page again to refresh refs` : `No element matches ${selector}`);
-  }
-  return el;
-}
-
 // Whether typing would go into a password field: the ref'd element, or the focused one.
 export function passwordTargetScript(ref) {
   let el = ref ? window.__agentRefStore?.map.get(ref)?.deref() : document.activeElement;

@@ -102,10 +102,6 @@ Connect Outlook in the Connections panel (the plug button) and sign in on Micros
 
 Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets prompts and final answers, never screenshots or page contents, and sensitive-site and password prompts can only be approved at the computer.
 
-### Developer tools
-
-When turned on, the agent can run JavaScript in a page and edit its HTML, which helps with debugging pages. Code runs with your signed-in access to the page. It is off by default; turn it on in Settings > Permissions and safety.
-
 ## Privacy and security
 
 - **Your key** is stored in this Chrome profile's local storage on your computer, never synced, and sent only to the provider it belongs to.

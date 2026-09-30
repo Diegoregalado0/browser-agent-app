@@ -9,10 +9,6 @@ import { CURRENT_TAB_TAG } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
 
-// Tools that run code or rewrite pages where the user is signed in; off unless the
-// developer tools setting is on.
-const DEVELOPER_TOOLS = new Set(["javascript_exec", "edit_html"]);
-
 const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 
 // Conversation history is provider-neutral:
@@ -65,8 +61,6 @@ function describeInput(name, input) {
   if (input.action) return [input.action, input.text && `"${input.text.slice(0, 60)}"`].filter(Boolean).join(" ");
   if (name === "navigate") return `to ${input.url}`;
   if (name === "form_input") return `= ${JSON.stringify(input.value).slice(0, 60)}`;
-  if (name === "javascript_exec") return `"${input.code.slice(0, 80)}"`;
-  if (name === "edit_html") return `${input.ref || input.selector}`;
   return "";
 }
 
@@ -208,8 +202,7 @@ export class Agent {
       content: [{ type: "text", text: `${userText}\n\n<current_tab id="${page.id}" title="${page.title}" url="${page.url.slice(0, 300)}" />` }],
     });
 
-    const browserTools = config.developerTools ? BROWSER_TOOL_DEFS : BROWSER_TOOL_DEFS.filter((t) => !DEVELOPER_TOOLS.has(t.name));
-    const tools = [...browserTools, ...(this.mcp?.toolDefs() ?? [])];
+    const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.abortController = new AbortController();
@@ -365,7 +358,6 @@ export class Agent {
       let authorizing = false;
       try {
         if (call.input?.__invalid_json !== undefined) throw new Error("Tool arguments were not valid JSON.");
-        if (DEVELOPER_TOOLS.has(call.name) && !config.developerTools) throw new Error(`${call.name} is turned off in Settings.`);
         await this.limiter.take("action", config.limits.actionsPerMinute, signal, (secs) =>
           this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
         );

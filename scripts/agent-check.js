@@ -9,7 +9,6 @@ import { providers } from "../src/providers/index.js";
 import { DEFAULTS, keyProblem, mergeConfig } from "../src/config-core.js";
 import { renderMarkdown } from "../ui/markdown.js";
 import * as openai from "../src/providers/openai.js";
-import { explainScriptError } from "../src/browser-tools.js";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { createController } from "../src/controller.js";
@@ -168,23 +167,21 @@ server.close();
 
 // Loop guard: a call that keeps failing the same way gets a note telling the model to
 // change approach, and the task stops before it burns the step budget.
-const probe = (n) => ({ type: "tool_call", id: `call_js${n}`, name: "javascript_exec", input: { code: "document.querySelector('iframe').contentDocument.title" } });
-const nullError = "TypeError: Cannot read properties of null (reading 'contentDocument')\n    at <anonymous>:1:33";
+const probe = (n) => ({ type: "tool_call", id: `call_find${n}`, name: "find", input: { query: "quiz answer" } });
 const notices = [];
 const looping = new Agent({ emit: (e) => e.type === "notice" && notices.push(e.text), askPermission: async () => "allow" });
 looping.browser = {
   ...agent.browser,
   run: async (name) => {
-    if (name === "javascript_exec") throw new Error(explainScriptError(nullError));
+    if (name === "find") throw new Error("Cannot find context with specified id 12");
     return "ok";
   },
 };
-const loopConfig = { ...config, developerTools: true, permissionMode: "auto" };
+const loopConfig = { ...config, permissionMode: "auto" };
 requests = [];
 replies = Array.from({ length: 30 }, (_, n) => ({ content: [probe(n)], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
 await looping.run("read the quiz", loopConfig);
 const loopResult = (i) => looping.messages.filter((m) => m.role === "user" && m.content[0].type === "tool_result")[i].content[0].content[0].text;
-assert.match(loopResult(0), /selector matched no element.*iframe itself/s, "javascript_exec null errors explain the cause");
 assert.doesNotMatch(loopResult(0), /Loop check/, "a single failure gets no loop note");
 assert.match(loopResult(1), /Loop check.*already failed/s, "a repeated failing call gets a loop note");
 assert.equal(requests.length, 5, `the stuck task made ${requests.length} model requests, expected it to stop after 5`);
@@ -319,8 +316,8 @@ assert.equal(loaded.limits.requestsPerMinute, DEFAULTS.limits.requestsPerMinute)
 assert.equal(loaded.ollamaHost, DEFAULTS.ollamaHost);
 assert.equal(loaded.maxSteps, 5);
 // Settings from older versions that no longer exist are dropped on load.
-const retired = mergeConfig({ skipYoutubeAds: true, maxSteps: 7 });
-assert.ok(!("skipYoutubeAds" in retired), "a retired setting survived loading");
+const retired = mergeConfig({ skipYoutubeAds: true, developerTools: true, maxSteps: 7 });
+assert.ok(!("skipYoutubeAds" in retired) && !("developerTools" in retired), "a retired setting survived loading");
 assert.equal(retired.maxSteps, 7);
 // Sensitive sites saved before these checks keep working: addresses become hostnames and
 // only unusable entries are dropped.

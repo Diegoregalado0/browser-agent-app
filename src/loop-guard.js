@@ -17,7 +17,7 @@ const STOP_CONSECUTIVE = 6;
 // Reads whose output reflects the page: the same read giving the same output this many
 // times means the actions between them changed nothing.
 const NOTE_SAME_READ = 3;
-const PAGE_READS = new Set(["javascript_exec", "read_page", "get_page_text"]);
+const PAGE_READS = new Set(["read_page", "get_page_text"]);
 
 // Errors that differ only in numbers (ref ids, line and column) count as the same.
 const errorKey = (text) => text.split("\n")[0].replace(/\d+/g, "#").slice(0, 300);

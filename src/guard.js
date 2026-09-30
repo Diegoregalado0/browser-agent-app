@@ -43,14 +43,13 @@ const SCAN_SCHEMA = {
 };
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
-const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "javascript_exec", "browser", "network_requests", "edit_html"]);
+const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "network_requests"]);
 const SCAN_MAX_CHARS = 60000;
 
 export function isStateChanging(name, input) {
   if (name === "browser") return !READ_ONLY_BROWSER_ACTIONS.has(input.action);
   if (name === "tabs") return input.action !== "list" && input.action !== "switch";
-  if (name === "edit_html") return input.html !== undefined;
-  return ["navigate", "form_input", "javascript_exec"].includes(name);
+  return ["navigate", "form_input"].includes(name);
 }
 
 async function sha256(text) {

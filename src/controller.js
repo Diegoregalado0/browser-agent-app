@@ -23,7 +23,6 @@ const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 //   sessions              { save, list, load, remove, removeAll } (async)
 //   ensureBrowser(agent)  connects agent.browser
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
-//   defaults              the edition's changes to the default settings
 //   outlook               Outlook on Microsoft Graph (extension; see outlook-graph.js), optional
 export function createController(host) {
   const clients = new Set();
@@ -293,7 +292,7 @@ export function createController(host) {
         });
         return;
       case "reset_config": {
-        const config = resetConfig(await host.loadConfig(), host.defaults);
+        const config = resetConfig(await host.loadConfig());
         await host.saveConfig(config);
         broadcastConfig(config);
         reply({ type: "config_reset" });

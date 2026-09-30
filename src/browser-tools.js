@@ -5,7 +5,6 @@ import {
   pageTextScript,
   describeTargetScript,
   hitTestScript,
-  resolveElementScript,
   agentCursorScript,
 } from "./page-scripts.js";
 import { sleep } from "./limits.js";
@@ -17,7 +16,6 @@ const PAGE_OUTLINE_MAX_CHARS = 40000;
 const PAGE_TEXT_MAX_CHARS = 60000;
 const NETWORK_LOG_MAX_ENTRIES = 500;
 const NETWORK_BODY_MAX_CHARS = 8000;
-const ELEMENT_HTML_MAX_CHARS = 20000;
 // Typing shown character by character takes at most about this long in total.
 const SHOWN_TYPING_MAX_MS = 3000;
 
@@ -95,13 +93,6 @@ export const BROWSER_TOOL_DEFS = [
     input_schema: { type: "object", properties: {} },
   },
   {
-    name: "javascript_exec",
-    description:
-      "Evaluate JavaScript in the current page's main world and return the JSON-serialized result. The code is an " +
-      "expression; wrap statements in an IIFE. Promises are awaited.",
-    input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"] },
-  },
-  {
     name: "network_requests",
     description:
       "List recent network requests of the current tab, newest last: method, status, resource type, duration, size, URL. " +
@@ -116,22 +107,6 @@ export const BROWSER_TOOL_DEFS = [
         limit: { type: "number", description: "Most recent requests to list (default 40, max 200)" },
         request_id: { type: "string", description: "Request number from the list, for full details" },
         clear: { type: "boolean", description: "Clear the recorded requests for this tab" },
-      },
-    },
-  },
-  {
-    name: "edit_html",
-    description:
-      "Read or replace an element's HTML in the current page, by ref from read_page/find or by CSS selector. Omit html " +
-      "to get the element's current HTML. mode 'outer' (default) replaces the element itself, 'inner' its contents. " +
-      "Edits change only this page view and are lost on reload.",
-    input_schema: {
-      type: "object",
-      properties: {
-        ref: { type: "string" },
-        selector: { type: "string", description: "CSS selector, when the element has no ref" },
-        html: { type: "string", description: "New HTML; omit to read" },
-        mode: { type: "string", enum: ["outer", "inner"] },
       },
     },
   },
@@ -727,39 +702,6 @@ export class Browser {
     return `${header}\n${rows.join("\n")}`;
   }
 
-  async #editHtml(input) {
-    if (!input.ref && !input.selector) throw new Error("ref or selector is required");
-    const found = await this.send("Runtime.evaluate", {
-      expression: `(${resolveElementScript.toString()})(${JSON.stringify(input.ref || null)}, ${JSON.stringify(input.selector || null)})`,
-    });
-    if (found.exceptionDetails) throw new Error(found.exceptionDetails.exception?.description?.replace(/^Error: /, "").split("\n")[0]);
-    const objectId = found.result.objectId;
-    const outerHtml = async (id) => {
-      const res = await this.send("Runtime.callFunctionOn", { objectId: id, functionDeclaration: "function () { return this.outerHTML; }", returnByValue: true });
-      const html = res.result.value || "";
-      return html.length > ELEMENT_HTML_MAX_CHARS ? html.slice(0, ELEMENT_HTML_MAX_CHARS) + "\n[truncated]" : html;
-    };
-    if (input.html === undefined) return outerHtml(objectId);
-
-    // DevTools edits bypass Trusted Types, which make innerHTML assignment throw on many sites.
-    await this.send("DOM.getDocument", { depth: 0 });
-    const setOuter = async (id, html) => {
-      const { nodeId } = await this.send("DOM.requestNode", { objectId: id });
-      await this.send("DOM.setOuterHTML", { nodeId, outerHTML: html });
-    };
-    if (input.mode === "inner") {
-      const marker = await this.send("Runtime.callFunctionOn", {
-        objectId,
-        functionDeclaration: "function () { const m = document.createElement('span'); this.replaceChildren(m); return m; }",
-      });
-      if (input.html) await setOuter(marker.result.objectId, input.html);
-      else await this.send("Runtime.callFunctionOn", { objectId: marker.result.objectId, functionDeclaration: "function () { this.remove(); }" });
-      return `Replaced the contents. The element is now:\n${(await outerHtml(objectId)).slice(0, 2000)}`;
-    }
-    await setOuter(objectId, input.html);
-    return "Replaced the element. Refs inside it no longer work; use read_page or find for new refs.";
-  }
-
   async #tabs(input) {
     switch (input.action) {
       case "list": {
@@ -875,19 +817,10 @@ export class Browser {
         const res = await this.callInPage(pageTextScript, PAGE_TEXT_MAX_CHARS);
         return `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nSource: <${res.source}>\n\n${res.text}`;
       }
-      case "javascript_exec": {
-        const value = await this.evaluate(input.code).catch((err) => {
-          throw new Error(explainScriptError(err.message));
-        });
-        const out = value === undefined ? "undefined" : JSON.stringify(value, null, 2);
-        return out.length > 30000 ? out.slice(0, 30000) + "\n[truncated]" : out;
-      }
       case "tabs":
         return this.#tabs(input);
       case "network_requests":
         return this.#networkRequests(input);
-      case "edit_html":
-        return this.#editHtml(input);
       default:
         throw new Error(`Unknown browser tool ${name}`);
     }
@@ -904,29 +837,6 @@ export class Browser {
     } catch {}
     return null;
   }
-}
-
-// A javascript_exec error with a hint at the usual cause, so the model looks at the page
-// instead of guessing at selectors again.
-export function explainScriptError(message) {
-  const first = message.split("\n")[0];
-  let hint = "";
-  if (/Blocked a frame|SecurityError|cross-origin/i.test(first)) {
-    hint =
-      "The code reached into a cross-origin iframe, which page scripts cannot access. Interact with it by screenshot " +
-      "coordinates, or navigate to the iframe's src.";
-  } else if (/Execution context was destroyed|Cannot find context|Inspected target navigated/i.test(first)) {
-    hint = "The page navigated while the code ran. Take a screenshot or use read_page to see the new page.";
-  } else if (/of (null|undefined)|is (null|undefined)|null is not an object/.test(first)) {
-    // "reading 'contentDocument'" means the iframe itself was not found.
-    const frame = /reading '(contentDocument|contentWindow)'/.test(first) ? " Here it was the iframe itself." : "";
-    hint =
-      "Something the code expected is missing, usually because a selector matched no element." + frame +
-      " The page may have changed or navigated, or the content is in an iframe (contentDocument is null for " +
-      "cross-origin iframes). Do not retry with another guessed selector: use read_page or find to see what is on the " +
-      "page now, or take a screenshot.";
-  }
-  return hint ? `${first}\n${hint}` : message;
 }
 
 // The origin a tool call acts on, for site permission checks; null when it touches no page.

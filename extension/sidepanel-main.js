@@ -3,7 +3,7 @@ import { Browser } from "../src/browser-tools.js";
 import { DebuggerTransport } from "./transport-debugger.js";
 import { DiscordBridge } from "../src/remote-discord.js";
 import { OutlookGraph } from "../src/outlook-graph.js";
-import { loadConfig, saveConfig, loadUsage, saveUsage, sessions, EXTENSION_DEFAULTS } from "./storage.js";
+import { loadConfig, saveConfig, loadUsage, saveUsage, sessions } from "./storage.js";
 
 // The extension edition runs the whole agent inside the side panel page: the panel's
 // window is the agent's workspace, and closing the panel ends its task. The UI (ui/app.js)
@@ -35,7 +35,6 @@ const host = {
   saveConfig,
   loadUsage,
   saveUsage,
-  defaults: EXTENSION_DEFAULTS,
   sessions,
   outlook,
   ensureBrowser: async (agent) => {

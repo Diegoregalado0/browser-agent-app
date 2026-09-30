@@ -146,10 +146,8 @@ function summarize(name, input) {
   if (name === "find") return input.query;
   if (name === "form_input") return `${input.ref} = ${JSON.stringify(input.value)}`.slice(0, 60);
   if (name === "tabs") return [input.action, input.tab_id, input.url].filter(Boolean).join(" ");
-  if (name === "javascript_exec") return (input.code || "").slice(0, 60);
   if (name === "read_page") return input.filter || "all";
   if (name === "network_requests") return input.request_id ? `#${input.request_id}` : [input.type, input.url_contains, input.failed_only && "failed"].filter(Boolean).join(" ");
-  if (name === "edit_html") return `${input.ref || input.selector || ""}${input.html === undefined ? " (read)" : ` ${input.mode || "outer"}`}`;
   return "";
 }
 
@@ -331,9 +329,7 @@ function describeAction(name, input) {
       find: `Finding "${input.query || ""}"…`,
       form_input: `Filling${target}…`,
       get_page_text: "Reading the page text…",
-      javascript_exec: "Running JavaScript…",
       network_requests: "Checking network requests…",
-      edit_html: input.html === undefined ? "Reading element HTML…" : "Editing the page…",
       tabs: `${{ list: "Listing", create: "Opening", switch: "Switching", close: "Closing" }[input.action] || "Managing"} tabs…`,
     }[name] || `Running ${name}…`
   );

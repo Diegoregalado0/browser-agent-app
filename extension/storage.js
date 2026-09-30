@@ -4,12 +4,9 @@ import { SESSION_ID_PATTERN, metaOf, sessionRecord } from "../src/session-format
 // Settings live in chrome.storage.local, which stays on this device and is never synced,
 // so API keys do not leave it. Conversations live in IndexedDB.
 
-// The extension's changes to the default settings: code-running tools start off.
-export const EXTENSION_DEFAULTS = { developerTools: false };
-
 export async function loadConfig() {
   const { config } = await chrome.storage.local.get("config");
-  return mergeConfig(config, EXTENSION_DEFAULTS);
+  return mergeConfig(config);
 }
 
 export async function saveConfig(config) {

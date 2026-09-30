@@ -38,8 +38,6 @@ export const DEFAULTS = {
   // security pages and the like, in every safety mode. sensitiveSites adds the user's own.
   confirmSensitiveSites: true,
   sensitiveSites: [],
-  // javascript_exec and edit_html: powerful on pages where the user is signed in.
-  developerTools: true,
   // Extra detail in the chat (tokens and timing per request) and in Settings.
   debugMode: false,
   // Set when the first-run setup has been finished or skipped.
@@ -52,10 +50,9 @@ export const DEFAULTS = {
 // Settings back to their defaults. API keys, the Discord bot, Ghost mode and finished
 // setup are kept: keys and the bot are connections rather than preferences, and Ghost
 // mode belongs to the conversation.
-export function resetConfig(config, overrides = {}) {
+export function resetConfig(config) {
   return {
     ...structuredClone(DEFAULTS),
-    ...structuredClone(overrides),
     keys: config.keys,
     ghostMode: config.ghostMode,
     setupDone: config.setupDone,
@@ -196,11 +193,11 @@ export function publicConfig(config) {
   return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
 }
 
-// Stored settings over the defaults (adjusted by an edition's overrides), with nested
-// objects merged. A stored value that fails cleanSetting (from an older version, or edited
-// outside the app) falls back to its default rather than being trusted.
-export function mergeConfig(stored = {}, overrides = {}) {
-  const defaults = { ...structuredClone(DEFAULTS), ...structuredClone(overrides) };
+// Stored settings over the defaults, with nested objects merged. A stored value that fails
+// cleanSetting (from an older version, or edited outside the app) falls back to its default
+// rather than being trusted. Keys that are not settings any more are dropped.
+export function mergeConfig(stored = {}) {
+  const defaults = structuredClone(DEFAULTS);
   const config = { ...defaults, keys: { ...defaults.keys, ...stored.keys } };
   if (stored.discord) config.discord = stored.discord;
   if (typeof stored.ghostMode === "boolean") config.ghostMode = stored.ghostMode;
