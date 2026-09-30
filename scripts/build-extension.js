@@ -4,8 +4,8 @@
 
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OUTLOOK_CLIENT_ID } from "../src/outlook-graph.js";
 
@@ -59,7 +59,7 @@ const manifest = {
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
-await build({
+const result = await build({
   // Split so each provider's SDK is its own chunk, loaded only when that provider is used.
   entryPoints: { sidepanel: join(ROOT, "extension", "sidepanel-main.js") },
   outdir: OUT,
@@ -70,8 +70,36 @@ await build({
   platform: "browser",
   target: "chrome120",
   legalComments: "none",
+  metafile: true,
   logLevel: "warning",
 });
+
+// The bundle drops the packages' own license comments, so their notices ship in one file:
+// every npm package esbuild bundled, with its LICENSE and NOTICE files as published.
+const packageDirs = new Set();
+for (const input of Object.keys(result.metafile.inputs)) {
+  const dir = /^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(input)?.[1];
+  if (dir) packageDirs.add(resolve(dir));
+}
+const notices = [...packageDirs].sort().map((dir) => {
+  const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  const files = readdirSync(dir).filter((f) => /^(licen[cs]e|copying|notice)/i.test(f)).sort();
+  if (!files.some((f) => !/^notice/i.test(f))) console.warn(`No license file in ${pkg.name}; THIRD_PARTY_NOTICES.txt names its license only.`);
+  const repository = typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+  return [
+    `${pkg.name} ${pkg.version}`,
+    `License: ${pkg.license}`,
+    ...(repository ? [`Source: ${repository}`] : []),
+    ...files.map((f) => `\n${readFileSync(join(dir, f), "utf8").trim()}`),
+  ].join("\n");
+});
+const RULE = "=".repeat(80);
+writeFileSync(
+  join(OUT, "THIRD_PARTY_NOTICES.txt"),
+  `Browsby includes the following third-party software. Each package is licensed under its own terms, reproduced below.\n\n${RULE}\n` +
+    notices.join(`\n\n${RULE}\n`) +
+    "\n",
+);
 
 // The store zip has no key (the store keeps its own); the unpacked folder gets it after packing.
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
