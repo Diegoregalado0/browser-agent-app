@@ -821,4 +821,32 @@ await declining.run("look around", config);
 assert.doesNotMatch(guardAsks[0], /declined/, "an earlier task's decline leaked into this one");
 assert.match(guardAsks[1], /declined these actions[\s\S]*left_click/, "the safety check was not told what the user declined");
 
+// A page that goes to another site while an action is being checked does not get the
+// action: the checks judged the page before it changed.
+let movingUrl = "https://shop.example/";
+let movedRuns = 0;
+const moving = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+moving.browser = {
+  ...agent.browser,
+  currentPage: async () => ({ id: "t1", title: "Shop", url: movingUrl }),
+  currentUrl: async () => movingUrl,
+  run: async () => (movedRuns++, "clicked"),
+};
+providers.openai.classify = async () => ((movingUrl = "https://bank.example/transfer"), { verdict: "allow", reason: "ok" });
+replies = [
+  { content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await moving.run("click search", config);
+assert.equal(movedRuns, 0, "an action ran on a page that changed site during its check");
+assert.match(moving.messages.at(-2).content[0].content[0].text, /changed to a different site/);
+// A page that stays on its site keeps working (same-site address changes included).
+providers.openai.classify = async () => ((movingUrl = "https://bank.example/transfer#step2"), { verdict: "allow", reason: "ok" });
+replies = [
+  { content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await moving.run("click next", config);
+assert.equal(movedRuns, 1, "an action on an unchanged site did not run");
+
 console.log("agent checks passed");

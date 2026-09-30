@@ -381,7 +381,13 @@ export class Agent {
         // Counted by the loop guard, so a model that keeps retrying is stopped.
         if (this.declinedCalls.has(callKey(call))) throw new Error(`The user already declined this exact action in this task. ${DECLINED}`);
         authorizing = true;
+        const checkedOn = await this.#pageKey(call);
         await this.#authorize(call, config, signal, prechecks.get(call.id));
+        // The checks and prompts judged the page as it was; a page that redirected, or a
+        // current tab that closed, while they ran would take the action somewhere else.
+        if (checkedOn !== (await this.#pageKey(call))) {
+          throw new Error("The page changed to a different site or tab while this action was being checked, so it was not run. Take a screenshot to see the page now.");
+        }
         authorizing = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
         let output = toBlocks(
@@ -415,6 +421,17 @@ export class Agent {
       }
     }
     return results;
+  }
+
+  // The tab and origin a page action lands on, or null for other tools.
+  async #pageKey(call) {
+    if (!["browser", "form_input"].includes(call.name) || !isStateChanging(call.name, call.input)) return null;
+    const page = await this.browser.currentPage();
+    let origin = page.url;
+    try {
+      origin = new URL(page.url).origin;
+    } catch {}
+    return `${page.id} ${origin}`;
   }
 
   #userRequests() {
