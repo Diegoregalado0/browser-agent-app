@@ -40,6 +40,12 @@ Everything left before Browsby goes to the Chrome Web Store. Not published on Gi
 - [ ] Add `https://<store id>.chromiumapp.org/` as a second redirect URI after the first upload.
 - [ ] Privacy and terms URLs in the app registration's branding; publisher verification to remove the "unverified" label.
 
+## Security review (legal/THREAT-MODEL.md)
+
+- [ ] In a real browser with a throwaway profile, check the review's fixes: a filled password field shows as `value=[hidden]` in read_page; a login request's body shows `password=[hidden]` in network_requests; a denied sensitive-site click followed by navigating to its address asks again at the computer; a page that redirects during a safety check does not get the click.
+- [ ] Repeat the Ministral decline test from the 2026-09-30 pass with this branch.
+- [ ] Decide the security recommendations in legal/THREAT-MODEL.md: end the task after a Deny, always ask before Outlook send, sensitive checks for payment iframes and private addresses, page scripts in an isolated world.
+
 ## Open product questions
 
 - [ ] Plain http for the OpenAI base URL and Ollama host: keep allowing it for non-local addresses, or only for localhost (the store frowns on unencrypted personal data).
