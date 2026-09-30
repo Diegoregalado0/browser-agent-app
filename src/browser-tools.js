@@ -144,6 +144,17 @@ export function formatHeaders(headers = {}) {
     .join("\n");
 }
 
+// Fields that carry passwords, tokens and card details. Their values are hidden in the
+// addresses, request bodies and response bodies the model sees, in JSON
+// ("password": "...") and in query strings and form bodies (password=...).
+const SECRET_FIELD = /pass|pwd|token|secret|api[-_]?key|auth|session|csrf|xsrf|cookie|otp|cvv|cvc|card/i;
+
+function redactSecrets(text) {
+  return text
+    .replace(/("([^"\\]{1,100})"\s*:\s*)("(?:[^"\\]|\\.)*(?:"|$)|-?\d[\d.]*)/g, (m, head, key) => (SECRET_FIELD.test(key) ? `${head}"[hidden]"` : m))
+    .replace(/(^|[?&#;\s])([^=&?#;\s]{1,100})=([^&#;\s]+)/g, (m, sep, key) => (SECRET_FIELD.test(key) ? `${sep}${key}=[hidden]` : m));
+}
+
 // Bot checks from search engines and Cloudflare, by URL, title, or the text of a short page.
 // Retrying them only makes the block last longer.
 const BOT_CHECK_URL = /^https?:\/\/([^/]+\.)?(google\.[a-z.]+\/sorry\/|bing\.com\/turing\/captcha|search\.brave\.com\/captcha)|\/cdn-cgi\/challenge-platform\//i;
@@ -664,7 +675,7 @@ export class Browser {
       const e = log.entries.find((x) => x.id === String(input.request_id).replace(/^#/, ""));
       if (!e) throw new Error(`No request #${input.request_id} in the recent requests of this tab`);
       const lines = [
-        `#${e.id} ${e.method} ${e.url}`,
+        `#${e.id} ${e.method} ${redactSecrets(e.url)}`,
         `Status: ${e.error ? `failed (${e.error})` : e.status ? `${e.status} ${e.statusText || ""}`.trim() : "pending"}`,
         `Type: ${e.type}${e.mimeType ? ` (${e.mimeType})` : ""}${e.fromCache ? ", from cache" : ""}`,
         `Started: ${new Date(e.time).toISOString()}${e.duration !== undefined ? `, took ${e.duration}ms` : ""}${e.size !== undefined ? `, ${formatBytes(e.size)} transferred` : ""}`,
@@ -672,12 +683,12 @@ export class Browser {
         "Request headers:",
         formatHeaders(e.requestHeaders),
       ];
-      if (e.postData) lines.push("", "Request body:", e.postData);
+      if (e.postData) lines.push("", "Request body:", redactSecrets(e.postData));
       if (e.responseHeaders) lines.push("", "Response headers:", formatHeaders(e.responseHeaders));
       if (e.done && !e.error && !e.redirected) {
         try {
           const { body, base64Encoded } = await this.send("Network.getResponseBody", { requestId: e.requestId });
-          const text = base64Encoded ? `[binary, ${formatBytes(Math.round((body.length * 3) / 4))}]` : body;
+          const text = base64Encoded ? `[binary, ${formatBytes(Math.round((body.length * 3) / 4))}]` : redactSecrets(body);
           lines.push("", "Response body:", text.length > NETWORK_BODY_MAX_CHARS ? text.slice(0, NETWORK_BODY_MAX_CHARS) + "\n[truncated]" : text);
         } catch {
           lines.push("", "Response body: not available (no longer buffered)");
@@ -688,7 +699,7 @@ export class Browser {
     const type = input.type?.toLowerCase();
     const filtered = log.entries.filter(
       (e) =>
-        (!input.url_contains || e.url.includes(input.url_contains)) &&
+        (!input.url_contains || redactSecrets(e.url).includes(input.url_contains)) &&
         (!type || e.type.toLowerCase() === type) &&
         (!input.failed_only || e.error || e.status >= 400),
     );
@@ -700,7 +711,7 @@ export class Browser {
     const rows = shown.map((e) => {
       const status = e.error ? `failed(${e.error})` : e.status ?? "pending";
       const timing = [e.duration !== undefined && `${e.duration}ms`, formatBytes(e.size)].filter(Boolean).join(" ");
-      return `#${e.id} ${e.method} ${status} ${e.type}${timing ? ` ${timing}` : ""} ${shortUrl(e.url)}`;
+      return `#${e.id} ${e.method} ${status} ${e.type}${timing ? ` ${timing}` : ""} ${shortUrl(redactSecrets(e.url))}`;
     });
     return `${header}\n${rows.join("\n")}`;
   }

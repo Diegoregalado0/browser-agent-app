@@ -22,7 +22,7 @@ import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
-import { formatHeaders } from "../src/browser-tools.js";
+import { Browser, formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
 import { readPageScript, describeTargetScript } from "../src/page-scripts.js";
 
@@ -751,5 +751,29 @@ assert.match(outline, /type=password value=\[hidden\]/);
 assert.doesNotMatch(outline, /hunter2/, "read_page showed a password");
 assert.doesNotMatch(describeTargetScript("ref_2", 0, 0) ?? "", /hunter2/, "a target description showed a password");
 for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
+
+// Network recording hides passwords and tokens in addresses and bodies too, and a filter
+// cannot probe a hidden value.
+const netTransport = {
+  pages: async () => [{ id: "n1", title: "", url: "https://a.test/" }],
+  send: async (id, method) => (method === "Network.getResponseBody" ? { body: '{"access_token":"tok-123","user":"ada","otp":482913}', base64Encoded: false } : {}),
+};
+const netBrowser = new Browser(netTransport);
+await netTransport.onAttach("n1");
+netTransport.onEvent("n1", "Network.requestWillBeSent", {
+  requestId: "r1", type: "XHR", wallTime: 1, timestamp: 1,
+  request: { url: "https://a.test/login?session_id=s-456&lang=en#access_token=frag-1", method: "POST", headers: {}, postData: 'user=ada&password=pw-789&next={"passcode":"cut-off' },
+});
+netTransport.onEvent("n1", "Network.responseReceived", { requestId: "r1", response: { status: 200, headers: {} } });
+netTransport.onEvent("n1", "Network.loadingFinished", { requestId: "r1", timestamp: 2, encodedDataLength: 10 });
+const netList = await netBrowser.run("network_requests", {});
+const netDetail = await netBrowser.run("network_requests", { request_id: "1" });
+for (const secret of ["cut-off", "s-456", "frag-1", "pw-789", "tok-123", "482913"]) {
+  assert.ok(!netList.includes(secret) && !netDetail.includes(secret), `network_requests showed ${secret}`);
+}
+assert.match(netDetail, /lang=en/);
+assert.match(netDetail, /user=ada/);
+assert.match(netDetail, /"user":"ada"/);
+assert.match(await netBrowser.run("network_requests", { url_contains: "session_id=s" }), /showing 0 of 0/, "a filter matched a hidden value");
 
 console.log("agent checks passed");
