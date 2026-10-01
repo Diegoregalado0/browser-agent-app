@@ -414,9 +414,14 @@ export class DiscordBridge {
   }
 
   // A task's messages: through its interaction while the token is valid, else as the bot in
-  // the channel the task came from.
+  // the channel the task came from. Private replies (outside the bot's DM) never fall back
+  // to the channel, where others would see them.
   #fresh(task) {
     return Boolean(task.out.token) && Date.now() - task.out.at < INTERACTION_TTL_MS;
+  }
+
+  #inChannel(task) {
+    return !(task.out.flags & EPHEMERAL);
   }
 
   #hook(task, path = "") {
@@ -428,6 +433,7 @@ export class DiscordBridge {
     task.chain = task.chain
       .then(async () => {
         if (this.#fresh(task)) return this.#api(task.token, "PATCH", this.#hook(task, "/messages/@original"), body);
+        if (!this.#inChannel(task)) return;
         if (task.progressId) return this.#api(task.token, "PATCH", `/channels/${task.out.channelId}/messages/${task.progressId}`, body);
         task.progressId = (await this.#api(task.token, "POST", `/channels/${task.out.channelId}/messages`, body)).id;
       })
@@ -446,6 +452,7 @@ export class DiscordBridge {
       } catch {}
     }
     try {
+      if (!this.#inChannel(task)) throw new Error("private");
       const sent = await this.#api(task.token, "POST", `/channels/${task.out.channelId}/messages`, body);
       return { path: `/channels/${task.out.channelId}/messages/${sent.id}` };
     } catch {
