@@ -1,0 +1,340 @@
+#!/usr/bin/env node
+// Runs the Browsby benchmark: one command drives the real built extension in a throwaway
+// Chrome profile over DevTools, same as `browser-agent` does, and runs each task by
+// talking to the panel's in-page controller (globalThis.agentHost) the way the UI does.
+// Writes bench-results/<run-id>.json and .md.
+//
+// Usage:
+//   node scripts/bench/run.js --provider openai --model qwen3.6-35b-a3b \
+//     --base-url http://localhost:8081/v1 --runs 1
+//   node scripts/bench/run.js --provider ollama --model gemma4:26b --host http://localhost:11436
+//   node scripts/bench/run.js --provider mistral --model ministral-14b-latest --key sk-...
+//
+// Flags: --provider --model --runs N --tasks a,b --host --base-url --key --timeout(ms)
+//        --port (DevTools port; 0 = any free one)
+
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+import { mergeConfig } from "../../src/config-core.js";
+import { TASKS } from "./tasks.js";
+
+const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
+const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
+
+function parseArgs(argv) {
+  const args = { runs: 1, timeout: 240000, port: 0 };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) continue;
+    const [k, inlineVal] = a.slice(2).split("=");
+    const val = inlineVal ?? argv[++i];
+    args[k] = val;
+  }
+  return args;
+}
+
+const args = parseArgs(process.argv.slice(2));
+if (!args.provider || !args.model) {
+  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url|--key] [--runs N] [--tasks a,b] [--timeout ms]");
+  process.exit(1);
+}
+
+const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
+const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id));
+if (!selectedTasks.length) {
+  console.error(`No matching tasks for --tasks ${args.tasks}. Known ids: ${TASKS.map((t) => t.id).join(", ")}`);
+  process.exit(1);
+}
+
+// Build the config the panel will read for this run. Reuses the app's own merge/validation
+// instead of hand-rolling a config shape.
+function buildConfig() {
+  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60 };
+  overrides.models[args.provider] = args.model;
+  if (args.provider === "ollama") {
+    overrides.ollamaHost = args.host || "http://localhost:11436";
+    // No key needed; guard uses the same model (DEFAULT_GUARD_MODELS.ollama is already "").
+  } else if (args.provider === "openai") {
+    overrides.openaiBaseUrl = args.baseUrl || args["base-url"] || "http://localhost:8081/v1";
+    overrides.keys.openai = args.key || "local";
+    // The default guard model (gpt-6-luna) does not exist on a local server; use the
+    // model under test for safety checks too, same as the local providers already do.
+    overrides.guardModels.openai = args.model;
+  } else if (args.provider === "mistral") {
+    if (!args.key) throw new Error("Mistral needs --key (its API key).");
+    overrides.keys.mistral = args.key;
+  } else {
+    throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, or mistral.`);
+  }
+  return mergeConfig(overrides);
+}
+
+// Pricing is only meaningful for billed cloud calls; local servers run on hardware already
+// paid for, so their cost column reads "-". Update if Mistral's published price changes.
+const CLOUD_PRICING_PER_MTOK = {
+  "ministral-14b-latest": { in: 0.25, out: 0.25 },
+  "ministral-8b-latest": { in: 0.1, out: 0.1 },
+  "ministral-3b-latest": { in: 0.04, out: 0.04 },
+};
+
+function costFor(provider, model, input, output) {
+  if (provider !== "mistral") return null;
+  const price = CLOUD_PRICING_PER_MTOK[model];
+  if (!price) return null;
+  return (input / 1e6) * price.in + (output / 1e6) * price.out;
+}
+
+async function freshProfile() {
+  return mkdtempSync(join(tmpdir(), "browser-agent-bench-"));
+}
+
+async function main() {
+  const home = await freshProfile();
+  process.env.BROWSER_AGENT_HOME = home;
+  console.log(`Profile: ${home}`);
+
+  const { connectChrome, browserProcesses } = await import("../../src/chrome.js");
+  const manifestPath = join(PROJECT_DIR, "dist", "extension", "manifest.json");
+  if (!existsSync(manifestPath)) {
+    console.log("Building the extension...");
+    const { spawnSync } = await import("node:child_process");
+    const res = spawnSync(process.execPath, [join(PROJECT_DIR, "scripts", "build-extension.js")], { stdio: "inherit" });
+    if (res.status !== 0) throw new Error("Extension build failed.");
+  }
+
+  const cdp = await connectChrome({ devtoolsPort: Number(args.port) || 0 });
+  // A fresh launch opens the panel itself, but that race occasionally loses (no tab yet
+  // when the keeper tries); ask the keeper to open it explicitly, same as `browser-agent
+  // open` falls back to.
+  let sidepanelTarget = await waitForSidepanel(cdp, 3000).catch(() => null);
+  if (!sidepanelTarget) {
+    const { keeper } = browserProcesses();
+    if (keeper) process.kill(keeper, "SIGUSR2");
+    sidepanelTarget = await waitForSidepanel(cdp, 10000);
+  }
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: sidepanelTarget.targetId, flatten: true });
+
+  await installBridge(cdp, sessionId);
+
+  const config = buildConfig();
+  await setConfig(cdp, sessionId, config);
+
+  const rows = [];
+  for (let run = 1; run <= Number(args.runs); run++) {
+    for (const task of selectedTasks) {
+      console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
+      const result = await runTask(cdp, sessionId, task, Number(args.timeout));
+      const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
+      rows.push({
+        run,
+        task: task.id,
+        name: task.name,
+        success: result.ok,
+        reason: result.reason,
+        steps: result.steps,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        wallMs: result.wallMs,
+        costUsd: cost,
+      });
+      console.log(`  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s`);
+    }
+  }
+
+  cdp.close();
+  const { chrome } = browserProcesses();
+  if (chrome) {
+    process.kill(chrome, "SIGTERM");
+    const end = Date.now() + 10000;
+    while (browserProcesses().chrome && Date.now() < end) await sleep(200);
+  }
+
+  writeReport({ provider: args.provider, model: args.model, rows });
+  rmSync(home, { recursive: true, force: true });
+  console.log(`\nCleaned up temp profile ${home}.`);
+}
+
+async function waitForSidepanel(cdp, timeoutMs = 15000) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const { targetInfos } = await cdp.send("Target.getTargets");
+    const panel = targetInfos.find((t) => t.type === "page" && t.url.endsWith("/sidepanel.html"));
+    if (panel) return panel;
+    await sleep(200);
+  }
+  throw new Error("The extension's side panel never opened.");
+}
+
+// Injects a small bridge: a client connected to the in-page controller, whose events are
+// buffered on window.__bench for this script to drain.
+async function installBridge(cdp, sessionId) {
+  const expr = `
+    (() => {
+      if (window.__bench) return true;
+      window.__bench = { events: [] };
+      const api = globalThis.agentHost.connect((e) => window.__bench.events.push(e));
+      window.__bench.send = api.send;
+      return true;
+    })()
+  `;
+  await cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);
+}
+
+async function setConfig(cdp, sessionId, config) {
+  const expr = `chrome.storage.local.set({ config: ${JSON.stringify(config)} })`;
+  await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, sessionId);
+}
+
+async function drainEvents(cdp, sessionId) {
+  const { result } = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify(window.__bench.events.splice(0))", returnByValue: true }, sessionId);
+  return JSON.parse(result.value);
+}
+
+// Fixed permission policy: allow ordinary prompts (safety checks, new-site approvals),
+// deny anything that reaches a sensitive site or a password field. Never answered as
+// "always", since that would persist a setting change between tasks/runs.
+function decisionFor(kind) {
+  return ["sensitive", "password"].includes(kind) ? "deny" : "once";
+}
+
+async function answerPermission(cdp, sessionId, id, decision) {
+  const expr = `window.__bench.send(${JSON.stringify({ type: "permission", id, decision })})`;
+  await cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);
+}
+
+async function readActiveTab(cdp, sessionId) {
+  const expr = `
+    (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      return JSON.stringify({ url: tab?.url || "", title: tab?.title || "" });
+    })()
+  `;
+  const { result } = await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, sessionId);
+  const { url, title } = JSON.parse(result.value);
+  let pageText = "";
+  try {
+    const { targetInfos } = await cdp.send("Target.getTargets");
+    const tabTarget = targetInfos.find((t) => t.type === "page" && t.url === url);
+    if (tabTarget) {
+      const { sessionId: tabSession } = await cdp.send("Target.attachToTarget", { targetId: tabTarget.targetId, flatten: true });
+      const textEval = await cdp.send("Runtime.evaluate", { expression: "document.body ? document.body.innerText.slice(0, 8000) : ''", returnByValue: true }, tabSession);
+      pageText = textEval.result.value || "";
+      await cdp.send("Target.detachFromTarget", { sessionId: tabSession });
+    }
+  } catch {}
+  return { url, title, pageText };
+}
+
+async function runTask(cdp, sessionId, task, timeoutMs) {
+  await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId);
+  await drainEvents(cdp, sessionId);
+
+  const started = Date.now();
+  await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
+
+  const events = [];
+  let finished = false;
+  let timedOut = false;
+  const end = started + timeoutMs;
+  while (!finished && Date.now() < end) {
+    await sleep(300);
+    const batch = await drainEvents(cdp, sessionId);
+    for (const e of batch) {
+      events.push(e);
+      if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
+      if (e.type === "status" && e.running === false) finished = true;
+    }
+  }
+  if (!finished) {
+    timedOut = true;
+    await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
+    // Drain whatever trails the stop.
+    await sleep(500);
+    events.push(...(await drainEvents(cdp, sessionId)));
+  }
+  const wallMs = Date.now() - started;
+
+  const steps = events.filter((e) => e.type === "tool_call").length;
+  const usage = [...events].reverse().find((e) => e.type === "usage");
+  const reply = events.filter((e) => e.type === "reply").map((e) => e.text).join("\n");
+
+  const { url: finalUrl, pageText } = await readActiveTab(cdp, sessionId);
+
+  let verdict;
+  if (timedOut) {
+    verdict = { ok: false, reason: `timed out after ${timeoutMs / 1000}s` };
+  } else {
+    try {
+      verdict = task.check({ finalUrl, pageText, reply, events });
+    } catch (err) {
+      verdict = { ok: false, reason: `checker threw: ${err.message}` };
+    }
+  }
+
+  return {
+    ok: verdict.ok,
+    reason: verdict.reason,
+    steps,
+    tokensIn: usage?.usage?.input ?? 0,
+    tokensOut: usage?.usage?.output ?? 0,
+    wallMs,
+  };
+}
+
+function fmtCost(c) {
+  return c == null ? "-" : `$${c.toFixed(4)}`;
+}
+
+function writeReport({ provider, model, rows }) {
+  mkdirSync(RESULTS_DIR, { recursive: true });
+  const runId = `${provider}-${model.replace(/[^\w.-]/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const jsonPath = join(RESULTS_DIR, `${runId}.json`);
+  const mdPath = join(RESULTS_DIR, `${runId}.md`);
+  writeFileSync(jsonPath, JSON.stringify({ provider, model, rows }, null, 2));
+
+  const header = `| Task | Run | Success | Steps | Tokens in | Tokens out | Wall time (s) | Cost | Notes |\n|---|---|---|---|---|---|---|---|---|`;
+  const lines = rows.map(
+    (r) =>
+      `| ${r.name} | ${r.run} | ${r.success ? "pass" : "fail"} | ${r.steps} | ${r.tokensIn} | ${r.tokensOut} | ${(r.wallMs / 1000).toFixed(1)} | ${fmtCost(r.costUsd)} | ${r.reason} |`,
+  );
+
+  const byTask = new Map();
+  for (const r of rows) {
+    if (!byTask.has(r.task)) byTask.set(r.task, []);
+    byTask.get(r.task).push(r);
+  }
+  const summaryHeader = `| Task | Success rate | Avg steps | Avg tokens | Avg wall time (s) |\n|---|---|---|---|---|`;
+  const summaryLines = [...byTask.entries()].map(([id, group]) => {
+    const n = group.length;
+    const rate = (group.filter((r) => r.success).length / n) * 100;
+    const avg = (f) => (group.reduce((s, r) => s + f(r), 0) / n).toFixed(1);
+    return `| ${group[0].name} | ${rate.toFixed(0)}% | ${avg((r) => r.steps)} | ${avg((r) => r.tokensIn + r.tokensOut)} | ${avg((r) => r.wallMs / 1000)} |`;
+  });
+
+  const overallRate = (rows.filter((r) => r.success).length / rows.length) * 100;
+  const totalCost = rows.reduce((s, r) => s + (r.costUsd || 0), 0);
+
+  const md = [
+    `# Browsby benchmark: ${provider} / ${model}`,
+    "",
+    `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${totalCost ? `$${totalCost.toFixed(4)}` : "-"}.`,
+    "",
+    "## Per-task summary",
+    "",
+    summaryHeader,
+    ...summaryLines,
+    "",
+    "## All runs",
+    "",
+    header,
+    ...lines,
+    "",
+  ].join("\n");
+  writeFileSync(mdPath, md);
+  console.log(`\nWrote ${jsonPath}\nWrote ${mdPath}`);
+}
+
+await main();
