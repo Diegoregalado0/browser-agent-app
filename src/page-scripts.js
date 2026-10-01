@@ -4,8 +4,16 @@
 // Builds a compact, indented outline of the page. Elements that can be acted on get a
 // stable ref id (ref_N) that the other tools accept in place of coordinates. Same-origin
 // iframes are walked in place; cross-origin ones are listed but their contents are not.
-export function readPageScript(interactiveOnly, maxChars) {
-  const store = (window.__agentRefStore ||= { seq: 0, map: new Map() });
+// shotWidth: list only the controls in the viewport, one per line with a coarse box in
+// the pixels of a screenshot scaled to at most this width, and return them as items too.
+export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
+  const inView = shotWidth > 0;
+  if (inView) interactiveOnly = true;
+  const scale = inView ? Math.min(1, shotWidth / innerWidth) : 1;
+  const items = [];
+  let visual = null;
+  // id: which document the refs belong to; a new document numbers its refs from 1 again.
+  const store = (window.__agentRefStore ||= { seq: 0, map: new Map(), id: Math.random().toString(36).slice(2) });
   const refFor = (el) => {
     if (!el.__agentRef) {
       el.__agentRef = "ref_" + ++store.seq;
@@ -104,11 +112,26 @@ export function readPageScript(interactiveOnly, maxChars) {
     return line;
   };
 
-  const walk = (root, depth) => {
+  // The part of an element's box inside the viewport, as "x,y wxh" in screenshot pixels,
+  // or null when none of it is. (ox, oy): the offset of the element's frame.
+  const boxOf = (el, ox, oy) => {
+    const r = el.getBoundingClientRect();
+    const left = Math.max(0, r.left + ox);
+    const top = Math.max(0, r.top + oy);
+    const right = Math.min(innerWidth, r.right + ox);
+    const bottom = Math.min(innerHeight, r.bottom + oy);
+    if (right <= left || bottom <= top) return null;
+    const px = (v) => Math.round(v * scale);
+    return { text: `${px(left)},${px(top)} ${px(right - left)}x${px(bottom - top)}`, area: (right - left) * (bottom - top) };
+  };
+
+  const walk = (root, depth, ox = 0, oy = 0) => {
     for (const el of root.children) {
       if (truncated) return;
       if (["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "HEAD"].includes(el.tagName.toUpperCase())) continue;
       if (!isVisible(el)) continue;
+      // A large canvas shows content no outline can (a map, a game, a chart).
+      if (inView && el.tagName === "CANVAS" && (boxOf(el, ox, oy)?.area ?? 0) > innerWidth * innerHeight * 0.2) visual ||= "a large canvas";
       if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
         let body = null;
         try {
@@ -116,11 +139,21 @@ export function readPageScript(interactiveOnly, maxChars) {
         } catch {}
         const name = clip(clean(el.getAttribute("title") || el.getAttribute("name")), 100);
         const src = clip(el.getAttribute("src") || "", 120);
-        push(
-          "  ".repeat(depth) + "iframe" + (name ? ` "${name.replace(/"/g, "'")}"` : "") + (src ? ` src="${src}"` : "") +
-            (body ? "" : " (cross-origin: its contents are not in this outline; use a screenshot and coordinates)"),
-        );
-        if (body) walk(body, depth + 1);
+        const box = inView ? boxOf(el, ox, oy) : null;
+        if (inView && !box) continue;
+        const line = "iframe" + (name ? ` "${name.replace(/"/g, "'")}"` : "") + (src ? ` src="${src}"` : "") +
+          (body ? "" : " (cross-origin: its contents are not in this outline; use a screenshot and coordinates)");
+        if (inView) {
+          if (!body && box.area > innerWidth * innerHeight * 0.2) visual ||= "a large cross-origin frame";
+          if (!body) {
+            items.push({ ref: `frame ${src}`, line, box: box.text });
+            push(`${line} @${box.text}`);
+          }
+        } else push("  ".repeat(depth) + line);
+        if (body) {
+          const fr = el.getBoundingClientRect();
+          walk(body, depth + 1, ox + fr.left + el.clientLeft, oy + fr.top + el.clientTop);
+        }
         continue;
       }
 
@@ -133,14 +166,21 @@ export function readPageScript(interactiveOnly, maxChars) {
         clean(el.textContent).length > 0;
 
       let nextDepth = depth;
-      if (interactive || structural || leafText) {
+      if (inView) {
+        const box = interactive && boxOf(el, ox, oy);
+        if (box) {
+          const line = describe(el, roleOf(el), true);
+          items.push({ ref: el.__agentRef, line, box: box.text });
+          push(`${line} @${box.text}`);
+        }
+      } else if (interactive || structural || leafText) {
         const role = leafText && !structural ? "text" : roleOf(el);
         push("  ".repeat(depth) + describe(el, role, interactive));
         nextDepth = depth + 1;
       }
       // Interactive elements' text is already in their name; don't repeat it.
-      if (!interactive || el.children.length > 3) walk(el, nextDepth);
-      if (el.shadowRoot) walk(el.shadowRoot, nextDepth);
+      if (!interactive || el.children.length > 3) walk(el, nextDepth, ox, oy);
+      if (el.shadowRoot) walk(el.shadowRoot, nextDepth, ox, oy);
     }
   };
 
@@ -152,6 +192,7 @@ export function readPageScript(interactiveOnly, maxChars) {
     viewport: `${innerWidth}x${innerHeight}`,
     scroll: `${Math.round(scrollX)},${Math.round(scrollY)} of ${document.documentElement.scrollWidth}x${document.documentElement.scrollHeight}`,
     tree: lines.join("\n") + (truncated ? "\n[truncated: page outline exceeded the size limit; use find or scroll]" : ""),
+    ...(inView && { items, visual, doc: store.id }),
   };
 }
 

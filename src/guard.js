@@ -43,7 +43,7 @@ const SCAN_SCHEMA = {
 };
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
-const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "network_requests"]);
+const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "navigate", "form_input", "tabs", "network_requests"]);
 // Scans read at most this much text: the start of a page is where text aimed at the agent
 // has to be to steer it, and a longer scan costs seconds per step on local models.
 export const SCAN_MAX_CHARS = 8000;
@@ -64,8 +64,8 @@ export class Guard {
   constructor({ onUsage = () => {} } = {}) {
     this.onUsage = onUsage;
     this.scanned = new Map();
-    // Addresses whose screenshots were scanned (see scanContent).
-    this.scannedPages = new Set();
+    // Addresses whose page was scanned, with the warning (see scanContent).
+    this.scannedPages = new Map();
     this.flags = [];
   }
 
@@ -128,25 +128,31 @@ export class Guard {
   }
 
   // Returns a warning string when the tool output looks like a prompt injection, else null.
-  // url: the page a screenshot in the output shows. Screenshots are scanned once per
-  // address, and by the page's text (pageText(), a promise of it) rather than the pixels
-  // when the page has text; a page without text (a canvas) is scanned by its image.
+  // url: the page the output shows, for output that observes the current page (a
+  // screenshot, the controls an action or navigation reports). Such output is scanned once
+  // per address, with the page's text (pageText(), a promise of it) in place of pixels
+  // when the page has text; a page without text (a canvas) is scanned by its screenshot.
   async scanContent({ config, name, output, signal, url = null, pageText = null }) {
     // MCP results (emails, calendar entries) are outside content too.
     if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
     let text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     let images = output.filter((b) => b.type === "image");
-    if (images.length && url) {
-      if (this.scannedPages.has(url)) images = [];
-      else {
-        this.scannedPages.add(url);
-        const page = String((await pageText?.().catch(() => "")) ?? "").trim();
-        if (page.length >= 40) {
-          text = `${text}\nText of the page in the screenshot:\n${page}`;
-          images = [];
-        }
-      }
+    if (!url) return this.#scan(config, name, text, images, signal);
+    if (this.scannedPages.has(url)) return this.scannedPages.get(url);
+    const page = String((await pageText?.().catch(() => "")) ?? "").trim();
+    if (page.length >= 40) {
+      text = `Text of the page:\n${page.slice(0, SCAN_MAX_CHARS / 2)}\n\n${text}`;
+      images = [];
+    } else if (!images.length) {
+      // Nothing of the page itself to scan yet; its first screenshot will be.
+      return this.#scan(config, name, text, images, signal);
     }
+    const warning = await this.#scan(config, name, text, images, signal);
+    this.scannedPages.set(url, warning);
+    return warning;
+  }
+
+  async #scan(config, name, text, images, signal) {
     text = text.slice(0, SCAN_MAX_CHARS);
     if (!images.length && text.length < 40) return null;
 

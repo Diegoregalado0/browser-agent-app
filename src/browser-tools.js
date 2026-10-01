@@ -14,6 +14,10 @@ import { sleep } from "./limits.js";
 // screenshot pixels and are mapped to CSS pixels before input is dispatched.
 const SCREENSHOT_MAX_WIDTH = 1280;
 const PAGE_OUTLINE_MAX_CHARS = 40000;
+// The controls in view, as read_page lists them by default and actions report changes to.
+const VIEW_MAX_CHARS = 12000;
+// Lines of a change report after an action; a larger change points to read_page.
+const CHANGES_MAX_LINES = 40;
 const PAGE_TEXT_MAX_CHARS = 60000;
 const NETWORK_LOG_MAX_ENTRIES = 500;
 const NETWORK_BODY_MAX_CHARS = 8000;
@@ -28,8 +32,9 @@ export const BROWSER_TOOL_DEFS = [
     name: "browser",
     description:
       "Mouse, keyboard and screenshot control inside the current browser tab's page. Coordinates are pixels in the most " +
-      "recent browser screenshot (origin top-left). For clicks and hover you may pass a ref from read_page/find instead of " +
-      "a coordinate. Take a screenshot to see the page, and again after actions whose effect you need to verify.",
+      "recent browser screenshot (origin top-left); read_page boxes use the same pixels. For clicks and hover you may pass " +
+      "a ref from read_page/find instead of a coordinate. Each action reports what changed among the controls in view " +
+      "(added, changed, or gone refs, or the new address). Take a screenshot when layout, images, or visual state matter.",
     input_schema: {
       type: "object",
       properties: {
@@ -70,9 +75,10 @@ export const BROWSER_TOOL_DEFS = [
   {
     name: "read_page",
     description:
-      "Return an outline of the current page (roles, names, values) with refs for actionable elements. Use filter " +
-      "'interactive' for only controls. Refs stay valid until the page navigates.",
-    input_schema: { type: "object", properties: { filter: { type: "string", enum: ["all", "interactive"] } } },
+      "List the controls in view (links, buttons, fields) with ref, role, name, state, and a box '@x,y wxh' in screenshot " +
+      "pixels. filter 'all' returns an outline of the whole page (headings, text, and controls); 'interactive' lists the " +
+      "controls of the whole page. Refs stay valid until the page navigates.",
+    input_schema: { type: "object", properties: { filter: { type: "string", enum: ["view", "all", "interactive"] } } },
   },
   {
     name: "find",
@@ -263,11 +269,14 @@ export class Browser {
     // character by character. pointers holds its last spot per tab, in CSS pixels.
     this.showActions = false;
     this.pointers = new Map();
+    // The controls in view per tab, as last reported to the model: { url, title, items }.
+    this.views = new Map();
     transport.onAttach = (id) => this.#prepareTab(id);
     transport.onEvent = (id, method, params) => this.#onNetworkEvent(id, method, params);
     transport.onDetach = (id) => {
       this.networkLogs.delete(id);
       this.pointers.delete(id);
+      this.views.delete(id);
     };
   }
 
@@ -601,7 +610,57 @@ export class Browser {
     return now === value ? `Set value to "${value.slice(0, 80)}"` : null;
   }
 
+  // The controls in view now; also kept as the base the next change report compares with.
+  async #view() {
+    const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH);
+    this.views.set(this.currentId, res);
+    return res;
+  }
+
+  // What an action changed among the controls in view: the new address and the controls
+  // there, or the controls added, changed, and gone since the last report. Empty when the
+  // page cannot be read (a browser page, or one still loading).
+  async #changes() {
+    const before = this.views.get(this.currentId);
+    let now;
+    try {
+      now = await this.#view();
+    } catch {
+      return "";
+    }
+    const show = (i) => `${i.line} @${i.box}`;
+    const list = (lines) =>
+      lines.length > CHANGES_MAX_LINES
+        ? [...lines.slice(0, CHANGES_MAX_LINES), `[${lines.length - CHANGES_MAX_LINES} more; read_page lists them all]`]
+        : lines;
+    if (!before || before.url !== now.url || before.doc !== now.doc) {
+      const where = before ? `Now on: ${shortUrl(now.title)} | ${shortUrl(now.url)}\n` : "";
+      return `\n${where}In view:\n${list(now.items.map(show)).join("\n") || "(no controls)"}`;
+    }
+    const old = new Map(before.items.map((i) => [i.ref, i]));
+    const added = [];
+    const changed = [];
+    for (const i of now.items) {
+      const was = old.get(i.ref);
+      old.delete(i.ref);
+      if (!was) added.push(`+ ${show(i)}`);
+      else if (was.line !== i.line) changed.push(`~ ${show(i)}`);
+    }
+    const gone = [...old.keys()];
+    const lines = [
+      ...(before.title !== now.title ? [`Title is now: ${shortUrl(now.title)}`] : []),
+      ...list([...changed, ...added]),
+      ...(gone.length ? [`Out of view or removed: ${gone.slice(0, 60).join(", ")}${gone.length > 60 ? ", …" : ""}`] : []),
+    ];
+    return `\n${lines.join("\n") || "No change among the controls in view."}`;
+  }
+
   async #pageAction(input) {
+    const result = await this.#pageStep(input);
+    return input.action === "screenshot" ? result : result + (await this.#changes());
+  }
+
+  async #pageStep(input) {
     switch (input.action) {
       case "screenshot": {
         const shot = await this.screenshot();
@@ -812,12 +871,20 @@ export class Browser {
         const page = await this.currentPage();
         const loaded = `Loaded: ${shortUrl(page.title)} | ${shortUrl(page.url)}${note}`;
         const text = await this.evaluate("document.body?.innerText.slice(0, 3000) ?? ''").catch(() => "");
-        if (!isBotCheck(page.url, page.title, text)) return loaded;
+        if (!isBotCheck(page.url, page.title, text)) {
+          this.views.delete(this.currentId);
+          return loaded + (await this.#changes());
+        }
         return `${loaded}\nThis page is a bot check. Do not retry it or try to solve it: use a different source (another site, or web search if you have it), or ask the user.`;
       }
       case "read_page": {
-        const res = await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS);
-        return `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nViewport: ${res.viewport}, scroll ${res.scroll}\n\n${res.tree}`;
+        const whole = input.filter === "all" || input.filter === "interactive";
+        const res = whole ? await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS) : await this.#view();
+        const text = `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nViewport: ${res.viewport}, scroll ${res.scroll}\n\n${res.tree}`;
+        if (!res.visual) return whole ? text : `${text}\n[Controls in view only; filter "all" outlines the whole page.]`;
+        // Content the outline cannot show comes with a screenshot.
+        const shot = await this.#pageStep({ action: "screenshot" });
+        return [{ type: "text", text: `${text}\n[The view has ${res.visual}; a screenshot is attached.]` }, ...shot];
       }
       case "find": {
         const res = await this.callInPage(readPageScript, false, 200000);
@@ -836,11 +903,11 @@ export class Browser {
       case "form_input": {
         if (this.showActions) {
           const shown = await this.#formInputShown(input);
-          if (shown) return shown;
+          if (shown) return shown + (await this.#changes());
         }
         const res = await this.callInPage(formInputScript, input.ref, input.value);
         if (res.error) throw new Error(res.error);
-        return res.ok;
+        return res.ok + (await this.#changes());
       }
       case "get_page_text": {
         const res = await this.callInPage(pageTextScript, PAGE_TEXT_MAX_CHARS);

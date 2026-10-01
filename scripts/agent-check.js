@@ -1376,4 +1376,97 @@ assert.equal(scans.length, 3);
 assert.ok(scans[2].text.length <= 8200, `a text scan sent ${scans[2].text.length} characters`);
 providers.openai.classify = classifyBefore;
 
+// Text-first observation: read_page lists the controls in view with boxes, an action
+// reports only what changed among them with refs kept, a new address lists what is in
+// view there, and a large canvas comes with a screenshot.
+const viewDoc = { defaultView: { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }) } };
+const control = (tag, name, top, { w = 100, h = 20, interactive = true } = {}) => {
+  const el = {
+    tagName: tag, innerText: name, textContent: name, children: [], labels: [], ownerDocument: viewDoc, isConnected: true,
+    getAttribute: () => null, matches: () => interactive,
+    getBoundingClientRect: () => ({ left: 10, top, right: 10 + w, bottom: top + h, width: w, height: h }),
+  };
+  return el;
+};
+const viewPage = { url: "https://shop.example/", title: "Shop" };
+const buy = control("BUTTON", "Buy", 10);
+const cart = control("A", "Cart", 40);
+const help = control("BUTTON", "Help", 70);
+const footer = control("A", "Imprint", 3000);
+const viewBody = { children: [buy, cart, help, footer] };
+Object.assign(globalThis, {
+  window: {}, innerWidth: 2560, innerHeight: 1600, scrollX: 0, scrollY: 0, devicePixelRatio: 1, visualViewport: { pageLeft: 0, pageTop: 0 },
+  location: { get href() { return viewPage.url; } },
+  document: { get title() { return viewPage.title; }, body: viewBody, documentElement: { scrollWidth: 2560, scrollHeight: 4000 } },
+});
+const viewShots = [];
+const viewTransport = {
+  pages: async () => [{ id: "v1", ...viewPage }],
+  activeId: async () => "v1",
+  activate: async () => {},
+  send: async (id, method, params) => {
+    if (method === "Page.captureScreenshot") return (viewShots.push(1), { data: "AAAA" });
+    if (method === "Runtime.evaluate") return { result: { value: await (0, eval)(params.expression) } };
+    return {};
+  },
+};
+const viewBrowser = new Browser(viewTransport);
+const inView = await viewBrowser.run("read_page", {});
+assert.match(inView, /button "Buy" \[ref_1\] @5,5 50x10/, "a control in view lacks its ref or its box in screenshot pixels");
+assert.doesNotMatch(inView, /Imprint/, "read_page listed a control outside the view by default");
+assert.match(await viewBrowser.run("read_page", { filter: "all" }), /Imprint/, "filter all left out the rest of the page");
+buy.innerText = "Bought";
+viewBody.children = [buy, help, control("BUTTON", "Checkout", 100), footer];
+const changes = await viewBrowser.run("browser", { action: "wait", duration: 0 });
+assert.match(changes, /~ button "Bought" \[ref_1\]/, "a changed control was not reported under its ref");
+assert.match(changes, /\+ button "Checkout" \[ref_\d+\]/, "a new control was not reported");
+assert.match(changes, /removed: ref_2/, "a control that left was not reported");
+assert.doesNotMatch(changes, /Help/, "an unchanged control was reported again");
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /No change among the controls in view/);
+viewPage.url = "https://shop.example/checkout";
+viewPage.title = "Checkout";
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /Now on: Checkout \| https:\/\/shop\.example\/checkout\nIn view:\nbutton "Bought" \[ref_1\]/);
+// A new document at the same address (a form posted back to its own page) numbers its refs
+// anew, so it is reported as a new page, not as changes.
+globalThis.window = {};
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /Now on: Checkout/, "a new document at the same address was reported as changes");
+assert.equal(viewShots.length, 0, "a screenshot was taken without a reason");
+viewBody.children = [buy, control("CANVAS", "", 100, { w: 2000, h: 1200, interactive: false })];
+const canvasRead = await viewBrowser.run("read_page", {});
+assert.ok(Array.isArray(canvasRead) && canvasRead.some((b) => b.type === "image"), "a large canvas in view came without a screenshot");
+for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "devicePixelRatio", "visualViewport", "location", "document"]) delete globalThis[name];
+
+// The agent attaches a screenshot when the page moves to another site or an action fails,
+// and not to an ordinary action on the same site.
+let siteUrl = "https://a.example/";
+const shotCalls = [];
+const shooter = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+shooter.browser = {
+  ...agent.browser,
+  currentUrl: async () => siteUrl,
+  currentPage: async () => ({ id: "t1", title: "", url: siteUrl }),
+  run: async (name, input) => {
+    shotCalls.push(input.action ?? name);
+    if (input.action === "screenshot") return [{ type: "image", mediaType: "image/jpeg", data: "AAAA" }, { type: "text", text: "Browser screenshot" }];
+    if (name === "navigate") siteUrl = input.url;
+    if (input.ref === "ref_9") throw new Error("ref_9 not found");
+    return "done";
+  },
+};
+const shotReplies = [
+  { content: [{ type: "tool_call", id: "s1", name: "browser", input: { action: "left_click", ref: "ref_1" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "s2", name: "navigate", input: { url: "https://b.example/" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "s3", name: "browser", input: { action: "left_click", ref: "ref_9" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+const shooterTurn = providers.openai.turn;
+providers.openai.turn = async () => shotReplies.shift();
+await shooter.run("buy it", { ...config, permissionMode: "auto" });
+providers.openai.turn = shooterTurn;
+const shotResults = shooter.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result");
+const hasShot = (r) => r.content.some((b) => b.type === "image");
+assert.ok(!hasShot(shotResults[0]), "an ordinary action came with a screenshot");
+assert.ok(hasShot(shotResults[1]), "moving to another site came without a screenshot");
+assert.ok(hasShot(shotResults[2]) && shotResults[2].isError, "a failed action came without a screenshot");
+
 console.log("agent checks passed");
