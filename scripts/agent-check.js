@@ -565,6 +565,15 @@ dm("owner", "check the weather");
 await until(() => sentTexts().includes("dm done"), "a task sent as a DM did not report back");
 assert.ok(discordCalls.every((c) => !c.auth || c.auth === "Bot bot-token" || c.auth === "Bot wrong-token"), "a request went out with another token");
 
+// A task refused before it begins still closes its progress message.
+const startTask = agent.browser.startTask;
+agent.browser.startTask = async () => {
+  throw new Error("Chrome would not attach");
+};
+const failToken = command("owner", "run", [{ name: "task", value: "anything" }]);
+await until(() => discordCalls.some((c) => c.method === "PATCH" && c.path === `/webhooks/app1/${failToken}/messages/@original` && /^Ended with an error/.test(c.body.content)), "a task refused before it began left its progress open");
+agent.browser.startTask = startTask;
+
 // Chrome took back the permission: the bridge disconnects and says so.
 bridge.revoke();
 assert.equal((await bridge.status()).state, "no-access");

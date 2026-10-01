@@ -475,7 +475,7 @@ export class DiscordBridge {
   async #onEvent(session, event) {
     const task = this.tasks.get(session);
     if (!task) return;
-    if (event.type === "status" && event.running === false) return this.#finish(task);
+    if (event.type === "status") return event.running ? (task.began = true) : this.#finish(task);
     if (event.type === "tool_call") {
       task.steps++;
       task.verb = stepWord(event);
@@ -502,6 +502,8 @@ export class DiscordBridge {
     } else if (event.type === "error") {
       task.ended = "Ended with an error";
       await this.#post(task, { content: clip(`Error: ${event.text}`) });
+      // Refused before it began (no key, a task already running): no status follows.
+      if (!task.began) await this.#finish(task);
     } else if (event.type === "notice") {
       task.ended = event.text.replace(/\.$/, "");
     }
