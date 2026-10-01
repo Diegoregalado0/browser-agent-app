@@ -8,10 +8,13 @@
 //   node scripts/bench/run.js --provider openai --model qwen3.6-35b-a3b \
 //     --base-url http://localhost:8081/v1 --runs 1
 //   node scripts/bench/run.js --provider ollama --model gemma4:26b --host http://localhost:11436
-//   node scripts/bench/run.js --provider mistral --model ministral-14b-latest --key sk-...
+//   BENCH_KEY=$(grep ^MISTRAL_API_KEY= ~/browser-agent/.env | cut -d= -f2) \
+//     node scripts/bench/run.js --provider mistral --model ministral-14b-latest
 //
-// Flags: --provider --model --runs N --tasks a,b --host --base-url --key --timeout(ms)
+// Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
 //        --port (DevTools port; 0 = any free one)
+// The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
+// (command-line args are visible to every user via `ps`), and is never logged.
 
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,8 +67,8 @@ function buildConfig() {
     // model under test for safety checks too, same as the local providers already do.
     overrides.guardModels.openai = args.model;
   } else if (args.provider === "mistral") {
-    if (!args.key) throw new Error("Mistral needs --key (its API key).");
-    overrides.keys.mistral = args.key;
+    if (!process.env.BENCH_KEY) throw new Error("Mistral needs its API key in the BENCH_KEY environment variable.");
+    overrides.keys.mistral = process.env.BENCH_KEY;
   } else {
     throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, or mistral.`);
   }
@@ -73,18 +76,18 @@ function buildConfig() {
 }
 
 // Pricing is only meaningful for billed cloud calls; local servers run on hardware already
-// paid for, so their cost column reads "-". Update if Mistral's published price changes.
+// paid for, so their cost column reads "-". $0.20/1M tokens (in and out) for Ministral 14B,
+// from docs.mistral.ai/inference/pricing as of 2026-10 - reported as an estimate below
+// since it was looked up, not read from a live billing API.
 const CLOUD_PRICING_PER_MTOK = {
-  "ministral-14b-latest": { in: 0.25, out: 0.25 },
-  "ministral-8b-latest": { in: 0.1, out: 0.1 },
-  "ministral-3b-latest": { in: 0.04, out: 0.04 },
+  "ministral-14b-latest": { in: 0.2, out: 0.2 },
 };
 
 function costFor(provider, model, input, output) {
   if (provider !== "mistral") return null;
   const price = CLOUD_PRICING_PER_MTOK[model];
   if (!price) return null;
-  return (input / 1e6) * price.in + (output / 1e6) * price.out;
+  return { amount: (input / 1e6) * price.in + (output / 1e6) * price.out, estimate: true };
 }
 
 async function freshProfile() {
@@ -285,7 +288,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
 }
 
 function fmtCost(c) {
-  return c == null ? "-" : `$${c.toFixed(4)}`;
+  return c == null ? "-" : `~$${c.amount.toFixed(4)} (estimate)`;
 }
 
 function writeReport({ provider, model, rows }) {
@@ -315,12 +318,13 @@ function writeReport({ provider, model, rows }) {
   });
 
   const overallRate = (rows.filter((r) => r.success).length / rows.length) * 100;
-  const totalCost = rows.reduce((s, r) => s + (r.costUsd || 0), 0);
+  const totalCost = rows.reduce((s, r) => s + (r.costUsd?.amount || 0), 0);
+  const anyEstimate = rows.some((r) => r.costUsd);
 
   const md = [
     `# Browsby benchmark: ${provider} / ${model}`,
     "",
-    `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${totalCost ? `$${totalCost.toFixed(4)}` : "-"}.`,
+    `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${anyEstimate ? `~$${totalCost.toFixed(4)} (estimate)` : "-"}.`,
     "",
     "## Per-task summary",
     "",
