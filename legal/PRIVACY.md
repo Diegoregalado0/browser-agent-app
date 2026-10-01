@@ -67,7 +67,7 @@ If you set up remote control in Settings > Remote (Discord), Browsby connects to
 
 - Browsby receives the tasks and approval answers you send from your paired Discord account.
 - Browsby sends the pairing reply, approval prompts, the agent's final answers, error messages, and stop notices.
-- Screenshots and full page contents are not sent. Approval prompts include the page address and a short preview of any text the agent wants to type (never text typed into a password field), and final answers can contain information the agent found for you.
+- Screenshots and full page contents are not sent. Approval prompts include the page address and a short preview of any text the agent wants to type (never text typed into a password field); a prompt to send Outlook mail includes its subject and recipients, also for a saved draft; and final answers can contain information the agent found for you.
 
 Discord can read messages sent by bots. Discord's own privacy policy applies to these messages.
 

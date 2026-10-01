@@ -29,6 +29,8 @@ export async function newPkce() {
 
 const recipients = (list) => (list ?? []).map((address) => ({ emailAddress: { address } }));
 const who = (r) => r?.emailAddress?.address ?? "";
+// Addresses as the send and invite prompts show them, clipped for the panel.
+const addressList = (...values) => values.flat().filter((v) => typeof v === "string").join(", ").slice(0, 300);
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const emails = { type: "array", items: { type: "string" } };
 // A local date or date-time from the model as a UTC instant, for Graph's calendar ranges.
@@ -226,17 +228,35 @@ export class OutlookGraph {
 
   // What a call that always needs the user's approval, in every safety mode, would do:
   // sending mail and inviting people. Null for other calls.
-  confirmation(name, input = {}) {
-    const list = (...values) => values.flat().filter((v) => typeof v === "string").join(", ").slice(0, 300);
+  async confirmation(name, input = {}, { signal } = {}) {
     const subject = String(input.subject ?? "").slice(0, 120);
     if (name === "mcp__outlook__send") {
-      if (input.draft_id) return "send a saved Outlook draft";
-      return `send an email to ${list(input.to, input.cc)}: "${subject}"`;
+      if (input.draft_id) return this.#draftConfirmation(input.draft_id, signal);
+      return `send an email to ${addressList(input.to, input.cc)}: "${subject}"`;
     }
     if (name === "mcp__outlook__event_create" && input.attendees?.length) {
-      return `create the Outlook event "${subject}" and invite ${list(input.attendees)}`;
+      return `create the Outlook event "${subject}" and invite ${addressList(input.attendees)}`;
     }
     return null;
+  }
+
+  // A saved draft's subject and recipients, read from Graph for the send prompt. The prompt
+  // still asks when they cannot be read, and says so.
+  async #draftConfirmation(draftId, signal) {
+    let draft;
+    try {
+      draft = await this.#graph(signal, "GET", `/me/messages/${encodeURIComponent(String(draftId))}?$select=subject,toRecipients,ccRecipients,bccRecipients`);
+    } catch (err) {
+      return `send a saved Outlook draft, whose subject and recipients could not be loaded (${err.message.slice(0, 200)})`;
+    }
+    const recipients = [
+      ["to", draft?.toRecipients],
+      ["cc", draft?.ccRecipients],
+      ["bcc", draft?.bccRecipients],
+    ]
+      .filter(([, list]) => list?.length)
+      .map(([label, list]) => `${label} ${addressList(list.map(who))}`);
+    return `send the saved Outlook draft "${String(draft?.subject ?? "").slice(0, 120)}" ${recipients.join("; ") || "with no recipients"}`;
   }
 
   async call(name, input = {}, { signal } = {}) {

@@ -500,7 +500,8 @@ export class Agent {
     if (config.permissionMode === "ask") await this.#checkSite(call, config);
     const isMcp = Boolean(this.mcp?.has(call.name));
     // What the call would do, when its tool server says it always asks (Outlook send).
-    const confirm = (isMcp && this.mcp.confirmation?.(call.name, call.input)) || null;
+    const confirm = (isMcp && (await this.mcp.confirmation?.(call.name, call.input, { signal }))) || null;
+    if (signal.aborted) throw new Error("Cancelled by the user.");
     let check = null;
     if (config.permissionMode !== "auto" && this.#changesState(call)) {
       check = await (precheck ?? this.#safetyCheck(call, config, signal));

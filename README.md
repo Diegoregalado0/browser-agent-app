@@ -100,7 +100,7 @@ Settings > General holds instructions sent with every task, for facts and prefer
 
 ### Outlook
 
-Connect Outlook in the Connections panel (the plug button) and sign in on Microsoft's own page with a work, school or personal Microsoft account. The agent can then search and read your mail, save drafts and replies, send, and list or add calendar events. Browsby asks you before it sends mail or adds an event that invites people, in every safety mode; saving drafts and adding events without attendees go through the safety check. The sign-in stays in this Chrome profile, never synced, and is never shown to the model. Sign out in the same panel.
+Connect Outlook in the Connections panel (the plug button) and sign in on Microsoft's own page with a work, school or personal Microsoft account. The agent can then search and read your mail, save drafts and replies, send, and list or add calendar events. Browsby asks you before it sends mail or adds an event that invites people, in every safety mode, and the prompt names the subject and recipients, also when sending a saved draft; saving drafts and adding events without attendees go through the safety check. The sign-in stays in this Chrome profile, never synced, and is never shown to the model. Sign out in the same panel.
 
 ### Remote control from Discord
 

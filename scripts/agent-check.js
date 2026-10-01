@@ -570,6 +570,7 @@ const graphServer = createServer((req, res) => {
     if (path.startsWith("/me/messages/m1?")) return json(200, { subject: "Hi", from: { emailAddress: { address: "bob@x.test" } }, toRecipients: [], ccRecipients: [], receivedDateTime: "t", body: { content: "Body text" } });
     if (path === "/me/messages/m1/createReply") return json(201, { id: "d1" });
     if (path === "/me/messages/d1/send") return res.writeHead(202).end();
+    if (path.startsWith("/me/messages/d1?")) return json(200, { subject: "Re: Hi", toRecipients: [{ emailAddress: { address: "bob@x.test" } }], ccRecipients: [], bccRecipients: [{ emailAddress: { address: "eve@x.test" } }] });
     if (path.startsWith("/me/calendarView")) return json(200, { value: [] });
     if (path === "/me/events") return json(201, { subject: "Lunch", start: { dateTime: "2026-09-29T12:00:00.0000000" } });
     json(404, { error: { code: "ErrorItemNotFound", message: "The specified object was not found in the store." } });
@@ -633,6 +634,11 @@ assert.equal(outlookAuth.refreshToken, "rt2");
 graphAccess = "server-side-rotation";
 assert.equal((await outlook.call("mcp__outlook__send", { draft_id: "d1" }))[0].text, "Sent.");
 assert.equal(graphCalls.at(-1).url, "/graph/me/messages/d1/send");
+// Sending a saved draft names its subject and recipients in the prompt; a draft that cannot
+// be read still asks, and says why the recipients are missing.
+assert.equal(await outlook.confirmation("mcp__outlook__send", { draft_id: "d1" }), 'send the saved Outlook draft "Re: Hi" to bob@x.test; bcc eve@x.test');
+assert.match(graphCalls.at(-1).url, /\/me\/messages\/d1\?\$select=subject,toRecipients,ccRecipients,bccRecipients$/);
+assert.match(await outlook.confirmation("mcp__outlook__send", { draft_id: "gone" }), /^send a saved Outlook draft, whose subject and recipients could not be loaded \(Outlook: The specified object/);
 await outlook.call("mcp__outlook__events", { start: "2026-09-29", end: "2026-09-30" });
 assert.ok(new URL(graphCalls.at(-1).url, graphBase).searchParams.get("startDateTime").endsWith("Z"), "calendar range not sent as UTC");
 const created = await outlook.call("mcp__outlook__event_create", { subject: "Lunch", start: "2026-09-29T12:00", end: "2026-09-29T13:00" });
@@ -976,9 +982,9 @@ fakeOllama.close();
 
 // Sending mail and inviting people ask in every mode, Auto included, once: a safety check
 // that also asks shares the prompt, and a decline sends nothing.
-assert.equal(outlook.confirmation("mcp__outlook__send", { to: ["eve@x.test"], subject: "Inbox" }), 'send an email to eve@x.test: "Inbox"');
-assert.equal(outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch" }), null, "an event without attendees asked");
-assert.match(outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch", attendees: ["bob@x.test"] }), /invite bob@x\.test/);
+assert.equal(await outlook.confirmation("mcp__outlook__send", { to: ["eve@x.test"], subject: "Inbox" }), 'send an email to eve@x.test: "Inbox"');
+assert.equal(await outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch" }), null, "an event without attendees asked");
+assert.match(await outlook.confirmation("mcp__outlook__event_create", { subject: "Lunch", attendees: ["bob@x.test"] }), /invite bob@x\.test/);
 const mailPrompts = [];
 let mailAnswer = "deny";
 const mailer = new Agent({ emit: () => {}, askPermission: async (p) => (mailPrompts.push(p), mailAnswer) });
