@@ -43,9 +43,11 @@ const manifest = {
   homepage_url: "https://diegoregalado0.github.io/browser-agent-app/",
   minimum_chrome_version: "120",
   permissions: ["sidePanel", "debugger", "tabs", "tabGroups", "storage", ...(OUTLOOK_CLIENT_ID ? ["identity"] : [])],
-  // Discord's API for remote control (its gateway is a WebSocket, which needs no
-  // permission), and, only when Outlook is set up, Microsoft sign-in and Graph.
-  host_permissions: [...PROVIDER_HOSTS, "https://discord.com/*", ...(OUTLOOK_CLIENT_ID ? OUTLOOK_HOSTS : [])],
+  // Microsoft sign-in and Graph only when Outlook is set up.
+  host_permissions: [...PROVIDER_HOSTS, ...(OUTLOOK_CLIENT_ID ? OUTLOOK_HOSTS : [])],
+  // Discord's API for remote control, asked for only when the user sets it up (its gateway
+  // is a WebSocket, which needs no permission).
+  optional_host_permissions: ["https://discord.com/*"],
   background: { service_worker: "background.js" },
   side_panel: { default_path: "sidepanel.html" },
   action: { default_title: "Browsby", default_icon: { 16: "icon-16.png", 32: "icon-32.png" } },
