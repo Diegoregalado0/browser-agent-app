@@ -1,4 +1,5 @@
 import { Ollama } from "ollama/browser";
+import { MODEL_LOAD_MS } from "../metrics.js";
 
 // Native Ollama API rather than its OpenAI-compatible endpoint, so the context window
 // (num_ctx) can be raised; screenshots and tool definitions overflow the default.
@@ -91,7 +92,28 @@ export async function turn(opts) {
   }
 }
 
+// The share of a loaded model in GPU memory (the rest is in system memory and runs on the
+// CPU), from /api/ps. Asked once per host and model, and again after a model load, which can
+// place it differently. A failed lookup is not kept.
+const placements = new Map();
+function gpuShare(config, model, reloaded) {
+  const key = `${config.ollamaHost} ${model}`;
+  if (reloaded || !placements.has(key)) {
+    const lookup = client(config)
+      .ps()
+      .then(({ models }) => {
+        const loaded = models.find((m) => m.name === model || m.model === model);
+        if (!loaded?.size) throw new Error("not loaded");
+        return loaded.size_vram / loaded.size;
+      })
+      .catch(() => (placements.delete(key), null));
+    placements.set(key, lookup);
+  }
+  return placements.get(key);
+}
+
 async function turnOnce({ model, config, system, tools, messages, signal, onText, onThinking }) {
+  const started = Date.now();
   const stream = await client(config, signal).chat({
     model,
     stream: true,
@@ -107,8 +129,11 @@ async function turnOnce({ model, config, system, tools, messages, signal, onText
   let text = "";
   let doneReason = null;
   let usage = null;
+  let metrics = null;
+  let firstTokenMs = null;
   const calls = [];
   for await (const chunk of stream) {
+    if (firstTokenMs === null && (chunk.message?.thinking || chunk.message?.content || chunk.message?.tool_calls)) firstTokenMs = Date.now() - started;
     if (chunk.message?.thinking) onThinking(chunk.message.thinking);
     if (chunk.message?.content) {
       text += chunk.message.content;
@@ -118,7 +143,20 @@ async function turnOnce({ model, config, system, tools, messages, signal, onText
     if (chunk.done) {
       doneReason = chunk.done_reason;
       usage = { input: chunk.prompt_eval_count ?? 0, cachedInput: 0, output: chunk.eval_count ?? 0 };
+      // Durations are in nanoseconds.
+      metrics = {
+        generatedTokens: chunk.eval_count,
+        generationMs: chunk.eval_duration / 1e6,
+        promptTokens: chunk.prompt_eval_count,
+        promptMs: chunk.prompt_eval_duration / 1e6,
+        loadMs: chunk.load_duration / 1e6,
+        contextSize: config.ollamaContext,
+      };
     }
+  }
+  if (metrics) {
+    metrics.firstTokenMs = firstTokenMs;
+    metrics.gpuShare = await gpuShare(config, model, metrics.loadMs > MODEL_LOAD_MS);
   }
 
   const content = [];
@@ -127,7 +165,7 @@ async function turnOnce({ model, config, system, tools, messages, signal, onText
     content.push({ type: "tool_call", id: `ollama_${Date.now()}_${i}`, name: c.function.name, input: c.function.arguments || {} }),
   );
   const stop = doneReason === "length" ? "max_tokens" : calls.length ? "tool_use" : "end";
-  return { content, raw: null, stop, usage };
+  return { content, raw: null, stop, usage, metrics };
 }
 
 // The connection test's one real request: the chosen model, one output token. A POST, so
