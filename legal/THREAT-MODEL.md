@@ -385,3 +385,4 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 6. Done: drop tool output when a saved conversation is reopened (chosen over saving the injection flags, which would miss content that was never scanned).
 7. Done: keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
 8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field; later also in the panel's tool calls and saved sessions.
+9. Decided, kept as is: the prompt before Outlook send and invitations keeps kind "safety" (src/agent.js:524), so it can be answered from Discord like other safety prompts, since tasks started from Discord send mail too (checked by "Sending mail and inviting people ask in every mode"). The trade-off is the one in ASI07: a stolen Discord account can approve a send. Sensitive-site and password prompts stay local only (src/controller.js:47).
