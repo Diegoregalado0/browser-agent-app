@@ -23,13 +23,17 @@ else
 fi
 
 # App bundle. Apps launched from Finder don't get the shell PATH, so node is pinned here;
-# rerun this script after moving the project or changing Node installs.
+# rerun this script after moving the project or changing Node installs. Finder can start a
+# script-only app under Rosetta, where a universal node cannot load the native esbuild
+# installed above, so the app runs node with this shell's architecture. Output goes to
+# app.log in the Browsby home, since an app has no terminal to show errors in.
 # The app was called "Browser Agent" before the rename; remove it so upgrades leave one app.
 rm -rf "$HOME/Applications/Browser Agent.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cat > "$APP/Contents/MacOS/browser-agent" <<SCRIPT
 #!/bin/sh
-exec "$NODE" "$PROJECT_DIR/bin/browser-agent.js" open
+mkdir -p "\$HOME/.browser-agent"
+exec /usr/bin/arch -$(uname -m) "$NODE" "$PROJECT_DIR/bin/browser-agent.js" open >>"\$HOME/.browser-agent/app.log" 2>&1
 SCRIPT
 chmod +x "$APP/Contents/MacOS/browser-agent"
 
