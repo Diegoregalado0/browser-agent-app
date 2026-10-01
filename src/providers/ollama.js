@@ -36,8 +36,12 @@ function toMessages(system, messages) {
   return out;
 }
 
-function client(config) {
-  return new Ollama({ host: config.ollamaHost });
+// The library sends a request's own abort signal only once the response starts, and none
+// for a request that does not stream, so Stop could not cut short the prompt processing
+// before the first token. Every request made for a task carries the task's signal.
+function client(config, signal) {
+  const withSignal = (url, init = {}) => fetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal });
+  return new Ollama({ host: config.ollamaHost, ...(signal && { fetch: withSignal }) });
 }
 
 // Whether a model lists the "thinking" capability, asked once per host and model. Models
@@ -71,8 +75,7 @@ export async function canChat({ model, config }) {
 }
 
 export async function turn({ model, config, system, tools, messages, signal, onText, onThinking }) {
-  const ollama = client(config);
-  const stream = await ollama.chat({
+  const stream = await client(config, signal).chat({
     model,
     stream: true,
     messages: toMessages(system, messages),
@@ -83,28 +86,22 @@ export async function turn({ model, config, system, tools, messages, signal, onT
     options: { num_ctx: config.ollamaContext },
     ...((await canThink(config, model)) && { think: Boolean(config.thinking) }),
   });
-  const onAbort = () => stream.abort();
-  signal.addEventListener("abort", onAbort);
 
   let text = "";
   let doneReason = null;
   let usage = null;
   const calls = [];
-  try {
-    for await (const chunk of stream) {
-      if (chunk.message?.thinking) onThinking(chunk.message.thinking);
-      if (chunk.message?.content) {
-        text += chunk.message.content;
-        onText(chunk.message.content);
-      }
-      calls.push(...(chunk.message?.tool_calls || []));
-      if (chunk.done) {
-        doneReason = chunk.done_reason;
-        usage = { input: chunk.prompt_eval_count ?? 0, cachedInput: 0, output: chunk.eval_count ?? 0 };
-      }
+  for await (const chunk of stream) {
+    if (chunk.message?.thinking) onThinking(chunk.message.thinking);
+    if (chunk.message?.content) {
+      text += chunk.message.content;
+      onText(chunk.message.content);
     }
-  } finally {
-    signal.removeEventListener("abort", onAbort);
+    calls.push(...(chunk.message?.tool_calls || []));
+    if (chunk.done) {
+      doneReason = chunk.done_reason;
+      usage = { input: chunk.prompt_eval_count ?? 0, cachedInput: 0, output: chunk.eval_count ?? 0 };
+    }
   }
 
   const content = [];
@@ -141,8 +138,8 @@ export function describeError(err) {
 }
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
-export async function classify({ model, config, system, text, images = [], schema, onUsage }) {
-  const res = await client(config).chat({
+export async function classify({ model, config, system, text, images = [], schema, signal, onUsage }) {
+  const res = await client(config, signal).chat({
     model,
     stream: false,
     format: schema,

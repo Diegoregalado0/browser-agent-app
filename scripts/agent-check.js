@@ -716,6 +716,27 @@ assert.match(ollama.describeError(new TypeError("Failed to fetch")), /Is it runn
 const ollamaError = (message, status) => Object.assign(new Error(message), { name: "ResponseError", status_code: status });
 assert.match(ollama.describeError(ollamaError("Forbidden", 403)), /OLLAMA_ORIGINS/);
 
+// Stop reaches Ollama while it is still processing the prompt (no response yet), for a
+// turn and for a safety check, against a stand-in that answers only after 5 seconds.
+const slowOllama = createServer((req, res) => {
+  if (req.url === "/api/show") return res.end(JSON.stringify({ capabilities: ["completion", "tools", "thinking"] }));
+  setTimeout(() => res.end("{}"), 5000);
+});
+await new Promise((r) => slowOllama.listen(0, "127.0.0.1", r));
+const slowConfig = { ...config, ollamaHost: `http://127.0.0.1:${slowOllama.address().port}` };
+for (const call of [
+  (signal) => ollama.turn({ model: "m", config: slowConfig, system: "s", tools: [], messages: [], signal, onText: () => {}, onThinking: () => {} }),
+  (signal) => ollama.classify({ model: "m", config: slowConfig, system: "s", text: "t", schema: {}, signal }),
+]) {
+  const controller = new AbortController();
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 200);
+  await assert.rejects(call(controller.signal), { name: "AbortError" });
+  assert.ok(Date.now() - started < 1000, `Stop took ${Date.now() - started} ms to reach Ollama`);
+}
+slowOllama.closeAllConnections();
+slowOllama.close();
+
 // Stop during a streamed reply whose SDK ends the stream quietly: the partial reply is not
 // kept as an answer, and the user is told the task stopped.
 const cutNotices = [];
