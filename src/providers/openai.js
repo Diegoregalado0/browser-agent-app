@@ -340,6 +340,9 @@ export async function classify({ apiKey, model, config, system, text, images = [
           { role: "user", content: [{ type: "text", text }, ...imageParts(images)] },
         ],
         response_format: { type: "json_schema", json_schema: { name: "result", schema, strict: true } },
+        // Set for endpoints whose models do not think (Mistral); a thinking model on another
+        // endpoint would spend the budget before the verdict.
+        ...(config.classifyMaxTokens && { max_tokens: config.classifyMaxTokens }),
       },
       { signal },
     );

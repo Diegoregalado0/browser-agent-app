@@ -1,13 +1,14 @@
 // Settings shape, defaults, and key handling. No file or environment access here.
 
 // Small models used for safety checks when none is set for the provider. Empty means
-// the main model is used. Mistral enables models per account, so its checks use the main
-// model, which the account can already run.
+// the main model is used, as for Ollama, where a second local model would compete for
+// memory. Mistral enables models per account; when the account cannot use a default here,
+// the checks fall back to the main model (see Guard).
 export const DEFAULT_GUARD_MODELS = {
   openai: "gpt-6-luna",
   anthropic: "claude-haiku-4-5",
-  gemini: "",
-  mistral: "",
+  gemini: "gemini-3.5-flash-lite",
+  mistral: "mistral-small-latest",
   ollama: "",
 };
 

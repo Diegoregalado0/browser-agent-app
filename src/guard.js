@@ -64,6 +64,8 @@ export class Guard {
   constructor({ onUsage = () => {} } = {}) {
     this.onUsage = onUsage;
     this.scanned = new Map();
+    // Default safety models the account turned out not to have, for the rest of the session.
+    this.unavailable = new Set();
     // Addresses whose page was scanned, with the warning (see scanContent).
     this.scannedPages = new Map();
     this.flags = [];
@@ -75,22 +77,31 @@ export class Guard {
     this.flags = [];
   }
 
+  // fallback: the model is a default the main model can stand in for.
   #resolve(config) {
     const provider = config.provider;
-    const model = config.guardModels?.[provider] || DEFAULT_GUARD_MODELS[provider] || config.models[provider];
-    return { impl: providers[provider], provider, model, apiKey: apiKeyFor(config, provider) };
+    const main = config.models[provider];
+    let model = config.guardModels?.[provider] || DEFAULT_GUARD_MODELS[provider] || main;
+    if (!config.guardModels?.[provider] && this.unavailable.has(`${provider} ${model}`)) model = main;
+    return { impl: providers[provider], provider, model, fallback: model !== main && !config.guardModels?.[provider], apiKey: apiKeyFor(config, provider) };
   }
 
   async #classify(config, args, signal) {
-    const { impl, model, apiKey } = this.#resolve(config);
     // Brief retries cover rate limits and transient errors on the small model. Other client
     // errors (bad key, model not in the plan) and a zero quota fail at once.
     for (let attempt = 0; ; attempt++) {
+      const { impl, provider, model, fallback, apiKey } = this.#resolve(config);
       try {
         return await impl.classify({ apiKey, model, config, signal, onUsage: this.onUsage, ...args });
       } catch (err) {
         const status = err?.status;
         const zeroQuota = status === 429 && err.headers?.get?.("x-ratelimit-limit-req-minute") === "0";
+        // A default model the account cannot use (not enabled, or not found) gives way to the
+        // main model, which the account already runs.
+        if (fallback && (zeroQuota || status === 403 || status === 404)) {
+          this.unavailable.add(`${provider} ${model}`);
+          continue;
+        }
         const permanent = zeroQuota || (status >= 400 && status < 500 && status !== 429);
         if (attempt >= 2 || signal?.aborted || permanent) throw err;
         await sleep(err?.status === 429 ? 8000 : 1000);

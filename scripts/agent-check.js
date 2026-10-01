@@ -191,16 +191,19 @@ assert.deepEqual(filled, ["a", "c"], "the blocked field ran, or an allowed one d
 assert.ok(batchMs < 800, `three 300ms safety checks took ${batchMs}ms, so they did not run together`);
 
 // A safety model the account cannot use (Mistral's zero quota) fails at once instead of
-// retrying, and the action falls back to asking.
+// retrying: a default one gives way to the main model once, and when that cannot run
+// either, the action falls back to asking.
 let guardCalls = 0;
-providers.openai.classify = async () => {
+const guardModelsTried = [];
+providers.openai.classify = async ({ model }) => {
   guardCalls++;
+  guardModelsTried.push(model);
   throw Object.assign(new Error("Rate limit exceeded"), { status: 429, headers: new Headers({ "x-ratelimit-limit-req-minute": "0" }) });
 };
 started = Date.now();
 const blocked = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://example.com/" }, name: "browser", input: {} });
 assert.equal(blocked.verdict, "ask");
-assert.equal(guardCalls, 1, `a zero-quota safety model was retried ${guardCalls - 1} times`);
+assert.deepEqual(guardModelsTried, ["gpt-6-luna", "gpt-6-sol"], `a zero-quota safety model was retried: ${guardModelsTried}`);
 assert.ok(Date.now() - started < 500, "a zero-quota safety model was retried after a wait");
 
 // Network recording hides sign-in headers from the model.
@@ -1468,5 +1471,46 @@ const hasShot = (r) => r.content.some((b) => b.type === "image");
 assert.ok(!hasShot(shotResults[0]), "an ordinary action came with a screenshot");
 assert.ok(hasShot(shotResults[1]), "moving to another site came without a screenshot");
 assert.ok(hasShot(shotResults[2]) && shotResults[2].isError, "a failed action came without a screenshot");
+
+// Cheap safety checks: a small default model per provider (Flash-Lite for Gemini, Small for
+// Mistral, the main model for Ollama), a verdict of about a hundred tokens with thinking
+// off, and the main model when the account cannot use the default.
+const { DEFAULT_GUARD_MODELS } = await import("../src/config-core.js");
+assert.match(DEFAULT_GUARD_MODELS.gemini, /flash-lite/);
+assert.match(DEFAULT_GUARD_MODELS.mistral, /^mistral-small/);
+assert.equal(DEFAULT_GUARD_MODELS.ollama, "");
+const guardBodies = [];
+const guardFetchBefore = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  guardBodies.push({ url: String(url), body: JSON.parse(init.body) });
+  throw new Error("offline");
+};
+const verdictSchema = { type: "object", properties: { verdict: { type: "string" } }, required: ["verdict"], additionalProperties: false };
+const guardRequest = { system: "s", text: "t", schema: verdictSchema };
+await anthropicModule.classify({ apiKey: "test", model: "claude-haiku-4-5", ...guardRequest }).catch(() => {});
+await (await import("../src/providers/mistral.js")).classify({ apiKey: "test", model: "mistral-small-latest", config, ...guardRequest }).catch(() => {});
+await ollama.classify({ model: "qwen3:8b", config: { ...config, ollamaHost: "http://127.0.0.1:9" }, ...guardRequest }).catch(() => {});
+globalThis.fetch = guardFetchBefore;
+const bodyFor = (re) => guardBodies.find((b) => re.test(b.url) && b.body.messages)?.body;
+assert.ok(bodyFor(/anthropic/).max_tokens <= 150 && !bodyFor(/anthropic/).thinking, "the Anthropic safety check is not short with thinking off");
+assert.ok(bodyFor(/mistral/).max_tokens <= 150, "the Mistral safety check is not short");
+assert.ok(bodyFor(/127\.0\.0\.1:9\/api\/chat/).options.num_predict <= 150, "the Ollama safety check is not short");
+const mistralTried = [];
+const mistralBefore = providers.mistral;
+providers.mistral = {
+  describeError: () => null,
+  classify: async ({ model }) => {
+    mistralTried.push(model);
+    if (model === "mistral-small-latest") throw Object.assign(new Error("quota"), { status: 429, headers: new Headers({ "x-ratelimit-limit-req-minute": "0" }) });
+    return { verdict: "allow", reason: "ok" };
+  },
+};
+const mistralConfig = { ...config, provider: "mistral", models: { ...config.models, mistral: "ministral-8b-latest" }, keys: { ...config.keys, mistral: "test" } };
+const mistralGuard = new Guard();
+const guardAsk = { config: mistralConfig, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} };
+assert.equal((await mistralGuard.checkAction(guardAsk)).verdict, "allow", "an unavailable default safety model did not fall back to the main model");
+assert.equal((await mistralGuard.checkAction(guardAsk)).verdict, "allow");
+assert.deepEqual(mistralTried, ["mistral-small-latest", "ministral-8b-latest", "ministral-8b-latest"], "the unavailable default was tried again");
+providers.mistral = mistralBefore;
 
 console.log("agent checks passed");

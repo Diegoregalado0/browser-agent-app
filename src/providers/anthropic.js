@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 
 // Models that accept adaptive thinking and output_config.effort.
 const THINKING_MODEL = /^claude-(opus-(4-[678]|5)|sonnet-(4-6|5)|fable|mythos)/;
+// Output tokens of a safety check's verdict: { verdict or injection, reason under 25 words }.
+const GUARD_MAX_TOKENS = 128;
 // Models the "default" server-side refusal fallback is documented for.
 const FALLBACK_MODEL = /^claude-(opus-5$|fable-5-1)/;
 
@@ -134,13 +136,15 @@ export function describeError(err) {
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
 export async function classify({ apiKey, model, system, text, images = [], schema, signal, onUsage }) {
   const client = createClient({ apiKey });
+  // The verdict is a short JSON object. A model that thinks by default thinks briefly.
+  const thinks = THINKING_MODEL.test(model);
   const message = await client.messages.create(
     {
       model,
-      max_tokens: 2048,
+      max_tokens: thinks ? 2048 : GUARD_MAX_TOKENS,
       system,
       messages: [{ role: "user", content: [...toBlocks(images), { type: "text", text }] }],
-      output_config: { format: { type: "json_schema", schema } },
+      output_config: { format: { type: "json_schema", schema }, ...(thinks && { effort: "low" }) },
     },
     { signal },
   );

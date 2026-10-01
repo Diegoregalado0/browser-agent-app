@@ -5,10 +5,12 @@ import * as openai from "./openai.js";
 const MISTRAL_BASE_URL = "https://api.mistral.ai/v1";
 // Mistral rejects requests carrying too many images; older screenshots are summarized.
 const MAX_IMAGES = 4;
+// Output tokens of a safety check's verdict; Mistral's chat models do not think.
+const GUARD_MAX_TOKENS = 128;
 
 const withEndpoint = (opts) => ({
   ...opts,
-  config: { ...opts.config, openaiBaseUrl: MISTRAL_BASE_URL, chatMaxImages: MAX_IMAGES },
+  config: { ...opts.config, openaiBaseUrl: MISTRAL_BASE_URL, chatMaxImages: MAX_IMAGES, classifyMaxTokens: GUARD_MAX_TOKENS },
 });
 
 export const turn = (opts) => openai.turn(withEndpoint(opts));
