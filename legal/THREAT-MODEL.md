@@ -42,6 +42,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js:789 | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
 | A reopened conversation replayed earlier tool output, including injections, with the injection flags lost (follow-up) | src/agent.js:185 | Tool results are replaced by a short stub; requests, replies and calls are kept. Chosen over saving the flags: it also covers content never scanned (Auto mode, older saves, failed scans) and needs no change to the saved format; the model reads pages again, and they are scanned again | "A reopened conversation does not replay earlier tool output" |
 | The panel's tool calls, the safety event and the saved session showed text typed into a password field (follow-up 2) | src/agent.js:81, 188, 309, 414; src/controller.js:114, 196 | The call is marked when the model's reply arrives (and again as it runs); events, the saved session and a reopened panel get `[hidden]` and the message without its provider-native copy; the live history keeps the text for the provider | "Nor in the panel's tool calls, their safety events, or the saved session" |
+| Every navigation to a local address asked again, inviting prompt fatigue (follow-up 2) | src/agent.js:560 to 578 | An approval covers that origin (scheme, host and port) for the rest of the task, in memory only; it is never saved to the approved sites, another port or a new task asks, and a decline is remembered as before | "An allowed local origin is not asked again in the same task" |
 
 ## Detailed threats
 
@@ -183,7 +184,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
     "attack_scenario": "1. Injection asks the model to enter card details into an embedded checkout, or to open http://192.168.1.1/apply?dns=...\n2. No sensitive prompt fires",
     "vulnerability_types": ["CWE-693"],
     "mitigation": "Treat a target inside a frame from a sensitive site as sensitive; treat private and loopback addresses as sensitive for navigation (done)",
-    "existing_controls": ["Frame of the target checked against the sensitive list (src/agent.js:569, src/page-scripts.js:267)", "Navigation to private, loopback and link-local addresses asks at the computer (src/agent.js:526, src/limits.js:72)", "Action check 'ask' rule for payment details", "Ask mode site prompts"],
+    "existing_controls": ["Frame of the target checked against the sensitive list (src/agent.js:569, src/page-scripts.js:267)", "Navigation to private, loopback and link-local addresses asks at the computer, once per origin and task (src/agent.js:563, src/limits.js:72)", "Action check 'ask' rule for payment details", "Ask mode site prompts"],
     "control_effectiveness": "substantial",
     "attack_complexity": "medium",
     "likelihood": "low",

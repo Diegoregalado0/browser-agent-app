@@ -1038,6 +1038,24 @@ await frameRun([goTo("n1", "http://192.168.1.1/apply?dns=1.2.3.4"), goTo("n2", "
 assert.deepEqual(framePrompts.slice(1).map((p) => p.kind), ["sensitive", "sensitive", "sensitive"], "a private address did not ask, or a public one did");
 assert.match(framePrompts[1].text, /192\.168\.1\.1 is on this computer or your local network/);
 assert.equal(frameRuns, 2, "a declined action ran, or an allowed one did not");
+// An allowed local origin is not asked again in the same task; another port is, and so is
+// the same origin in the next task.
+const localPrompts = [];
+const localAgent = new Agent({ emit: () => {}, askPermission: async (p) => (localPrompts.push(p), "once") });
+localAgent.browser = { ...agent.browser, run: async () => "done" };
+const localRun = async (calls) => {
+  replies = [
+    { content: calls, raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+    { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+  ];
+  await localAgent.run("check the dev server", { ...config, permissionMode: "auto" });
+};
+await localRun([goTo("l1", "http://localhost:3000/"), goTo("l2", "http://localhost:3000/admin"), goTo("l3", "http://localhost:3001/")]);
+assert.deepEqual(localPrompts.map((p) => p.text.match(/open (\S+)\?/)[1]), ["http://localhost:3000/", "http://localhost:3001/"], "a local origin asked twice in a task, or another port did not ask");
+assert.ok(localPrompts.every((p) => p.kind === "sensitive" && !p.allowAlways), "a local address approval can be saved or answered remotely");
+await localRun([goTo("l4", "http://localhost:3000/")]);
+assert.equal(localPrompts.length, 3, "a local origin allowed in an earlier task did not ask again");
+
 // Text typed into a password field is not shown in prompts, which Discord gets verbatim.
 const secretPrompts = [];
 const typist = new Agent({ emit: () => {}, askPermission: async (p) => (secretPrompts.push(p.text), "once") });

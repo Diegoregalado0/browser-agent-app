@@ -132,6 +132,8 @@ export class Agent {
     // hostnames with the kind of prompt declined there.
     this.declinedCalls = new Set();
     this.declinedHosts = new Map();
+    // Local origins (scheme, host and port) the user allowed opening during the current task.
+    this.allowedPrivateOrigins = new Set();
     // Tool calls that typed into a password field; their text is hidden everywhere but in
     // the requests to the provider (see shownMessages).
     this.secretCalls = new WeakSet();
@@ -250,6 +252,7 @@ export class Agent {
     this.loopGuard = new LoopGuard();
     this.declinedCalls.clear();
     this.declinedHosts.clear();
+    this.allowedPrivateOrigins.clear();
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
     const outputAtStart = this.usage.output;
@@ -555,13 +558,14 @@ export class Agent {
   }
 
   // Opening an address on this computer or the local network (a router, a printer, an
-  // intranet page) asks at the computer, like a sensitive site. Returns whether it asked.
+  // intranet page) asks at the computer, like a sensitive site. An approval covers the same
+  // origin for the rest of the task and is never saved. Returns whether it asked.
   async #checkPrivateAddress(call) {
     const origin = originForToolCall(call.name, call.input, "");
-    if (!origin || !isPrivateAddress(origin)) return false;
+    if (!origin || !isPrivateAddress(origin) || this.allowedPrivateOrigins.has(origin)) return false;
     const host = new URL(origin).hostname;
     const decision = await this.askPermission({
-      text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${clipAddress(String(call.input.url))}?`,
+      text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${clipAddress(String(call.input.url))}? This allows ${origin} for the rest of this task.`,
       allowAlways: false,
       kind: "sensitive",
     });
@@ -569,6 +573,7 @@ export class Agent {
       this.#decline(call, origin, "sensitive");
       throw new Error(`The user declined opening ${host}. ${DECLINED}`);
     }
+    this.allowedPrivateOrigins.add(origin);
     return true;
   }
 
