@@ -390,7 +390,7 @@ export function createController(host) {
         const changes = {};
         for (const [key, value] of Object.entries(rest)) {
           if (!Object.hasOwn(config, key) || key === "keys") continue;
-          const merged = ["models", "limits", "guardModels", "recentModels"].includes(key) && value && typeof value === "object" ? { ...config[key], ...value } : value;
+          const merged = ["models", "limits", "guardModels"].includes(key) && value && typeof value === "object" ? { ...config[key], ...value } : value;
           changes[key] = cleanSetting(key, merged);
         }
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.

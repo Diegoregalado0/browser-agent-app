@@ -421,28 +421,36 @@ assert.equal(retired.maxSteps, 7);
 // only unusable entries are dropped.
 assert.deepEqual(mergeConfig({ sensitiveSites: ["https://MyBank.example/login", "*.pay.example", "not a site", 7] }).sensitiveSites, ["mybank.example", "*.pay.example"]);
 
-// Model switcher: the menu lists only providers that can run, the current model first and
-// a few recent picks; a switch saves the provider, model and recent picks in one patch,
-// merged per provider and checked like any setting. Model lists leave out non-chat models.
-const { usableProviders, shortList, switchPatch, modelTags } = await import("../ui/models.js");
+// Model switcher: the quick selector lists the models already used whose provider can
+// still run, newest first, with the current one first; a switch saves the provider, model
+// and history in one patch, checked like any setting. Model lists leave out non-chat models.
+const { usedModels, switchPatch, forgetPatch, modelTags } = await import("../ui/models.js");
 const uiConfig = (c) => ({ ...c, keyInfo: Object.fromEntries(Object.entries(c.keys).map(([p, k]) => [p, { source: k ? "saved" : "none" }])) });
-assert.deepEqual(usableProviders(uiConfig(hostConfig)), ["openai"]);
-assert.deepEqual(usableProviders(uiConfig({ ...hostConfig, models: { ...hostConfig.models, ollama: "qwen3:8b" } })), ["openai", "ollama"]);
-const before = hostConfig.models.openai;
-await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", "gpt-6-luna") });
-assert.equal(hostConfig.provider, "openai");
-assert.equal(hostConfig.models.openai, "gpt-6-luna");
-assert.deepEqual(shortList(uiConfig(hostConfig), "openai"), ["gpt-6-luna", before], "the replaced model left the menu");
-await fromLocal({ type: "save_config", patch: { recentModels: { anthropic: ["claude-haiku-4-5"] } } });
-assert.deepEqual(hostConfig.recentModels.openai, ["gpt-6-luna", before], "a recent-models patch dropped another provider");
-for (let i = 0; i < 6; i++) await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", `m-${i}`) });
-assert.deepEqual(shortList(uiConfig(hostConfig), "openai"), ["m-5", "m-4", "m-3", "m-2"]);
-for (const recentModels of [{ openai: "gpt" }, { evil: ["x"] }, { openai: ["a b"] }, { openai: ["a", "b", "c", "d", "e"] }, ["openai"]]) {
+const pairs = (list) => list.map((m) => `${m.provider}/${m.model}`);
+assert.deepEqual(pairs(usedModels(uiConfig(hostConfig))), [`openai/${hostConfig.models.openai}`], "the current model is not listed");
+assert.deepEqual(usedModels(uiConfig({ ...hostConfig, keys: { ...hostConfig.keys, openai: "" } })), [], "a model without a key was listed");
+const first = hostConfig.models.openai;
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "ollama", "qwen3:8b") });
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "mistral", "mistral-small-latest") });
+assert.equal(hostConfig.provider, "mistral");
+assert.deepEqual(pairs(hostConfig.modelHistory), ["mistral/mistral-small-latest", "ollama/qwen3:8b", `openai/${first}`]);
+// Mistral has no key, so its model is left out until one is saved.
+assert.deepEqual(pairs(usedModels(uiConfig(hostConfig))), ["ollama/qwen3:8b", `openai/${first}`]);
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", first) });
+assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest", "ollama/qwen3:8b"], "a model was listed twice");
+await fromLocal({ type: "save_config", patch: forgetPatch(uiConfig(hostConfig), { provider: "ollama", model: "qwen3:8b" }) });
+assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest"]);
+for (let i = 0; i < 20; i++) await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", `m-${i}`) });
+assert.equal(hostConfig.modelHistory.length, 12);
+for (const modelHistory of [{ openai: ["gpt"] }, [{ provider: "evil", model: "x" }], [{ provider: "openai", model: "a b" }], [{ provider: "openai" }], Array(13).fill({ provider: "openai", model: "a" })]) {
   const kept = JSON.stringify(hostConfig);
-  await fromLocal({ type: "save_config", patch: { recentModels } });
-  assert.equal(JSON.stringify(hostConfig), kept, `saved bad recent models: ${JSON.stringify(recentModels)}`);
+  await fromLocal({ type: "save_config", patch: { modelHistory } });
+  assert.equal(JSON.stringify(hostConfig), kept, `saved a bad model history: ${JSON.stringify(modelHistory).slice(0, 80)}`);
 }
-assert.deepEqual(mergeConfig({ recentModels: { openai: [7] } }).recentModels, {});
+assert.deepEqual(mergeConfig({ modelHistory: [{ provider: "openai", model: "ok" }, { provider: "openai", model: 7 }] }).modelHistory, [{ provider: "openai", model: "ok" }]);
+await fromLocal({ type: "reset_config" });
+assert.deepEqual(hostConfig.modelHistory, [], "reset kept the model history");
+assert.equal(hostConfig.keys.openai, "test");
 assert.deepEqual(modelTags("ollama", "qwen3:8b"), ["Local"]);
 assert.deepEqual(modelTags("anthropic", "claude-haiku-4-5"), ["Fast"]);
 assert.deepEqual(modelTags("gemini", "gemini-2.5-flash"), ["Fast"]);

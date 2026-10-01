@@ -135,15 +135,9 @@
         </section>
 
         <section class="settings-page" data-page="models" data-title="Models" hidden>
-          <div class="setting-group">
-            <div class="setting">
-              <div class="setting-text">
-                <span class="setting-title">Model</span>
-                <p class="setting-desc">Switch models from the model name at the top left of the panel. A switch applies from your next message.</p>
-              </div>
-              <button id="add-model" type="button">Add a model</button>
-            </div>
-          </div>
+          <h3 class="group-label">Providers</h3>
+          <p class="group-desc">Connect a provider with your own API key, or a local model, then pick a model. Models you pick also show up at the top left for quick switching. A switch applies from your next message.</p>
+          <div id="provider-cards"></div>
 
           <h3 class="group-label">Reasoning</h3>
           <div class="setting-group">
@@ -185,9 +179,7 @@
             </div>
           </div>
 
-          <h3 class="group-label">API keys and endpoints</h3>
-          <p class="group-desc">You use your own API key. It is stored only in this browser profile, never synced, and sent only to the provider it belongs to. Usage is billed to your account with that provider.</p>
-          <div id="provider-cards"></div>
+          <p class="group-desc">Your API keys are stored only in this browser profile, never synced, and sent only to the provider they belong to. Usage is billed to your account with that provider.</p>
         </section>
 
         <section class="settings-page" data-page="safety" data-title="Permissions and safety" hidden>
@@ -440,20 +432,6 @@
         <button type="button" id="connect-secondary" hidden></button>
         <button type="button" id="connect-primary" class="primary"></button>
       </div>
-    </div>
-  </dialog>
-
-  <dialog id="model-flow" class="wizard model-flow" aria-labelledby="mf-title">
-    <div class="wizard-card">
-      <div class="mf-head">
-        <button type="button" id="mf-back" class="link mf-back" data-icon="back" hidden><span>Back</span></button>
-        <p class="wizard-step mf-steps" id="mf-steps"></p>
-        <button type="button" id="mf-close" class="icon-btn" data-icon="close" title="Close" aria-label="Close"></button>
-      </div>
-      <h2 id="mf-title"></h2>
-      <p id="mf-lead" class="field-note"></p>
-      <div id="mf-body" class="mf-body"></div>
-      <button type="button" id="mf-primary" class="primary mf-primary" hidden></button>
     </div>
   </dialog>
 

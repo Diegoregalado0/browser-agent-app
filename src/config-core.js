@@ -15,8 +15,8 @@ export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
   keys: { anthropic: "", openai: "", gemini: "", mistral: "" },
-  // Per provider, the models picked lately, newest first, for the model menu.
-  recentModels: {},
+  // The models picked so far, newest first, for quick switching: [{ provider, model }].
+  modelHistory: [],
   openaiBaseUrl: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
@@ -96,7 +96,7 @@ const NUMBER_RANGES = {
   dailyTokens: [0, 1e11],
 };
 export const CUSTOM_INSTRUCTIONS_MAX = 10000;
-export const RECENT_MODELS_MAX = 4;
+export const MODEL_HISTORY_MAX = 12;
 const LIST_MAX = 1000;
 // Model ids as providers write them: "gpt-6-sol", "anthropic/claude-opus-5", "qwen3:8b".
 const MODEL_ID = /^[\w.:/@+-]{0,200}$/;
@@ -147,15 +147,13 @@ export function cleanSetting(key, value) {
     }
     return value;
   }
-  if (key === "recentModels") {
-    if (!isObject(value)) fail("Recent models must be lists of model ids.");
-    for (const [p, ids] of Object.entries(value)) {
-      if (!CHOICES.provider.includes(p)) fail("Unknown provider.");
-      if (!Array.isArray(ids) || ids.length > RECENT_MODELS_MAX || !ids.every((id) => typeof id === "string" && id && MODEL_ID.test(id))) {
-        fail(`Recent models are up to ${RECENT_MODELS_MAX} model ids per provider.`);
-      }
-    }
-    return value;
+  if (key === "modelHistory") {
+    if (!Array.isArray(value) || value.length > MODEL_HISTORY_MAX) fail(`The model history holds up to ${MODEL_HISTORY_MAX} models.`);
+    return value.map((entry) =>
+      isObject(entry) && CHOICES.provider.includes(entry.provider) && typeof entry.model === "string" && entry.model && MODEL_ID.test(entry.model)
+        ? { provider: entry.provider, model: entry.model }
+        : fail("Each model in the history is a provider and a model id."),
+    );
   }
   if (key === "openaiBaseUrl") return value === "" ? value : httpUrl(value, "The base URL");
   if (key === "ollamaHost") return httpUrl(value, "The Ollama host");

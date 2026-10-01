@@ -42,7 +42,6 @@ const ICONS = {
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   down: '<path d="m7 10 5 5 5-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
-  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v4"/>',
   phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/>',
@@ -62,7 +61,7 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines });
+const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines, onPage: (name) => name === "models" && switcher.pageShown() });
 const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
 const switcher = createModelSwitcher({
   $,
@@ -71,7 +70,8 @@ const switcher = createModelSwitcher({
   send,
   toast: (text) => settings.toast(text),
   isRunning: () => running,
-  openKeys: () => settings.open("models"),
+  openMain: () => settings.open("models"),
+  confirmInline: settings.confirmInline,
 });
 const wizard = createWizard({
   $,
@@ -79,14 +79,14 @@ const wizard = createWizard({
   icon,
   send,
   mcp: mcpPanel,
-  openModels: () => switcher.openFlowAfterSave(),
+  openModels: () => settings.open("models"),
 });
 
 // While an overlay is open, the page behind it is inert, so neither focus nor a screen
 // reader reaches it. The scrim, toasts, and the connect flow above it stay live.
 function setInertBehind(overlay, on) {
   for (const node of document.body.children) {
-    if (node !== overlay && !["menu-scrim", "toast", "connect-flow", "model-flow"].includes(node.id)) node.inert = on;
+    if (node !== overlay && !["menu-scrim", "toast", "connect-flow"].includes(node.id)) node.inert = on;
   }
 }
 
@@ -669,7 +669,6 @@ $("menu-open-mcp").onclick = openMcp;
 $("close-mcp").onclick = () => mcpPanel.close();
 
 $("close-settings").onclick = () => settings.close();
-$("add-model").onclick = () => switcher.openFlow();
 $("run-setup").onclick = () => {
   settings.close();
   wizard.open();
