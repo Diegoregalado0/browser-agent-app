@@ -12,9 +12,12 @@
 //     node scripts/bench/run.js --provider mistral --model ministral-14b-latest
 //
 // Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
-//        --port (DevTools port; 0 = any free one)
+//        --port (DevTools port; 0 = any free one) --thinking on|off
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged.
+// --thinking defaults to off for ollama and openai (local/self-hosted servers, where
+// thinking costs real minutes per step on shared hardware) and on for mistral (its default
+// behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,9 +44,14 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.provider || !args.model) {
-  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url|--key] [--runs N] [--tasks a,b] [--timeout ms]");
+  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--thinking on|off]");
   process.exit(1);
 }
+
+const defaultThinking = (provider) => (provider === "ollama" || provider === "openai" ? "off" : "on");
+const thinkingArg = args.thinking || defaultThinking(args.provider);
+if (!["on", "off"].includes(thinkingArg)) throw new Error('--thinking must be "on" or "off".');
+const thinking = thinkingArg === "on";
 
 const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
 const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id));
@@ -55,7 +63,7 @@ if (!selectedTasks.length) {
 // Build the config the panel will read for this run. Reuses the app's own merge/validation
 // instead of hand-rolling a config shape.
 function buildConfig() {
-  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60 };
+  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking };
   overrides.models[args.provider] = args.model;
   if (args.provider === "ollama") {
     overrides.ollamaHost = args.host || "http://localhost:11436";
@@ -63,6 +71,10 @@ function buildConfig() {
   } else if (args.provider === "openai") {
     overrides.openaiBaseUrl = args.baseUrl || args["base-url"] || "http://localhost:8081/v1";
     overrides.keys.openai = args.key || "local";
+    // Note: src/providers/openai.js only forwards config.thinking on the Responses API path
+    // (official OpenAI); its Chat Completions path, used for a custom base URL like a
+    // llama.cpp router, sends no reasoning/thinking control at all. Thinking there is
+    // whatever the server itself defaults to - this flag has no effect on that request.
     // The default guard model (gpt-6-luna) does not exist on a local server; use the
     // model under test for safety checks too, same as the local providers already do.
     overrides.guardModels.openai = args.model;
@@ -155,7 +167,7 @@ async function main() {
     while (browserProcesses().chrome && Date.now() < end) await sleep(200);
   }
 
-  writeReport({ provider: args.provider, model: args.model, rows });
+  writeReport({ provider: args.provider, model: args.model, thinking: thinkingArg, rows });
   rmSync(home, { recursive: true, force: true });
   console.log(`\nCleaned up temp profile ${home}.`);
 }
@@ -291,12 +303,12 @@ function fmtCost(c) {
   return c == null ? "-" : `~$${c.amount.toFixed(4)} (estimate)`;
 }
 
-function writeReport({ provider, model, rows }) {
+function writeReport({ provider, model, thinking, rows }) {
   mkdirSync(RESULTS_DIR, { recursive: true });
   const runId = `${provider}-${model.replace(/[^\w.-]/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const jsonPath = join(RESULTS_DIR, `${runId}.json`);
   const mdPath = join(RESULTS_DIR, `${runId}.md`);
-  writeFileSync(jsonPath, JSON.stringify({ provider, model, rows }, null, 2));
+  writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, rows }, null, 2));
 
   const header = `| Task | Run | Success | Steps | Tokens in | Tokens out | Wall time (s) | Cost | Notes |\n|---|---|---|---|---|---|---|---|---|`;
   const lines = rows.map(
@@ -323,6 +335,8 @@ function writeReport({ provider, model, rows }) {
 
   const md = [
     `# Browsby benchmark: ${provider} / ${model}`,
+    "",
+    `Thinking: ${thinking}.`,
     "",
     `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${anyEstimate ? `~$${totalCost.toFixed(4)} (estimate)` : "-"}.`,
     "",
