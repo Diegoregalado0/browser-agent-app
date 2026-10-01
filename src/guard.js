@@ -1,5 +1,5 @@
 import { providers } from "./providers/index.js";
-import { apiKeyFor, DEFAULT_GUARD_MODELS } from "./config-core.js";
+import { apiKeyFor, defaultGuardModel } from "./config-core.js";
 import { sleep } from "./limits.js";
 
 // Safety checks run by a small, cheap model alongside the main agent:
@@ -72,7 +72,7 @@ export class Guard {
 
   #resolve(config) {
     const provider = config.provider;
-    const model = config.guardModels?.[provider] || DEFAULT_GUARD_MODELS[provider] || config.models[provider];
+    const model = config.guardModels?.[provider] || defaultGuardModel(config, provider) || config.models[provider];
     return { impl: providers[provider], provider, model, apiKey: apiKeyFor(config, provider) };
   }
 

@@ -715,9 +715,13 @@ providers.openai.classify = async () => {
 };
 providers.openai.describeError = () => "This model is not enabled for your account.";
 const unavailable = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} });
+// A custom OpenAI-compatible server runs the checks on the main model.
+const custom = { ...config, openaiBaseUrl: "http://localhost:8081/v1", models: { ...config.models, openai: "local-model" } };
+const customUnavailable = await new Guard().checkAction({ config: custom, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} });
 Object.assign(providers.openai, { classify: savedClassify, describeError: savedDescribe });
 assert.equal(unavailable.verdict, "ask");
 assert.equal(unavailable.reason, "Safety check unavailable (gpt-6-luna: This model is not enabled for your account).");
+assert.equal(customUnavailable.reason, "Safety check unavailable (local-model: This model is not enabled for your account).");
 
 // Running out of credit mid-stream arrives as an error event with no HTTP status.
 const noCredit = new OpenAI.APIError(undefined, { code: "insufficient_quota", type: "insufficient_quota", message: "No credits." }, "No credits.", undefined);
