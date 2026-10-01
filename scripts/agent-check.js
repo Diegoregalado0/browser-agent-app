@@ -1513,4 +1513,32 @@ assert.equal((await mistralGuard.checkAction(guardAsk)).verdict, "allow");
 assert.deepEqual(mistralTried, ["mistral-small-latest", "ministral-8b-latest", "ministral-8b-latest"], "the unavailable default was tried again");
 providers.mistral = mistralBefore;
 
+// Mistral's image cap drops old screenshots in batches: each request carries at most 4,
+// and what is sent before the newest messages changes once per batch, not with every
+// new screenshot.
+const imageBodies = [];
+const imageFetchBefore = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  imageBodies.push(JSON.parse(init.body));
+  throw new Error("offline");
+};
+const mistralModule = await import("../src/providers/mistral.js");
+const imageHistory = [{ role: "user", content: [{ type: "text", text: "look around" }] }];
+for (let i = 1; i <= 12; i++) {
+  imageHistory.push({ role: "assistant", content: [{ type: "tool_call", id: `i${i}`, name: "browser", input: { action: "screenshot" } }], raw: null });
+  imageHistory.push({ role: "user", content: [{ type: "tool_result", id: `i${i}`, name: "browser", content: [{ type: "image", mediaType: "image/jpeg", data: `IMG${i}` }] }] });
+  await mistralModule
+    .turn({ apiKey: "test", model: "ministral-8b-latest", config, system: "s", tools: [], messages: imageHistory, signal: undefined, onText() {}, onThinking() {}, onWait() {} })
+    .catch(() => {});
+}
+globalThis.fetch = imageFetchBefore;
+const sentImages = (body) => (JSON.stringify(body.messages).match(/IMG\d+/g) ?? []).length;
+assert.ok(imageBodies.every((b) => sentImages(b) <= 4), `a request carried ${Math.max(...imageBodies.map(sentImages))} images`);
+let prefixBreaks = 0;
+for (let i = 1; i < imageBodies.length; i++) {
+  const before = JSON.stringify(imageBodies[i - 1].messages);
+  if (!JSON.stringify(imageBodies[i].messages).startsWith(before.slice(0, -1))) prefixBreaks++;
+}
+assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${prefixBreaks} changed prefixes in 12 requests)`);
+
 console.log("agent checks passed");

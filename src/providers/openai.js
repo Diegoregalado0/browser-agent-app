@@ -25,18 +25,25 @@ function imageParts(blocks) {
     .map((b) => ({ type: "image_url", image_url: { url: `data:${b.mediaType};base64,${b.data}` } }));
 }
 
-// Keeps only the newest `maxImages` screenshots, replacing older ones with a note.
-// Some OpenAI-compatible APIs (Mistral) cap images per request.
+// Keeps at most `maxImages` screenshots, replacing the oldest with a note. Some
+// OpenAI-compatible APIs (Mistral) cap images per request. The oldest go in batches of
+// maxImages - 1, so what is sent before the newest messages changes once per batch (or
+// with a compaction pass, which removes old screenshots itself) and stays cacheable in
+// between, instead of changing with every new screenshot.
 function limitImages(messages, maxImages) {
   if (!maxImages) return messages;
-  let seen = 0;
+  const count = (blocks) => blocks.reduce((n, b) => n + (b.type === "image" ? 1 : b.type === "tool_result" ? count(b.content) : 0), 0);
+  const total = messages.reduce((n, m) => n + (m.role === "user" ? count(m.content) : 0), 0);
+  if (total <= maxImages) return messages;
+  const batch = Math.max(1, maxImages - 1);
+  let drop = Math.ceil((total - maxImages) / batch) * batch;
   const trim = (blocks) =>
-    [...blocks].reverse().map((b) => {
-      if (b.type === "image") return ++seen > maxImages ? { type: "text", text: "[earlier screenshot omitted]" } : b;
+    blocks.map((b) => {
+      if (b.type === "image") return drop-- > 0 ? { type: "text", text: "[earlier screenshot omitted]" } : b;
       if (b.type === "tool_result") return { ...b, content: trim(b.content) };
       return b;
-    }).reverse();
-  return [...messages].reverse().map((m) => (m.role === "user" ? { ...m, content: trim(m.content) } : m)).reverse();
+    });
+  return messages.map((m) => (m.role === "user" ? { ...m, content: trim(m.content) } : m));
 }
 
 function toMessages(system, messages) {
