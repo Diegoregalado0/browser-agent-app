@@ -1,5 +1,5 @@
 import { providers } from "./providers/index.js";
-import { BROWSER_TOOL_DEFS, addressForToolCall, originForToolCall } from "./browser-tools.js";
+import { BROWSER_TOOL_DEFS, actionProblem, addressForToolCall, originForToolCall } from "./browser-tools.js";
 import { apiKeyFor } from "./config-core.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { Guard, isStateChanging } from "./guard.js";
@@ -459,6 +459,9 @@ export class Agent {
       let authorizing = false;
       try {
         if (call.input?.__invalid_json !== undefined) throw new Error("Tool arguments were not valid JSON.");
+        // Before the checks, so no safety check is spent on a call that cannot run.
+        const problem = actionProblem(call.name, call.input);
+        if (problem) throw new Error(problem);
         await this.limiter.take("action", config.limits.actionsPerMinute, signal, (secs) =>
           this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
         );

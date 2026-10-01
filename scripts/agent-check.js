@@ -22,7 +22,7 @@ import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
-import { Browser, formatHeaders } from "../src/browser-tools.js";
+import { Browser, actionProblem, formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
 import { readPageScript, describeTargetScript } from "../src/page-scripts.js";
 
@@ -100,6 +100,20 @@ assert.equal(requests.length, 2, "an empty turn was re-prompted more than once")
 assert.ok(emptyEvents.some((e) => e.type === "notice" && /without a reply/.test(e.text)));
 assert.deepEqual(quiet.messages.map((m) => m.role), ["user", "assistant", "user"]);
 replies = [];
+
+// A browser or tabs call without a valid action names the field and the valid actions, and
+// fails before any safety check or action.
+assert.equal(actionProblem("tabs", { action: "open" }), '"open" is not a tabs action. Set "action" to one of: list, create, switch, close.');
+assert.equal(actionProblem("navigate", {}), null);
+const actionsBefore = actions;
+requests = [];
+replies = [
+  { content: [{ type: "tool_call", id: "no_action", name: "browser", input: { coordinate: [5, 5] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await quiet.run("click", config);
+assert.match(requests[1].at(-1).content[0].content[0].text, /^The browser tool needs an "action" field\. Set "action" to one of: screenshot, left_click, /);
+assert.equal(actions, actionsBefore, "a call without an action ran");
 
 // Compaction: once requests grow large, older long tool output and screenshots are trimmed
 // in one pass, the latest messages are kept whole, and no pass runs again until the

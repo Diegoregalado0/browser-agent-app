@@ -126,6 +126,15 @@ export const BROWSER_TOOL_DEFS = [
   },
 ];
 
+// The error for a browser or tabs call whose action is missing or unknown, naming the field
+// and the valid actions; null when the action is valid or the tool takes none.
+export function actionProblem(name, input) {
+  const actions = BROWSER_TOOL_DEFS.find((t) => t.name === name)?.input_schema.properties.action?.enum;
+  if (!actions || actions.includes(input?.action)) return null;
+  const given = input?.action === undefined || input.action === "" ? `The ${name} tool needs an "action" field` : `${JSON.stringify(input.action)} is not a ${name} action`;
+  return `${given}. Set "action" to one of: ${actions.join(", ")}.`;
+}
+
 // Keeps huge data: URLs and tracking-laden links from flooding tool output.
 function shortUrl(url) {
   return url.length > 200 ? url.slice(0, 200) + "…" : url;
@@ -657,7 +666,7 @@ export class Browser {
         return `Waited ${secs}s`;
       }
       default:
-        throw new Error(`Unknown action ${input.action}`);
+        throw new Error(actionProblem("browser", input));
     }
   }
 
@@ -750,7 +759,7 @@ export class Browser {
         return `Closed tab ${id}`;
       }
       default:
-        throw new Error(`Unknown tabs action ${input.action}`);
+        throw new Error(actionProblem("tabs", input));
     }
   }
 
