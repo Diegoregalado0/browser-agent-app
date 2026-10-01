@@ -2,9 +2,9 @@ import { providers } from "./providers/index.js";
 import { BROWSER_TOOL_DEFS, actionProblem, addressForToolCall, originForToolCall } from "./browser-tools.js";
 import { apiKeyFor } from "./config-core.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
-import { Guard, isStateChanging } from "./guard.js";
+import { Guard, SCAN_MAX_CHARS, isStateChanging } from "./guard.js";
 import { RateLimiter, isPrivateAddress, isSensitiveSite, sleep } from "./limits.js";
-import { passwordTargetScript } from "./page-scripts.js";
+import { pageTextScript, passwordTargetScript } from "./page-scripts.js";
 import { CURRENT_TAB_TAG, currentTabTag } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
@@ -504,7 +504,15 @@ export class Agent {
         );
         if (guarded) {
           const scanStarted = Date.now();
-          const warning = await this.guard.scanContent({ config, name: call.name, output, signal });
+          const shot = output.some((b) => b.type === "image") && !this.mcp?.has(call.name);
+          const warning = await this.guard.scanContent({
+            config,
+            name: call.name,
+            output,
+            signal,
+            url: shot ? await this.browser.currentUrl().catch(() => null) : null,
+            pageText: async () => (await this.browser.callInPage(pageTextScript, SCAN_MAX_CHARS)).text,
+          });
           // A scan this short made no model call (a tool that is not scanned, or output already scanned).
           const scanMs = Date.now() - scanStarted;
           if (scanMs >= 50) {

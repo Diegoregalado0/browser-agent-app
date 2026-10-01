@@ -1352,4 +1352,28 @@ const reopenedThinking = new Agent({ emit: () => {}, askPermission: async () => 
 reopenedThinking.restore({ messages: thinker.messages });
 assert.ok(reopenedThinking.messages.every((m) => !m.raw), "a reopened conversation replays thinking written before its tool output was stubbed");
 
+// Content scans: a screenshot is scanned once per address, by the page's text when it has
+// some (its pixels only when it has none, as on a canvas), and scans read at most 8k
+// characters. Text tools are still scanned on every new output.
+const scans = [];
+const classifyBefore = providers.openai.classify;
+providers.openai.classify = async (args) => (scans.push(args), { injection: false, reason: "ok" });
+const scanGuard = new Guard();
+const screenshotOutput = (data) => [{ type: "image", mediaType: "image/jpeg", data }, { type: "text", text: "Browser screenshot 1280x800" }];
+const pageWords = async () => "Welcome to the shop. Today's offers are listed below. ".repeat(400);
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A1"), url: "https://shop.example/", pageText: pageWords });
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A2"), url: "https://shop.example/", pageText: pageWords });
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A3"), url: "https://shop.example/", pageText: pageWords });
+assert.equal(scans.length, 1, `three screenshots of one page were scanned ${scans.length} times`);
+assert.equal(scans[0].images.length, 0, "a page with text was scanned by its pixels");
+assert.match(scans[0].text, /Welcome to the shop/);
+assert.ok(scans[0].text.length <= 8200, `a scan sent ${scans[0].text.length} characters`);
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("B1"), url: "https://game.example/", pageText: async () => "" });
+assert.equal(scans.length, 2, "a new address was not scanned");
+assert.equal(scans[1].images.length, 1, "a page without text was not scanned by its image");
+await scanGuard.scanContent({ config, name: "get_page_text", output: [{ type: "text", text: "y".repeat(50000) }] });
+assert.equal(scans.length, 3);
+assert.ok(scans[2].text.length <= 8200, `a text scan sent ${scans[2].text.length} characters`);
+providers.openai.classify = classifyBefore;
+
 console.log("agent checks passed");

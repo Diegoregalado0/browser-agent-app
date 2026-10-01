@@ -44,7 +44,9 @@ const SCAN_SCHEMA = {
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
 const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "network_requests"]);
-const SCAN_MAX_CHARS = 60000;
+// Scans read at most this much text: the start of a page is where text aimed at the agent
+// has to be to steer it, and a longer scan costs seconds per step on local models.
+export const SCAN_MAX_CHARS = 8000;
 
 export function isStateChanging(name, input) {
   if (name === "browser") return !READ_ONLY_BROWSER_ACTIONS.has(input.action);
@@ -62,11 +64,14 @@ export class Guard {
   constructor({ onUsage = () => {} } = {}) {
     this.onUsage = onUsage;
     this.scanned = new Map();
+    // Addresses whose screenshots were scanned (see scanContent).
+    this.scannedPages = new Set();
     this.flags = [];
   }
 
   reset() {
     this.scanned.clear();
+    this.scannedPages.clear();
     this.flags = [];
   }
 
@@ -123,11 +128,26 @@ export class Guard {
   }
 
   // Returns a warning string when the tool output looks like a prompt injection, else null.
-  async scanContent({ config, name, output, signal }) {
+  // url: the page a screenshot in the output shows. Screenshots are scanned once per
+  // address, and by the page's text (pageText(), a promise of it) rather than the pixels
+  // when the page has text; a page without text (a canvas) is scanned by its image.
+  async scanContent({ config, name, output, signal, url = null, pageText = null }) {
     // MCP results (emails, calendar entries) are outside content too.
     if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
-    const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n").slice(0, SCAN_MAX_CHARS);
-    const images = output.filter((b) => b.type === "image");
+    let text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    let images = output.filter((b) => b.type === "image");
+    if (images.length && url) {
+      if (this.scannedPages.has(url)) images = [];
+      else {
+        this.scannedPages.add(url);
+        const page = String((await pageText?.().catch(() => "")) ?? "").trim();
+        if (page.length >= 40) {
+          text = `${text}\nText of the page in the screenshot:\n${page}`;
+          images = [];
+        }
+      }
+    }
+    text = text.slice(0, SCAN_MAX_CHARS);
     if (!images.length && text.length < 40) return null;
 
     const key = await sha256(text + images.map((i) => i.data).join(""));
