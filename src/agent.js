@@ -76,6 +76,12 @@ function describeInput(name, input, secret = false) {
   return "";
 }
 
+// A call's input as it leaves the agent (the panel, the saved session) when it types into a
+// password field: the text is hidden, the rest is kept.
+function withoutSecret(input) {
+  return { ...input, ...(input.text !== undefined && { text: "[hidden]" }), ...(input.value !== undefined && { value: "[hidden]" }) };
+}
+
 // The user's standing instructions ride on the system prompt, so they apply to every
 // task and change the cached prefix only when the user edits them.
 function systemPrompt(config) {
@@ -126,6 +132,9 @@ export class Agent {
     // hostnames with the kind of prompt declined there.
     this.declinedCalls = new Set();
     this.declinedHosts = new Map();
+    // Tool calls that typed into a password field; their text is hidden everywhere but in
+    // the requests to the provider (see shownMessages).
+    this.secretCalls = new WeakSet();
   }
 
   get running() {
@@ -170,6 +179,18 @@ export class Agent {
     this.compactedAt = 0;
     // Sites whose notes this conversation already has.
     this.guidesGiven = new Set();
+    this.secretCalls = new WeakSet();
+  }
+
+  // The conversation as it is saved and shown again: a call that typed into a password
+  // field has its text hidden, and its message drops the provider's native copy, which
+  // holds the same text. The live history keeps both for the provider.
+  shownMessages() {
+    return this.messages.map((m) =>
+      m.role === "assistant" && m.content.some((b) => this.secretCalls.has(b))
+        ? { ...m, raw: null, content: m.content.map((b) => (this.secretCalls.has(b) ? { ...b, input: withoutSecret(b.input) } : b)) }
+        : m,
+    );
   }
 
   // Adds tokens to this task's count and to today's ledger.
@@ -285,6 +306,13 @@ export class Agent {
           throw new Error(provider.describeError(err) || err.message);
         }
 
+        // Marked before the history is first saved, so no saved copy holds a password.
+        for (const call of result.content.filter((b) => b.type === "tool_call")) {
+          // Small models (Ministral) often send a ref as its bare number, "3" for "ref_3". This
+          // runs before the permission checks, so they judge the element the action will hit.
+          if (/^\d+$/.test(call.input?.ref)) call.input.ref = `ref_${call.input.ref}`;
+          if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
+        }
         this.messages.push({ role: "assistant", content: result.content, raw: result.raw });
         if (result.usage?.input) this.lastInput = result.usage.input;
         if (config.debugMode && result.usage) {
@@ -380,10 +408,10 @@ export class Agent {
         results.push({ ...base, isError: true, content: [{ type: "text", text }] });
         continue;
       }
-      // Small models (Ministral) often send a ref as its bare number, "3" for "ref_3". This
-      // runs before the permission checks, so they judge the element the action will hit.
-      if (/^\d+$/.test(call.input?.ref)) call.input.ref = `ref_${call.input.ref}`;
-      this.emit({ type: "tool_call", id: call.id, name: call.name, input: call.input });
+      // Checked again as the call runs: an earlier call in the batch can move focus to a
+      // password field. The next save of the history then hides it too.
+      if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
+      this.emit({ type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
       // Declined or blocked actions are the user's and the safety check's decisions, not loops.
       let authorizing = false;
       try {
@@ -437,6 +465,11 @@ export class Agent {
     return results;
   }
 
+  // A call's input as events show it: without text typed into a password field.
+  #shownInput(call) {
+    return this.secretCalls.has(call) ? withoutSecret(call.input) : call.input;
+  }
+
   // The tab and origin a page action lands on, or null for other tools.
   async #pageKey(call) {
     if (!["browser", "form_input"].includes(call.name) || !isStateChanging(call.name, call.input)) return null;
@@ -471,7 +504,7 @@ export class Agent {
       // A check cut short by Stop is not a reason to ask; the action is not going to run.
       if (signal.aborted) throw new Error("Cancelled by the user.");
       const { page, target, verdict, reason } = check;
-      this.emit({ type: "guard", name: call.name, input: call.input, target, page: page.url, verdict, reason });
+      this.emit({ type: "guard", name: call.name, input: this.#shownInput(call), target, page: page.url, verdict, reason });
       if (verdict === "block") {
         this.emit({ type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
         throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);

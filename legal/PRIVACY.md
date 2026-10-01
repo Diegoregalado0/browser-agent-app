@@ -43,7 +43,7 @@ What each provider does with the data it receives is governed by that provider's
 
 ### Saved sessions
 
-- **What:** your conversations with the agent: your requests, the agent's replies, and its tool calls and results (which can include page text, email text it read, and what it typed). Screenshots are never saved.
+- **What:** your conversations with the agent: your requests, the agent's replies, and its tool calls and results (which can include page text, email text it read, and what it typed, except text typed into a password field, which is saved as "[hidden]"). Screenshots are never saved.
 - **Where:** in this Chrome profile's IndexedDB on your computer. They are not sent anywhere.
 - **Ghost mode:** when it is on, the session is not saved. It is always on in incognito windows.
 

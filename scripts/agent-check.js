@@ -1057,6 +1057,35 @@ await typist.run("sign in", { ...config, permissionMode: "auto" });
 assert.ok(secretPrompts.some((t) => /Safety check: .*type \[hidden\]/.test(t)) && secretPrompts.some((t) => /sensitive site.*type \[hidden\]/.test(t)), secretPrompts.join("\n"));
 assert.ok(!secretPrompts.some((t) => t.includes("hunter2")), "a prompt showed text typed into a password field");
 
+// Nor in the panel's tool calls, their safety events, or the saved session; the model's own
+// call keeps the text for the provider.
+const savedSessions = [];
+const pwEvents = [];
+const pwController = createController({
+  loadConfig: async () => ({ ...structuredClone(config), permissionMode: "auto" }),
+  saveConfig: async () => {},
+  loadUsage: async () => null,
+  saveUsage: async () => {},
+  sessions: { save: async (s) => savedSessions.push(structuredClone(s)), list: async () => [], load: async () => ({}), remove: async () => {}, removeAll: async () => {} },
+  ensureBrowser: async (a) => (a.browser = { ...agent.browser, callInPage: async (_, ref) => ref === "ref_pw", run: async () => "typed" }),
+});
+const pwSend = pwController.connect({ send: (e) => pwEvents.push(e) });
+pwController.agent.askPermission = async () => "once";
+const typedPw = { type: "tool_call", id: "pw4", name: "browser", input: { action: "type", ref: "ref_pw", text: "hunter2-secret" } };
+const typedName = { type: "tool_call", id: "pw5", name: "form_input", input: { ref: "ref_name", value: "ada" } };
+replies = [
+  { content: [typedPw, typedName], raw: { provider: "openai-responses", model: "m", data: ["hunter2-secret"] }, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+requests = [];
+await pwSend({ type: "run", text: "sign in" });
+await pwSend({ type: "hello" });
+assert.ok(savedSessions.length && pwEvents.some((e) => e.type === "tool_call"));
+assert.ok(!JSON.stringify([savedSessions, pwEvents]).includes("hunter2"), "password text reached the panel or the saved session");
+assert.ok(pwEvents.some((e) => e.type === "tool_call" && e.input.text === "[hidden]"));
+assert.ok(JSON.stringify(savedSessions.at(-1)).includes('"value":"ada"'), "text outside password fields was hidden");
+assert.ok(JSON.stringify(requests.at(-1)).includes("hunter2-secret"), "the provider lost the model's own call");
+
 // The frame script finds the frame at a point or with focus, through same-origin frames.
 const { targetFrameScript } = await import("../src/page-scripts.js");
 const stripe = { tagName: "IFRAME", contentDocument: null, src: "https://js.stripe.com/v3/card" };

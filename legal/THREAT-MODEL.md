@@ -2,7 +2,7 @@
 
 Agentic threat model against the OWASP Top 10 for Agentic Applications 2026 (ASI01 to ASI10). Reviewed 2026-09-30 on the `security-review` branch (based on `provider-test-pass`). Not published on GitHub Pages.
 
-Follow-ups decided by the owner were made on the `follow-ups` branch (rows marked "follow-up" below). Line numbers in the other rows are as of the review and may have moved since.
+Follow-ups decided by the owner were made on the `follow-ups` branch (rows marked "follow-up" below) and the `follow-ups-2` branch (rows marked "follow-up 2"). Line numbers in the other rows are as of the review and may have moved since.
 
 The main threat is indirect prompt injection: every page, email and network response the agent reads is attacker-controlled, and the agent acts in the user's own signed-in Chrome window.
 
@@ -41,6 +41,7 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 | The Ask mode site prompt named only the origin, not the address that could carry data (follow-up) | src/agent.js:30, 608; src/browser-tools.js:882 | The prompt adds the full address, clipped to 300 characters with a count of what is left out; "Always" still approves the origin | "The prompt shows the full address" |
 | `navigate back` and `forward` moved through the history of any current tab, including the user's own (follow-up) | src/browser-tools.js:789 | Refused unless the current tab was opened during this task, like loading an address | "navigate back and forward work only in tabs this task opened" |
 | A reopened conversation replayed earlier tool output, including injections, with the injection flags lost (follow-up) | src/agent.js:185 | Tool results are replaced by a short stub; requests, replies and calls are kept. Chosen over saving the flags: it also covers content never scanned (Auto mode, older saves, failed scans) and needs no change to the saved format; the model reads pages again, and they are scanned again | "A reopened conversation does not replay earlier tool output" |
+| The panel's tool calls, the safety event and the saved session showed text typed into a password field (follow-up 2) | src/agent.js:81, 188, 309, 414; src/controller.js:114, 196 | The call is marked when the model's reply arrives (and again as it runs); events, the saved session and a reopened panel get `[hidden]` and the message without its provider-native copy; the live history keeps the text for the provider | "Nor in the panel's tool calls, their safety events, or the saved session" |
 
 ## Detailed threats
 
@@ -382,4 +383,4 @@ Agentic patterns found: LLM providers (`src/providers/`: Anthropic, OpenAI, Gemi
 5. Done: show the full address, not only the origin, in the Ask mode site prompt for navigations, since data can ride in the address.
 6. Done: drop tool output when a saved conversation is reopened (chosen over saving the injection flags, which would miss content that was never scanned).
 7. Done: keep `navigate back` and `forward` to tabs the task opened, like navigation to an address.
-8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field.
+8. Done: hide typed text in Discord prompt previews (and the panel's) when the target is a password field; later also in the panel's tool calls and saved sessions.

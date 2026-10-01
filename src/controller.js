@@ -111,7 +111,7 @@ export function createController(host) {
     const created = !session;
     if (created) session = { id: newSessionId(), title: titleFor(agent.messages), created: new Date().toISOString() };
     try {
-      await host.sessions.save({ ...session, messages: agent.messages, usage: agent.usage });
+      await host.sessions.save({ ...session, messages: agent.shownMessages(), usage: agent.usage });
     } catch (err) {
       console.error(`Could not save the session: ${err.message}`);
       return;
@@ -193,7 +193,7 @@ export function createController(host) {
         if (pendingPermission) reply(permissionRequest());
         if (host.outlook) reply(await host.outlook.status());
         if (agent.messages.length) {
-          reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.messages) });
+          reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.shownMessages()) });
         }
         return;
       }
