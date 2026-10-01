@@ -37,10 +37,13 @@ const clipAddress = (url) => (url.length <= ADDRESS_MAX ? url : `${url.slice(0, 
 // request, which is what makes long tasks large. Once a request passes COMPACT_MIN_TOKENS
 // and has grown by half since the last pass, one pass trims them in all but the latest
 // messages. Passes are rare, so the prompt prefix stays cacheable between them.
+// Anthropic clears old tool results on its side instead (see providers/anthropic.js): its
+// replayed thinking blocks are valid only with the exact history they were written after.
 const COMPACT_MIN_TOKENS = 12000;
 const COMPACT_GROWTH = 1.5;
 const COMPACT_KEEP_MESSAGES = 4;
 const COMPACT_TEXT_CHARS = 1500;
+const SERVER_CLEARED = new Set(["anthropic"]);
 
 function compactBlocks(blocks) {
   return blocks.map((b) => {
@@ -149,7 +152,8 @@ export class Agent {
 
   // Trims old screenshots and long tool output when the last request was large (see
   // COMPACT_MIN_TOKENS). The user's own messages are never trimmed.
-  #compact(lastInput) {
+  #compact(lastInput, config) {
+    if (SERVER_CLEARED.has(config.provider)) return false;
     if (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH) return;
     let trimmed = false;
     const end = this.messages.length - COMPACT_KEEP_MESSAGES;
@@ -208,12 +212,14 @@ export class Agent {
   // Replaces the conversation with a saved one. Earlier tool output is replaced by a stub:
   // it can hold instructions planted in a page that were never scanned (Auto mode, older
   // saves) or whose injection flags are gone, and the model can run a tool again for a
-  // fresh, scanned copy. The user's requests and the replies are kept.
+  // fresh, scanned copy. The user's requests and the replies are kept. The replies lose
+  // their provider-native copies: thinking replayed after the stubbed results would no
+  // longer match the history it was written after.
   restore({ messages, usage }) {
     this.reset();
     const stub = [{ type: "text", text: RESTORED_RESULT }];
     this.messages = messages.map((m) =>
-      m.role === "user" ? { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: stub } : b)) } : m,
+      m.role === "user" ? { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: stub } : b)) } : { ...m, raw: null },
     );
     if (usage) this.usage = { ...this.usage, ...usage };
   }
@@ -282,7 +288,7 @@ export class Agent {
             this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
           );
           if (signal.aborted) throw new DOMException("Stopped", "AbortError");
-          if (this.#compact(this.lastInput) && config.debugMode) {
+          if (this.#compact(this.lastInput, config) && config.debugMode) {
             this.emit({ type: "debug", text: `Trimmed old screenshots and tool output (last request ${this.lastInput} input tokens).` });
           }
           requestStarted = Date.now();
@@ -325,9 +331,11 @@ export class Agent {
         }
         const requestMs = Date.now() - requestStarted;
 
+        let promptDropped = false;
         if (agentPrompt) {
           this.messages.splice(this.messages.indexOf(agentPrompt), 1);
           agentPrompt = null;
+          promptDropped = true;
         }
         // A reply the provider could not read (Ollama's tool call parser failing mid-reply).
         // The model is told and tries again; repeats count toward the loop guard.
@@ -351,7 +359,11 @@ export class Agent {
           if (/^\d+$/.test(call.input?.ref)) call.input.ref = `ref_${call.input.ref}`;
           if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
         }
-        this.messages.push({ role: "assistant", content: result.content, raw: result.raw });
+        // A reply to an agent prompt that has left the history was written with the prompt in
+        // place, so its thinking is not replayed. A pending tool round keeps it, since the
+        // provider needs the thinking that led to the calls.
+        const pendingCalls = result.content.some((b) => b.type === "tool_call");
+        this.messages.push({ role: "assistant", content: result.content, raw: promptDropped && !pendingCalls ? null : result.raw });
         if (result.usage?.input) this.lastInput = result.usage.input;
         this.emit({ type: "speed", ...metrics.request({ usage: result.usage, metrics: result.metrics, ms: requestMs, firstTokenMs }) });
         if (config.debugMode && result.usage) {

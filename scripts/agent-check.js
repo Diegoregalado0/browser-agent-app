@@ -1311,4 +1311,45 @@ for (const url of ["https://example.com/", "http://172.32.0.1/", "http://[2001:d
   assert.ok(!isPrivateAddress(url), `${url} was seen as private`);
 }
 
+// Anthropic: old tool results are cleared by the API's context editing, so the history the
+// agent sends stays append-only (replayed thinking stays valid and the cached prefix holds),
+// and the request carries the clearing strategy and its beta.
+const anthropicSent = [];
+const plainFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  anthropicSent.push({ url: String(url), headers: new Headers(init.headers), body: JSON.parse(init.body) });
+  throw new Error("offline");
+};
+const anthropicModule = await import("../src/providers/anthropic.js");
+await anthropicModule
+  .turn({ apiKey: "test", model: "claude-opus-5", config: { ...config, thinking: true, effort: "high" }, system: "s", tools: [], messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], onText() {}, onThinking() {} })
+  .catch(() => {});
+globalThis.fetch = plainFetch;
+const clearing = anthropicSent[0].body.context_management?.edits?.[0];
+assert.equal(clearing?.type, "clear_tool_uses_20250919", "the Anthropic request does not clear old tool results on the server");
+assert.ok(clearing.clear_at_least?.value >= 5000, "server-side clearing is not batched");
+assert.match(anthropicSent[0].headers.get("anthropic-beta") ?? "", /context-management-2025-06-27/);
+assert.match(anthropicSent[0].headers.get("anthropic-beta") ?? "", /server-side-fallback-2026-07-01/);
+const savedAnthropic = providers.anthropic;
+const anthropicRequests = [];
+const anthropicReplies = ["a1", "a2", "a3", "a4", "a5"].map((id, i) => ({
+  content: [read(id)],
+  raw: { provider: "anthropic", model: "claude-opus-5", data: [{ type: "thinking", thinking: "t", signature: id }] },
+  stop: "tool_use",
+  usage: { input: [5000, 13000, 20000, 40000, 70000][i], output: 1 },
+}));
+anthropicReplies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+providers.anthropic = { describeError: () => null, turn: async ({ messages }) => (anthropicRequests.push(structuredClone(messages)), anthropicReplies.shift()) };
+const thinker = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+thinker.browser = { ...agent.browser, run: async () => [{ type: "text", text: longText }, { type: "image", mediaType: "image/jpeg", data: "AAAA" }] };
+await thinker.run("read them", { ...config, provider: "anthropic", permissionMode: "auto", keys: { ...config.keys, anthropic: "test" } });
+providers.anthropic = savedAnthropic;
+for (let i = 1; i < anthropicRequests.length; i++) {
+  assert.deepEqual(anthropicRequests[i].slice(0, anthropicRequests[i - 1].length), anthropicRequests[i - 1], `request ${i + 1} edited the history sent before`);
+}
+// A reopened conversation stubs its tool output, so replies lose their replayable thinking.
+const reopenedThinking = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+reopenedThinking.restore({ messages: thinker.messages });
+assert.ok(reopenedThinking.messages.every((m) => !m.raw), "a reopened conversation replays thinking written before its tool output was stubbed");
+
 console.log("agent checks passed");

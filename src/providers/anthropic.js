@@ -5,6 +5,23 @@ const THINKING_MODEL = /^claude-(opus-(4-[678]|5)|sonnet-(4-6|5)|fable|mythos)/;
 // Models the "default" server-side refusal fallback is documented for.
 const FALLBACK_MODEL = /^claude-(opus-5$|fable-5-1)/;
 
+// Old tool results (screenshots, page text) are cleared by the API, not by the agent: the
+// history sent stays append-only, so replayed thinking blocks stay valid and the prompt
+// cache keeps its prefix. Once a request passes CLEAR_TRIGGER tokens, results older than
+// the latest CLEAR_KEEP tool uses are replaced by a placeholder, in passes of at least
+// CLEAR_AT_LEAST tokens so the cached prefix changes rarely.
+const CONTEXT_BETA = "context-management-2025-06-27";
+const CONTEXT_MANAGEMENT = {
+  edits: [
+    {
+      type: "clear_tool_uses_20250919",
+      trigger: { type: "input_tokens", value: 30000 },
+      keep: { type: "tool_uses", value: 5 },
+      clear_at_least: { type: "input_tokens", value: 10000 },
+    },
+  ],
+};
+
 // In the extension edition the user's own key calls the API from their browser, which
 // the SDK allows only with this opt-in.
 function createClient({ apiKey }) {
@@ -63,18 +80,19 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
     ],
     messages: toMessages(messages, model),
     cache_control: { type: "ephemeral" },
+    betas: [CONTEXT_BETA],
+    context_management: CONTEXT_MANAGEMENT,
   };
   if (config.thinking && THINKING_MODEL.test(model)) {
     params.thinking = { type: "adaptive", display: "summarized" };
     if (config.effort !== "default") params.output_config = { effort: config.effort };
   }
-  const useFallback = FALLBACK_MODEL.test(model);
-  if (useFallback) {
-    params.betas = ["server-side-fallback-2026-07-01"];
+  if (FALLBACK_MODEL.test(model)) {
+    params.betas.push("server-side-fallback-2026-07-01");
     params.fallbacks = "default";
   }
 
-  const stream = useFallback ? client.beta.messages.stream(params, { signal }) : client.messages.stream(params, { signal });
+  const stream = client.beta.messages.stream(params, { signal });
   stream.on("text", onText);
   stream.on("thinking", onThinking);
   const message = await stream.finalMessage();
