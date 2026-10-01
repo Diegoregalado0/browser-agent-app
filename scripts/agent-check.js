@@ -78,6 +78,29 @@ const sent = requests[0];
 assert.ok(!sent.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool_call" && b.id === "call_click")), "unanswered call was sent");
 assert.equal(sent.at(-1).role, "user");
 
+// A turn that ends with no reply and no tool calls (the answer only in the thinking) gets
+// one re-prompt for the answer, which leaves the history once answered; a second empty turn
+// ends the task with a notice instead of another request.
+const emptyEvents = [];
+const quiet = new Agent({ emit: (e) => emptyEvents.push(e), askPermission: async () => "allow" });
+quiet.browser = agent.browser;
+const empty = { content: [], raw: null, stop: "end", usage: { input: 1, output: 1 } };
+requests = [];
+replies = [empty, { content: [{ type: "text", text: "The answer is 42." }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+await quiet.run("what is it?", config);
+assert.equal(requests.length, 2);
+assert.match(requests[1].at(-1).content[0].text, /final answer/);
+assert.ok(emptyEvents.some((e) => e.type === "reply" && e.text === "The answer is 42."));
+assert.deepEqual(quiet.messages.map((m) => m.role), ["user", "assistant"], "the re-prompt or the empty turn stayed in the history");
+requests = [];
+emptyEvents.length = 0;
+replies = [empty, empty, empty];
+await quiet.run("and now?", config);
+assert.equal(requests.length, 2, "an empty turn was re-prompted more than once");
+assert.ok(emptyEvents.some((e) => e.type === "notice" && /without a reply/.test(e.text)));
+assert.deepEqual(quiet.messages.map((m) => m.role), ["user", "assistant", "user"]);
+replies = [];
+
 // Compaction: once requests grow large, older long tool output and screenshots are trimmed
 // in one pass, the latest messages are kept whole, and no pass runs again until the
 // request has grown by half.

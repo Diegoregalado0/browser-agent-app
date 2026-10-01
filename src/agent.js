@@ -24,6 +24,9 @@ const DECLINED = "Do not retry it or work around it; tell the user what you want
 const callKey = (call) => `${call.name} ${JSON.stringify(call.input)}`;
 // What a tool result from a reopened conversation says in place of its output.
 const RESTORED_RESULT = "[output from before this conversation was reopened is not kept; run the tool again if you need it]";
+// Sent once when a turn ends with neither tool calls nor text (the answer was only in the
+// model's thinking, which the user does not see).
+const FINAL_ANSWER_PROMPT = "You ended your turn without writing a reply. Give your final answer to the user now, as plain text.";
 // An address as prompts show it: whole up to ADDRESS_MAX characters (data can ride in it),
 // else its start and how much is left out. The panel wraps it.
 const ADDRESS_MAX = 300;
@@ -260,6 +263,9 @@ export class Agent {
 
     try {
       let requestStarted = 0;
+      // The re-prompt after an empty final turn, while it is in the history; at most one per task.
+      let finalAnswerPrompt = null;
+      let finalAnswerAsked = false;
       for (let step = 0; step < config.maxSteps; step++) {
         this.emit({ type: "assistant_start" });
         let result;
@@ -348,8 +354,27 @@ export class Agent {
         const calls = result.content.filter((b) => b.type === "tool_call");
         const replyText = result.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
         if (replyText) this.emit({ type: "reply", text: replyText });
+        // The re-prompt is the agent's, not the user's: once answered it leaves the history, so
+        // it neither shows as a request nor counts as one for the safety checks.
+        if (finalAnswerPrompt) {
+          this.messages.splice(this.messages.indexOf(finalAnswerPrompt), 1);
+          finalAnswerPrompt = null;
+          this.onHistory();
+        }
         if (calls.length === 0) {
           if (result.stop === "max_tokens") this.emit({ type: "notice", text: "The reply hit the output limit." });
+          else if (!replyText) {
+            // An empty turn adds nothing the model needs to see again.
+            this.messages.pop();
+            this.onHistory();
+            if (!finalAnswerAsked) {
+              finalAnswerAsked = true;
+              finalAnswerPrompt = { role: "user", content: [{ type: "text", text: FINAL_ANSWER_PROMPT }] };
+              this.messages.push(finalAnswerPrompt);
+              continue;
+            }
+            this.emit({ type: "notice", text: "The model ended its turn without a reply. Ask again, or try another model or setting." });
+          }
           return;
         }
         if (result.stop === "max_tokens") {
