@@ -161,24 +161,9 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     });
   }
 
-  $("provider").addEventListener("change", () => {
-    const provider = $("provider").value;
-    save({ provider }, `Now using ${PROVIDER_NAMES[provider]}`);
-    $("model-input").value = config.models[provider] || "";
-    loadModels(provider);
-  });
-  $("model-input").addEventListener("change", () => {
-    save({ models: { [$("provider").value]: $("model-input").value.trim() } }, "Model saved");
-  });
-  $("refresh-models").onclick = () => loadModels($("provider").value);
   $("guard-model").addEventListener("change", () => {
     save({ guardModels: { ...config.guardModels, [config.provider]: $("guard-model").value.trim() } });
   });
-
-  function loadModels(provider) {
-    $("models-hint").textContent = "Loading models…";
-    send({ type: "list_models", provider });
-  }
 
   $("ghostMode").addEventListener("change", () => {
     pendingToast = $("ghostMode").checked ? "This session will not be saved" : "Ghost mode off. Started a new session.";
@@ -350,13 +335,8 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
 
   function render(next) {
     config = next;
-    // The provider changed elsewhere (setup, another window) while the sheet is open: the
-    // list on screen, or the one still loading, is for the previous provider.
-    if (!sheet.hidden && $("provider").value !== config.provider) loadModels(config.provider);
     for (const control of sheet.querySelectorAll("[data-setting]")) setValue(control.id, readSetting(control.dataset.setting));
     setValue("sensitiveSites", (config.sensitiveSites || []).join("\n"));
-    setValue("provider", config.provider);
-    setValue("model-input", config.models[config.provider] || "");
     setValue("guard-model", config.guardModels?.[config.provider] || "");
     $("guard-model").placeholder = `Default: ${config.defaultGuardModels?.[config.provider] || "same as the main model"}`;
     setValue("ghostMode", config.ghostMode);
@@ -443,7 +423,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
       else if (WIDE.matches) showPage(page);
       else showNav();
       $("settings-title").focus();
-      if (config) loadModels(config.provider);
     },
     close() {
       if (sheet.hidden) return;
@@ -457,12 +436,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     },
     render,
     handlers: {
-      models(msg) {
-        if (msg.provider !== $("provider").value) return;
-        $("model-list").replaceChildren(...msg.models.map((m) => Object.assign(el("option"), { value: m })));
-        $("models-hint").className = `field-note${msg.error ? " error" : ""}`;
-        $("models-hint").textContent = msg.error || `${msg.models.length} models available. Click the field to pick one, or type an id.`;
-      },
       provider_test(msg) {
         const result = cards.querySelector(`[data-provider="${msg.provider}"] .pc-result`);
         result.className = `pc-result ${msg.ok ? "ok" : "error"}`;

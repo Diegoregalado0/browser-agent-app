@@ -1,6 +1,7 @@
 import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
 import { createWizard } from "./wizard.js";
+import { createModelSwitcher } from "./models.js";
 import { renderMarkdown } from "./markdown.js";
 import { speedParts } from "./speed.js";
 
@@ -39,6 +40,9 @@ const ICONS = {
   shield: '<path d="M12 2.8 4.5 5.6v5.9c0 4.6 3.1 8.4 7.5 9.7 4.4-1.3 7.5-5.1 7.5-9.7V5.6Z"/><path d="m9 12 2.2 2.2L15.5 10"/>',
   lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  down: '<path d="m7 10 5 5 5-5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v4"/>',
   phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/>',
@@ -60,20 +64,29 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 const debugLines = [];
 const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines });
 const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
+const switcher = createModelSwitcher({
+  $,
+  el,
+  icon,
+  send,
+  toast: (text) => settings.toast(text),
+  isRunning: () => running,
+  openKeys: () => settings.open("models"),
+});
 const wizard = createWizard({
   $,
   el,
   icon,
   send,
   mcp: mcpPanel,
-  openModels: () => settings.open("models"),
+  openModels: () => switcher.openFlowAfterSave(),
 });
 
 // While an overlay is open, the page behind it is inert, so neither focus nor a screen
 // reader reaches it. The scrim, toasts, and the connect flow above it stay live.
 function setInertBehind(overlay, on) {
   for (const node of document.body.children) {
-    if (node !== overlay && !["menu-scrim", "toast", "connect-flow"].includes(node.id)) node.inert = on;
+    if (node !== overlay && !["menu-scrim", "toast", "connect-flow", "model-flow"].includes(node.id)) node.inert = on;
   }
 }
 
@@ -195,7 +208,6 @@ function setRunning(value) {
 
 function renderHeader() {
   if (!config) return;
-  $("model").textContent = config.models[config.provider] || "No model selected";
   setRunning(running);
   const ghost = Boolean(config.ghostMode);
   document.documentElement.classList.toggle("ghost", ghost);
@@ -415,6 +427,7 @@ const handlers = {
   config(msg) {
     config = msg.config;
     renderHeader();
+    switcher.render(config);
     settings.render(config);
     mcpPanel.render(config);
     wizard.render(config);
@@ -562,7 +575,7 @@ function announceReply() {
 }
 
 function receive(msg) {
-  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers]) group[msg.type]?.(msg);
+  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers, switcher.handlers]) group[msg.type]?.(msg);
 }
 
 function connect() {
@@ -656,6 +669,7 @@ $("menu-open-mcp").onclick = openMcp;
 $("close-mcp").onclick = () => mcpPanel.close();
 
 $("close-settings").onclick = () => settings.close();
+$("add-model").onclick = () => switcher.openFlow();
 $("run-setup").onclick = () => {
   settings.close();
   wizard.open();

@@ -9,11 +9,14 @@
 <body>
   <header>
     <span class="dot" id="dot" role="img" aria-label="Connecting"></span>
-    <span id="model" class="model">connecting…</span>
+    <button id="model" class="model-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">connecting…</button>
+    <span class="spacer"></span>
     <button id="toggle-ghost" class="icon-btn" data-icon="ghost" aria-pressed="false" title="Ghost mode" aria-label="Ghost mode"></button>
     <button id="open-mcp" class="icon-btn" data-icon="plug" title="Connections" aria-label="Connections"></button>
     <button id="open-menu" class="icon-btn" data-icon="menu" title="Menu" aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu"></button>
   </header>
+
+  <div id="model-menu" class="model-menu" role="menu" aria-label="Models" hidden></div>
 
   <main id="log"></main>
 
@@ -135,28 +138,10 @@
           <div class="setting-group">
             <div class="setting">
               <div class="setting-text">
-                <label class="setting-title" for="provider">Provider</label>
-                <p class="setting-desc">The service that runs the agent. You can switch in the middle of a session.</p>
+                <span class="setting-title">Model</span>
+                <p class="setting-desc">Switch models from the model name at the top left of the panel. A switch applies from your next message.</p>
               </div>
-              <select id="provider">
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Google Gemini</option>
-                <option value="mistral">Mistral</option>
-                <option value="ollama">Ollama (local)</option>
-              </select>
-            </div>
-            <div class="setting stack">
-              <div class="setting-text">
-                <label class="setting-title" for="model-input">Model</label>
-                <p class="setting-desc">The model id for this provider. Load the list to pick from the models your key can use.</p>
-              </div>
-              <div class="control-row">
-                <input id="model-input" list="model-list" placeholder="Model id" autocomplete="off" spellcheck="false" aria-describedby="models-hint" />
-                <button id="refresh-models" type="button">Load list</button>
-              </div>
-              <datalist id="model-list"></datalist>
-              <p class="field-note" id="models-hint" aria-live="polite"></p>
+              <button id="add-model" type="button">Add a model</button>
             </div>
           </div>
 
@@ -455,6 +440,20 @@
         <button type="button" id="connect-secondary" hidden></button>
         <button type="button" id="connect-primary" class="primary"></button>
       </div>
+    </div>
+  </dialog>
+
+  <dialog id="model-flow" class="wizard model-flow" aria-labelledby="mf-title">
+    <div class="wizard-card">
+      <div class="mf-head">
+        <button type="button" id="mf-back" class="link mf-back" data-icon="back" hidden><span>Back</span></button>
+        <p class="wizard-step mf-steps" id="mf-steps"></p>
+        <button type="button" id="mf-close" class="icon-btn" data-icon="close" title="Close" aria-label="Close"></button>
+      </div>
+      <h2 id="mf-title"></h2>
+      <p id="mf-lead" class="field-note"></p>
+      <div id="mf-body" class="mf-body"></div>
+      <button type="button" id="mf-primary" class="primary mf-primary" hidden></button>
     </div>
   </dialog>
 

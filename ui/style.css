@@ -69,7 +69,6 @@ header .dot { margin-right: 6px; }
 .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
 @keyframes pulse { to { opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) { .dot.running { animation: none; } }
-.model { flex: 1; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button {
   font: inherit; font-size: 13px;
   border: 1px solid var(--border); background: var(--panel); color: var(--fg);
@@ -426,3 +425,93 @@ a.button-link:hover { filter: brightness(1.08); }
 #wizard-outlook-logo .logo { width: 56px; height: 56px; }
 .onboard-legal { margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
 .onboard-legal a { color: inherit; }
+
+/* Model switcher: the current model at the top left, its menu, and the add flow. */
+.model-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
+  padding: 3px 6px 3px 4px; border: 1px solid transparent; border-radius: 8px; background: none;
+  color: var(--fg); font-size: 12px; font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+.model-chip:hover, .model-chip[aria-expanded="true"] { background: var(--hover); border-color: var(--border); }
+.model-chip.unset .model-name { color: var(--muted); }
+.model-chip .icon { width: 14px; height: 14px; color: var(--muted); }
+.model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.model-chip.switched { animation: chip-switched 0.6s ease-out; }
+@keyframes chip-switched { from { background: color-mix(in srgb, var(--ok) 22%, transparent); } }
+header .spacer { min-width: 4px; }
+
+/* Provider marks: a monogram tile in the provider's hue (no logos), Local gets a chip glyph. */
+.pmark {
+  --hue: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 18px; height: 18px; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 1;
+  color: color-mix(in srgb, var(--hue) 80%, var(--fg)); background: color-mix(in srgb, var(--hue) 18%, var(--panel));
+}
+.pmark .icon { width: 13px; height: 13px; color: inherit; }
+.pmark[data-provider="anthropic"] { --hue: #b5643c; }
+.pmark[data-provider="openai"] { --hue: #2f8a6b; }
+.pmark[data-provider="gemini"] { --hue: #3f6fd8; }
+.pmark[data-provider="mistral"] { --hue: #c27a12; }
+.pmark[data-provider="ollama"] { --hue: var(--accent); }
+.mtag {
+  flex: none; font-size: 10.5px; font-weight: 500; padding: 0 6px; border-radius: 999px; line-height: 17px;
+  background: var(--hover); color: var(--muted);
+}
+.mtag.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+
+.model-menu {
+  position: fixed; z-index: 8; width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 72px); overflow-y: auto; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+  animation: model-menu-in 0.14s ease-out;
+}
+@keyframes model-menu-in { from { opacity: 0; transform: translateY(-4px); } }
+.mm-group + .mm-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.mm-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.mm-item, .mf-option {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; min-height: 34px;
+  border: none; border-radius: 8px; background: none; color: var(--fg); text-align: left; font-size: 13px; cursor: pointer;
+}
+.mm-item:hover, .mm-item:focus-visible, .mf-option:hover, .mf-option:focus-visible { background: var(--hover); }
+.mm-item:focus-visible, .mf-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mm-item .icon, .mf-option .icon { width: 15px; height: 15px; color: var(--muted); }
+.mm-item[role="menuitemradio"] .icon, .mf-option .icon { visibility: hidden; color: var(--accent); }
+.mm-item[aria-checked="true"] .icon, .mf-option[aria-selected="true"] .icon { visibility: visible; }
+.mm-item[aria-checked="true"], .mf-option[aria-selected="true"] { font-weight: 600; }
+.mm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mm-action { color: var(--muted); }
+.mm-action:hover, .mm-action:focus-visible { color: var(--fg); }
+.mm-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+.mm-empty { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 8px; font-size: 13px; color: var(--muted); }
+.mm-empty strong { color: var(--fg); }
+
+.mf-head { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: -6px -8px 0 -6px; }
+.mf-head .wizard-step { flex: 1; display: flex; align-items: center; gap: 10px; }
+.mf-back { display: inline-flex; align-items: center; gap: 4px; }
+.mf-back .icon { width: 16px; height: 16px; }
+.mf-bar { display: inline-flex; gap: 4px; }
+.mf-bar span { width: 18px; height: 3px; border-radius: 2px; background: var(--border); transition: background 0.2s; }
+.mf-bar .done, .mf-bar .current { background: var(--accent); }
+.mf-body { display: flex; flex-direction: column; gap: 10px; }
+.mf-body:empty { display: none; }
+.mf-body input { width: 100%; }
+.mf-body a { color: var(--accent); }
+.mf-body code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
+.mf-providers { display: flex; flex-direction: column; gap: 6px; }
+.mf-provider { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; font-weight: 500; text-align: left; }
+.mf-provider .pmark { width: 24px; height: 24px; font-size: 13px; border-radius: 7px; }
+.mf-pname { flex: 1; }
+.mf-more summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.mf-more[open] summary { margin-bottom: 8px; }
+.mf-list { max-height: min(320px, 45vh); overflow-y: auto; margin: 0 -4px; padding: 2px 4px; }
+.mf-primary { padding: 8px 16px; font-size: 14px; border-radius: 8px; }
+.mf-done { display: flex; justify-content: center; padding: 8px 0; }
+.mf-done .icon { width: 44px; height: 44px; padding: 10px; border-radius: 50%; color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); animation: mf-done-in 0.3s ease-out; }
+@keyframes mf-done-in { from { transform: scale(0.7); opacity: 0; } }
+.model-flow .wizard-card { animation: model-menu-in 0.16s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .model-chip, .mf-bar span { transition: none; }
+  .model-chip.switched, .model-menu, .mf-done .icon, .model-flow .wizard-card { animation: none; }
+}

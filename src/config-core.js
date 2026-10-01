@@ -15,6 +15,8 @@ export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
   keys: { anthropic: "", openai: "", gemini: "", mistral: "" },
+  // Per provider, the models picked lately, newest first, for the model menu.
+  recentModels: {},
   openaiBaseUrl: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
@@ -94,6 +96,7 @@ const NUMBER_RANGES = {
   dailyTokens: [0, 1e11],
 };
 export const CUSTOM_INSTRUCTIONS_MAX = 10000;
+export const RECENT_MODELS_MAX = 4;
 const LIST_MAX = 1000;
 // Model ids as providers write them: "gpt-6-sol", "anthropic/claude-opus-5", "qwen3:8b".
 const MODEL_ID = /^[\w.:/@+-]{0,200}$/;
@@ -141,6 +144,16 @@ export function cleanSetting(key, value) {
     for (const [p, id] of Object.entries(value)) {
       if (!CHOICES.provider.includes(p)) fail("Unknown provider.");
       if (typeof id !== "string" || !MODEL_ID.test(id)) fail("A model id has only letters, digits and . : / @ + - _ (no spaces), up to 200 characters.");
+    }
+    return value;
+  }
+  if (key === "recentModels") {
+    if (!isObject(value)) fail("Recent models must be lists of model ids.");
+    for (const [p, ids] of Object.entries(value)) {
+      if (!CHOICES.provider.includes(p)) fail("Unknown provider.");
+      if (!Array.isArray(ids) || ids.length > RECENT_MODELS_MAX || !ids.every((id) => typeof id === "string" && id && MODEL_ID.test(id))) {
+        fail(`Recent models are up to ${RECENT_MODELS_MAX} model ids per provider.`);
+      }
     }
     return value;
   }

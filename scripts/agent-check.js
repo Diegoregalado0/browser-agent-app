@@ -421,6 +421,38 @@ assert.equal(retired.maxSteps, 7);
 // only unusable entries are dropped.
 assert.deepEqual(mergeConfig({ sensitiveSites: ["https://MyBank.example/login", "*.pay.example", "not a site", 7] }).sensitiveSites, ["mybank.example", "*.pay.example"]);
 
+// Model switcher: the menu lists only providers that can run, the current model first and
+// a few recent picks; a switch saves the provider, model and recent picks in one patch,
+// merged per provider and checked like any setting. Model lists leave out non-chat models.
+const { usableProviders, shortList, switchPatch, modelTags } = await import("../ui/models.js");
+const uiConfig = (c) => ({ ...c, keyInfo: Object.fromEntries(Object.entries(c.keys).map(([p, k]) => [p, { source: k ? "saved" : "none" }])) });
+assert.deepEqual(usableProviders(uiConfig(hostConfig)), ["openai"]);
+assert.deepEqual(usableProviders(uiConfig({ ...hostConfig, models: { ...hostConfig.models, ollama: "qwen3:8b" } })), ["openai", "ollama"]);
+const before = hostConfig.models.openai;
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", "gpt-6-luna") });
+assert.equal(hostConfig.provider, "openai");
+assert.equal(hostConfig.models.openai, "gpt-6-luna");
+assert.deepEqual(shortList(uiConfig(hostConfig), "openai"), ["gpt-6-luna", before], "the replaced model left the menu");
+await fromLocal({ type: "save_config", patch: { recentModels: { anthropic: ["claude-haiku-4-5"] } } });
+assert.deepEqual(hostConfig.recentModels.openai, ["gpt-6-luna", before], "a recent-models patch dropped another provider");
+for (let i = 0; i < 6; i++) await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", `m-${i}`) });
+assert.deepEqual(shortList(uiConfig(hostConfig), "openai"), ["m-5", "m-4", "m-3", "m-2"]);
+for (const recentModels of [{ openai: "gpt" }, { evil: ["x"] }, { openai: ["a b"] }, { openai: ["a", "b", "c", "d", "e"] }, ["openai"]]) {
+  const kept = JSON.stringify(hostConfig);
+  await fromLocal({ type: "save_config", patch: { recentModels } });
+  assert.equal(JSON.stringify(hostConfig), kept, `saved bad recent models: ${JSON.stringify(recentModels)}`);
+}
+assert.deepEqual(mergeConfig({ recentModels: { openai: [7] } }).recentModels, {});
+assert.deepEqual(modelTags("ollama", "qwen3:8b"), ["Local"]);
+assert.deepEqual(modelTags("anthropic", "claude-haiku-4-5"), ["Fast"]);
+assert.deepEqual(modelTags("gemini", "gemini-2.5-flash"), ["Fast"]);
+assert.deepEqual(modelTags("mistral", "ministral-8b"), []);
+providers.openai.listModels = async () => ["gpt-6-sol", "text-embedding-3-small", "whisper-1", "gpt-image-1"];
+localEvents.length = 0;
+await fromLocal({ type: "list_models", provider: "openai" });
+assert.deepEqual(localEvents.find((e) => e.type === "models").models, ["gpt-6-sol"]);
+delete providers.openai.listModels;
+
 // Reply rendering: markup is escaped, only http(s) links become links, and a URL inside a
 // link cannot add attributes to it.
 for (const reply of [
