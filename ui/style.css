@@ -426,3 +426,52 @@ a.button-link:hover { filter: brightness(1.08); }
 #wizard-outlook-logo .logo { width: 56px; height: 56px; }
 .onboard-legal { margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
 .onboard-legal a { color: inherit; }
+
+/* Setup progress: "Step 2 of 5" for screen readers and a bar of segments. */
+.onboard-steps { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.onboard-step-text { font-size: 12px; color: var(--muted); }
+.onboard-bar { display: flex; gap: 4px; }
+.onboard-bar span { flex: 1; height: 4px; border-radius: 2px; background: var(--border); transition: background 0.2s; }
+.onboard-bar .done { background: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.onboard-bar .current { background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .onboard-bar span { transition: none; } }
+.onboard-top { display: flex; align-items: center; min-height: 32px; margin: -8px 0 -4px; }
+.onboard-top .onboard-back { margin: 0 0 0 -6px; }
+.onboard-top .icon-btn { margin-right: -8px; }
+.onboard-body { display: flex; flex-direction: column; gap: 12px; }
+.onboard-body:empty { display: none; }
+.onboard.welcome .onboard-body { text-align: left; align-self: stretch; }
+
+/* Remote setup illustration: a phone with a chat, and the lamp. */
+.onboard-art { display: flex; justify-content: center; }
+.remote-art { width: 160px; height: 112px; }
+.art-device { fill: var(--panel); stroke: var(--accent); stroke-width: 2.5; }
+.art-line, .art-rays { stroke: var(--muted); stroke-width: 2.5; stroke-linecap: round; fill: none; }
+.art-rays { stroke: var(--border); }
+.art-bubble { fill: var(--user); }
+.art-bubble-out { fill: var(--accent); }
+.art-line-out { stroke: var(--accent-fg); stroke-width: 2.5; stroke-linecap: round; }
+.art-ring { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.art-lamp { fill: #e0a23b; }
+
+/* Lists and checks on setup screens. */
+.onboard-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.onboard-list li { display: flex; gap: 10px; align-items: flex-start; }
+.onboard-list .icon { color: var(--ok); margin-top: 2px; }
+.onboard-list.examples li { display: block; }
+.onboard-checklist { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+.onboard-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.onboard-checks:empty { display: none; }
+.onboard-checks li { display: flex; gap: 8px; align-items: flex-start; }
+.onboard-checks .icon { width: 16px; height: 16px; margin-top: 2px; }
+.onboard-checks .ok { color: var(--ok); }
+.onboard-checks .fail { color: var(--error); }
+.onboard a.button-link.onboard-link { display: block; text-align: center; padding: 9px 16px; border-radius: 8px; font-size: 14px; color: var(--accent-fg); }
+.onboard-alt-link { font-size: 13px; }
+.pair-command { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px !important; padding: 8px 10px !important; }
+.onboard-waiting { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
+
+/* Settings > Remote status card. */
+.remote-head { display: flex; gap: 10px; align-items: flex-start; }
+.remote-head .dot { margin-top: 7px; }
+.remote-howto code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }

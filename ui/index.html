@@ -359,41 +359,37 @@
 
 
         <section class="settings-page" data-page="remote" data-title="Remote (Discord)" hidden>
-          <p class="group-desc">Give the agent tasks and answer its questions from Discord on your phone. It only runs tasks, stops them and answers prompts from there; settings stay on this computer, and prompts for sensitive sites and password fields can only be approved here. Discord can read bot messages, so only prompts and final answers are sent, never screenshots or page contents.</p>
-          <p class="group-desc">It works only while Chrome is open with the agent's panel open. Closing the panel disconnects the bot until you open it again, and tasks from Discord run in that panel's window.</p>
+          <p class="group-desc">Give Browsby tasks, stop them and answer its questions from Discord on your phone. Discord gets prompts, final answers and the kind of step it is on, never screenshots or page contents. Prompts for sensitive sites and password fields can only be approved here.</p>
 
-          <div class="setting-group">
+          <div class="setting-group remote-card">
             <div class="setting stack">
-              <div class="setting-text">
-                <span class="setting-title">Status</span>
-                <p class="setting-desc" id="discord-status" aria-live="polite">Not set up.</p>
-              </div>
-              <div class="device-code" id="discord-pair" hidden>
-                <p class="setting-desc">Send the bot a direct message with this code to pair your Discord account:</p>
-                <div class="code-row"><code id="discord-code"></code><button type="button" id="discord-code-copy">Copy</button></div>
+              <div class="remote-head">
+                <span class="dot" id="discord-dot" aria-hidden="true"></span>
+                <div class="setting-text">
+                  <span class="setting-title" id="discord-headline">Not set up</span>
+                  <p class="setting-desc" id="discord-status" aria-live="polite">Use your own Discord bot. Setup takes about five minutes.</p>
+                  <p class="setting-desc" id="discord-sessions" hidden></p>
+                </div>
               </div>
               <div class="row">
-                <a id="discord-invite" class="button-link" target="_blank" rel="noopener noreferrer" hidden>Add the bot to your server</a>
+                <button type="button" id="discord-setup" class="primary">Set up remote control</button>
                 <button type="button" id="discord-unpair" hidden>Unpair</button>
                 <button type="button" id="discord-remove" class="link-danger" hidden>Remove bot</button>
               </div>
             </div>
           </div>
 
-          <h3 class="group-label">Set up</h3>
-          <form class="setting-group" id="discord-form">
+          <h3 class="group-label">How it works</h3>
+          <div class="setting-group">
             <div class="setting stack">
-              <ol class="connect-steps">
-                <li>Open <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">discord.com/developers/applications</a>, click New Application and name it (for example Browsby).</li>
-                <li>Open Bot, click Reset Token, and copy the token.</li>
-                <li>Paste it below and save. Then use “Add the bot to your server” with a server of your own (a private one works), since Discord only lets you message bots you share a server with.</li>
-                <li>Send the bot the pairing code shown above as a direct message.</li>
-              </ol>
-              <div class="card-field"><label class="card-label" for="discord-token">Bot token</label><input id="discord-token" type="password" aria-describedby="discord-status" autocomplete="off" spellcheck="false" placeholder="Paste the bot token" /></div>
-              <p class="field-note">The token stays in this Chrome profile on this computer (never synced) and is never shown again.</p>
-              <div class="row"><button type="submit" class="primary">Save and connect</button></div>
+              <ul class="connect-list remote-howto">
+                <li><code>/browsby run</code> starts a task. One message shows its progress, with a Stop button.</li>
+                <li><code>/browsby sessions</code> picks which Chrome window runs your tasks.</li>
+                <li>Approvals arrive as messages with Allow and Deny.</li>
+                <li>It works while Chrome is open with a Browsby panel open.</li>
+              </ul>
             </div>
-          </form>
+          </div>
         </section>
 
         <section class="settings-page" data-page="debug" data-title="Debug" hidden>
@@ -461,6 +457,7 @@
   <div id="wizard" class="onboard" hidden role="dialog" aria-modal="true" aria-labelledby="wizard-title">
     <div class="onboard-screen">
       <button type="button" id="wizard-back" class="link onboard-back" data-icon="back" hidden><span>Back</span></button>
+      <p id="wizard-steps" class="onboard-steps" hidden></p>
       <span id="wizard-outlook-logo" hidden></span>
       <h1 id="wizard-title" tabindex="-1"></h1>
       <p id="wizard-lead" class="onboard-lead"></p>
@@ -480,6 +477,26 @@
         <span aria-hidden="true">·</span>
         <a href="https://diegoregalado0.github.io/browser-agent-app/legal/TERMS" target="_blank" rel="noopener noreferrer">Terms of Use</a>
       </p>
+    </div>
+  </div>
+
+  <div id="remote-setup" class="onboard" hidden role="dialog" aria-modal="true" aria-labelledby="remote-title">
+    <div class="onboard-screen">
+      <div class="onboard-top">
+        <button type="button" id="remote-back" class="link onboard-back" data-icon="back" hidden><span>Back</span></button>
+        <span class="spacer"></span>
+        <button type="button" id="remote-close" class="icon-btn" data-icon="close" title="Close" aria-label="Close remote setup"></button>
+      </div>
+      <p id="remote-steps" class="onboard-steps" hidden></p>
+      <div id="remote-art" class="onboard-art" hidden></div>
+      <h1 id="remote-title" tabindex="-1"></h1>
+      <p id="remote-lead" class="onboard-lead"></p>
+      <div id="remote-body" class="onboard-body"></div>
+      <p class="pc-result" id="remote-result" aria-live="polite"></p>
+      <div class="onboard-actions">
+        <button type="button" id="remote-next" class="primary"></button>
+        <button type="button" id="remote-alt" class="link" hidden></button>
+      </div>
     </div>
   </div>
 

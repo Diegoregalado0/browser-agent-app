@@ -1,6 +1,7 @@
 import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
 import { createWizard } from "./wizard.js";
+import { createRemoteWizard } from "./remote-wizard.js";
 import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
@@ -57,7 +58,15 @@ for (const node of document.querySelectorAll("[data-icon]")) node.prepend(icon(n
 
 // Recent debug lines from the chat, for Settings > Debug > Copy diagnostics.
 const debugLines = [];
-const settings = createSettings({ $, el, icon, send, setInertBehind, getDebugLines: () => debugLines });
+const settings = createSettings({
+  $,
+  el,
+  icon,
+  send,
+  setInertBehind,
+  getDebugLines: () => debugLines,
+  openRemoteSetup: () => remoteWizard.open(),
+});
 const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
 const wizard = createWizard({
   $,
@@ -67,6 +76,7 @@ const wizard = createWizard({
   mcp: mcpPanel,
   openModels: () => settings.open("models"),
 });
+const remoteWizard = createRemoteWizard({ $, el, icon, send, toast: (text, kind) => settings.toast(text, kind) });
 
 // While an overlay is open, the page behind it is inert, so neither focus nor a screen
 // reader reaches it. The scrim, toasts, and the connect flow above it stay live.
@@ -529,7 +539,7 @@ function announceReply() {
 }
 
 function receive(msg) {
-  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers]) group[msg.type]?.(msg);
+  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers, remoteWizard.handlers]) group[msg.type]?.(msg);
 }
 
 function connect() {
