@@ -16,3 +16,4 @@ exclude:
   - legal/WEB-STORE.md
   - legal/PUBLISH-CHECKLIST.md
   - legal/THREAT-MODEL.md
+  - legal/REMOTE-CONTROL-DESIGN.md
