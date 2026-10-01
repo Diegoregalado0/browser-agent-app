@@ -20,7 +20,7 @@ function within(promise, ms, message) {
 
 // Model names that cannot run the agent (embedding, moderation, OCR, speech), for models
 // whose provider does not report capabilities.
-const NON_CHAT_MODEL = /embed|moderation|transcri|(^|[^a-z])(ocr|tts|whisper)([^a-z]|$)/i;
+const NON_CHAT_MODEL = /embed|moderation|transcri|^(babbage|davinci)-|dall-e|gpt-image|sora|(^|[^a-z])(ocr|tts|whisper)([^a-z]|$)/i;
 
 // The first listed model that can chat with tools, or null.
 async function firstChatModel(provider, models, apiKey, config) {
