@@ -737,6 +737,55 @@ for (const call of [
 slowOllama.closeAllConnections();
 slowOllama.close();
 
+// A tool call Ollama fails to parse mid-reply is requested again once; a second failure
+// comes back as an unreadable reply instead of an error.
+let parseFailures = 0;
+let parseChats = 0;
+const parseOllama = createServer((req, res) => {
+  if (req.url === "/api/show") return res.end(JSON.stringify({ capabilities: ["completion", "tools"] }));
+  parseChats++;
+  const reply = { message: { role: "assistant", content: "hi" }, done: true, done_reason: "stop", prompt_eval_count: 1, eval_count: 1 };
+  const failed = parseFailures-- > 0;
+  res.end(`${JSON.stringify({ message: { role: "assistant", content: "" }, done: false })}\n${JSON.stringify(failed ? { error: "XML syntax error on line 3: element <function> closed by </parameter>" } : reply)}\n`);
+});
+await new Promise((r) => parseOllama.listen(0, "127.0.0.1", r));
+const parseTurn = () =>
+  ollama.turn({ model: "m", config: { ...config, ollamaHost: `http://127.0.0.1:${parseOllama.address().port}` }, system: "s", tools: [], messages: [], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} });
+parseFailures = 1;
+assert.equal((await parseTurn()).content[0].text, "hi");
+assert.equal(parseChats, 2);
+parseFailures = 2;
+parseChats = 0;
+const unreadable = await parseTurn();
+assert.equal(unreadable.stop, "unreadable");
+assert.match(unreadable.error, /XML syntax error/);
+assert.equal(parseChats, 2, "a failed parse was retried more than once");
+parseOllama.close();
+
+// The agent tells the model its reply could not be read, keeps the note out of the history
+// once answered, and stops through the loop guard when it keeps happening.
+const unreadableEvents = [];
+const garbled = new Agent({ emit: (e) => unreadableEvents.push(e), askPermission: async () => "allow" });
+garbled.browser = agent.browser;
+const unreadableTurn = { content: [], raw: null, stop: "unreadable", error: "XML syntax error on line 3", usage: null };
+const turnBefore = providers.openai.turn;
+providers.openai.turn = async ({ messages }) => (requests.push(structuredClone(messages)), replies.shift());
+requests = [];
+replies = [unreadableTurn, { content: [{ type: "text", text: "Done." }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+await garbled.run("go", config);
+assert.match(requests[1].at(-1).content[0].text, /could not be read \(XML syntax error on line 3\)/);
+assert.ok(unreadableEvents.some((e) => e.type === "reply" && e.text === "Done."));
+assert.deepEqual(garbled.messages.map((m) => m.role), ["user", "assistant"]);
+requests = [];
+unreadableEvents.length = 0;
+replies = Array(10).fill(unreadableTurn);
+await garbled.run("again", config);
+assert.equal(requests.length, 5, "unreadable replies were not bounded by the loop guard");
+assert.ok(unreadableEvents.some((e) => e.type === "notice" && /seems stuck/.test(e.text)));
+assert.equal(garbled.messages.at(-1).role, "user");
+providers.openai.turn = turnBefore;
+replies = [];
+
 // Stop during a streamed reply whose SDK ends the stream quietly: the partial reply is not
 // kept as an answer, and the user is told the task stopped.
 const cutNotices = [];

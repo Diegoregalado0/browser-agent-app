@@ -263,8 +263,11 @@ export class Agent {
 
     try {
       let requestStarted = 0;
-      // The re-prompt after an empty final turn, while it is in the history; at most one per task.
-      let finalAnswerPrompt = null;
+      // A message from the agent to the model (the re-prompt after an empty final turn, or a
+      // reply that could not be read), while it is in the history. It is the agent's, not the
+      // user's: once answered it leaves the history, so it neither shows as a request nor
+      // counts as one for the safety checks.
+      let agentPrompt = null;
       let finalAnswerAsked = false;
       for (let step = 0; step < config.maxSteps; step++) {
         this.emit({ type: "assistant_start" });
@@ -315,6 +318,25 @@ export class Agent {
           throw new Error(provider.describeError(err) || err.message);
         }
 
+        if (agentPrompt) {
+          this.messages.splice(this.messages.indexOf(agentPrompt), 1);
+          agentPrompt = null;
+        }
+        // A reply the provider could not read (Ollama's tool call parser failing mid-reply).
+        // The model is told and tries again; repeats count toward the loop guard.
+        if (result.stop === "unreadable") {
+          const error = result.error.slice(0, 300);
+          if (config.debugMode) this.emit({ type: "debug", text: `Request ${step + 1}: the reply could not be read, ${Date.now() - requestStarted} ms: ${error}` });
+          const note = this.loopGuard.record("reply", {}, true, error);
+          if (this.loopGuard.stopReason) {
+            this.emit({ type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
+            return;
+          }
+          const text = `[Agent] Your last reply could not be read (${error}). Send it again: tool calls with valid arguments, or a plain text answer.`;
+          agentPrompt = { role: "user", content: [{ type: "text", text: note ? `${text}\n${note}` : text }] };
+          this.messages.push(agentPrompt);
+          continue;
+        }
         // Marked before the history is first saved, so no saved copy holds a password.
         for (const call of result.content.filter((b) => b.type === "tool_call")) {
           // Small models (Ministral) often send a ref as its bare number, "3" for "ref_3". This
@@ -354,13 +376,6 @@ export class Agent {
         const calls = result.content.filter((b) => b.type === "tool_call");
         const replyText = result.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
         if (replyText) this.emit({ type: "reply", text: replyText });
-        // The re-prompt is the agent's, not the user's: once answered it leaves the history, so
-        // it neither shows as a request nor counts as one for the safety checks.
-        if (finalAnswerPrompt) {
-          this.messages.splice(this.messages.indexOf(finalAnswerPrompt), 1);
-          finalAnswerPrompt = null;
-          this.onHistory();
-        }
         if (calls.length === 0) {
           if (result.stop === "max_tokens") this.emit({ type: "notice", text: "The reply hit the output limit." });
           else if (!replyText) {
@@ -369,8 +384,8 @@ export class Agent {
             this.onHistory();
             if (!finalAnswerAsked) {
               finalAnswerAsked = true;
-              finalAnswerPrompt = { role: "user", content: [{ type: "text", text: FINAL_ANSWER_PROMPT }] };
-              this.messages.push(finalAnswerPrompt);
+              agentPrompt = { role: "user", content: [{ type: "text", text: FINAL_ANSWER_PROMPT }] };
+              this.messages.push(agentPrompt);
               continue;
             }
             this.emit({ type: "notice", text: "The model ended its turn without a reply. Ask again, or try another model or setting." });

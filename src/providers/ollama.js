@@ -74,7 +74,24 @@ export async function canChat({ model, config }) {
   return capabilities ? capabilities.includes("completion") && capabilities.includes("tools") : null;
 }
 
-export async function turn({ model, config, system, tools, messages, signal, onText, onThinking }) {
+// Ollama's parser for some models' tool calls (Qwen 3.5's XML format) can fail mid-reply on
+// output that a second sample usually gets right.
+const TOOL_CALL_PARSE_ERROR = /XML syntax error|tool ?call pars|pars(e|ing) tool ?call/i;
+
+// A reply that fails to parse is requested again once; a second failure comes back as an
+// unreadable reply, which the agent tells the model about, rather than as an error.
+export async function turn(opts) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await turnOnce(opts);
+    } catch (err) {
+      if (opts.signal.aborted || !TOOL_CALL_PARSE_ERROR.test(err?.message)) throw err;
+      if (attempt >= 1) return { content: [], raw: null, stop: "unreadable", error: err.message, usage: null };
+    }
+  }
+}
+
+async function turnOnce({ model, config, system, tools, messages, signal, onText, onThinking }) {
   const stream = await client(config, signal).chat({
     model,
     stream: true,
