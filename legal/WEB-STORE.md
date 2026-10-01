@@ -17,7 +17,7 @@ Every feature serves that purpose: the side panel is where tasks are given, the 
 
 ## Permission justifications
 
-The manifest requests these permissions (with `OUTLOOK_CLIENT_ID` empty, as it is now). There are no optional permissions and no content scripts.
+The manifest requests these permissions (with `OUTLOOK_CLIENT_ID` empty, as it is now). The only optional permission is the `https://discord.com/*` host, requested at runtime. There are no content scripts.
 
 ### `debugger`
 
@@ -43,9 +43,14 @@ The manifest requests these permissions (with `OUTLOOK_CLIENT_ID` empty, as it i
 
 > - `https://api.anthropic.com/*`, `https://api.openai.com/*`, `https://generativelanguage.googleapis.com/*`, `https://api.mistral.ai/*`: the AI provider APIs that run the agent's model with the user's own API key. Only the provider the user selects is contacted.
 > - `http://127.0.0.1/*`, `http://localhost/*`: a local model server on the user's own computer (Ollama, or an OpenAI-compatible server such as LM Studio).
-> - `https://discord.com/*`: the optional Discord remote control, where the user's own bot receives tasks and sends approval prompts and results to the user.
 >
 > The agent does not need host permissions for the websites it operates: it reaches them through the debugger on tabs the user's task opens.
+
+### Optional host permission: `https://discord.com/*`
+
+Requested with `chrome.permissions.request` only when the user clicks "Allow access to discord.com" in Settings > Remote (Discord) > Set up remote control, so it is not granted for anyone who does not use remote control. (A store review had flagged an always-on discord.com permission as a second purpose.) If the user removes it later, remote control stops and Settings offers to allow it again.
+
+> `https://discord.com/*`: optional, asked for only when the user sets up remote control. The user's own Discord bot receives their tasks and approval answers from Discord, and sends approval prompts, progress and results back to them, so they can run the same agent from their phone. The Gateway is a WebSocket and needs no permission.
 
 ## Remote code
 
@@ -96,7 +101,7 @@ https://diegoregalado0.github.io/browser-agent-app/legal/PRIVACY once GitHub Pag
 | Unused permissions | Every permission maps to code; `identity` and the Microsoft hosts are requested only when Outlook is set up | None |
 | Remote code | Everything bundled, strict CSP, no eval, no tool that runs model-written code | None |
 | Listing does not match behavior or data use | README and privacy policy describe data flows | Mention in the description: sends page content and screenshots to your chosen AI provider; optional Outlook and Discord |
-| Single purpose violations (bundled unrelated features) | Outlook and Discord are the same agent acting in other places | None |
+| Single purpose violations (bundled unrelated features) | Outlook and Discord are the same agent acting in other places; the discord.com host permission is optional and asked for only in remote control setup | None |
 | Missing or incomplete privacy policy | `legal/PRIVACY.md` covers each data type, third parties, deletion, Limited Use; linked from Settings > Data and privacy and the manifest's `homepage_url` | Turn on GitHub Pages and put the URL in the listing |
 | Prominent disclosure and consent for personal data | Setup explains keys stay local; Settings explains where keys go | Add a one-line data disclosure to the first-run setup (text in `legal/IN-APP.md`) |
 | Insecure handling of personal data | HTTPS to all cloud services; keys in local storage, not synced, not shown to the model | The OpenAI base URL and Ollama host settings accept any `http://` address, not only local ones; consider allowing plain HTTP only for localhost |
