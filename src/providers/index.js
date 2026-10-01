@@ -19,6 +19,8 @@ function lazy(name, load) {
     classify: call("classify"),
     listModels: call("listModels"),
     ping: call("ping"),
+    // Whether a model can chat with tools: true, false, or null when the provider does not say.
+    canChat: async (opts) => (await get()).canChat?.(opts) ?? null,
     // Errors come from the calls above, so the module has loaded by the time this runs.
     describeError: (err) => module?.describeError(err) ?? null,
   };

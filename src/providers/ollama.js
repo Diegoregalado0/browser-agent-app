@@ -63,6 +63,13 @@ export async function listModels({ config }) {
   return models.map((m) => m.name);
 }
 
+// Whether a model can run the agent (chat and tools), from its capabilities; null when the
+// server does not report them.
+export async function canChat({ model, config }) {
+  const capabilities = (await client(config).show({ model }).catch(() => null))?.capabilities;
+  return capabilities ? capabilities.includes("completion") && capabilities.includes("tools") : null;
+}
+
 export async function turn({ model, config, system, tools, messages, signal, onText, onThinking }) {
   const ollama = client(config);
   const stream = await ollama.chat({

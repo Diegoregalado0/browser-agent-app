@@ -18,8 +18,20 @@ function within(promise, ms, message) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+// Model names that cannot run the agent (embedding, moderation, OCR, speech), for models
+// whose provider does not report capabilities.
+const NON_CHAT_MODEL = /embed|moderation|transcri|(^|[^a-z])(ocr|tts|whisper)([^a-z]|$)/i;
+
+// The first listed model that can chat with tools, or null.
+async function firstChatModel(provider, models, apiKey, config) {
+  for (const model of models) {
+    if (!NON_CHAT_MODEL.test(model) && (await provider.canChat?.({ apiKey, model, config })) !== false) return model;
+  }
+  return null;
+}
+
 // Lists the provider's models, then sends one tiny real request with the chosen model (or
-// the first listed), so an account without credit or an Ollama server that refuses the
+// the first listed chat model), so an account without credit or an Ollama server that refuses the
 // extension fails here rather than on the first task. Returns the success text; throws
 // with the provider's own explanation.
 async function testConnection(id, apiKey, config) {
@@ -27,10 +39,14 @@ async function testConnection(id, apiKey, config) {
   const started = Date.now();
   try {
     const models = await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
-    const model = config.models[id] || models[0];
+    const model = config.models[id] || (await within(firstChatModel(provider, models, apiKey, config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds."));
     if (!model) {
-      if (id === "ollama") throw new Error("Ollama is running but has no models yet. Pull one that supports tools with ollama pull <model>, then test again.");
-      throw new Error("The provider lists no models for this key.");
+      const fix = id === "ollama" ? "Pull one that supports tools with ollama pull <model>" : "Pick a chat model in Settings > Models";
+      if (!models.length) {
+        if (id === "ollama") throw new Error(`Ollama is running but has no models yet. ${fix}, then test again.`);
+        throw new Error("The provider lists no models for this key.");
+      }
+      throw new Error(`None of the ${models.length} listed models can chat with tools; they look like embedding, speech or other special-purpose models. ${fix}, then test again.`);
     }
     await within(provider.ping({ apiKey, model, config }), MODEL_TEST_TIMEOUT_MS, `${model} did not answer within 60 seconds.`);
     const count = `${models.length} model${models.length === 1 ? "" : "s"} available`;

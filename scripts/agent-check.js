@@ -914,6 +914,10 @@ const standIn = createServer((req, res) => {
     const json = (status, value) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
     if (req.method === "POST") testBodies.push({ path: req.url, body: JSON.parse(body) });
     if (req.url === "/api/tags") return json(200, { models: ollamaModels });
+    if (req.url === "/api/show") {
+      const capabilities = ollamaModels.find((m) => m.name === JSON.parse(body).model)?.capabilities;
+      return capabilities ? json(200, { capabilities }) : json(404, { error: "model not found" });
+    }
     if (req.url === "/api/chat") return res.writeHead(403).end();
     if (req.url === "/v1/models") return json(200, { object: "list", data: [{ id: "gpt-cheap" }] });
     json(429, { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } });
@@ -943,6 +947,18 @@ const refusedOrigin = await testResult({ provider: "ollama", host: standInUrl })
 assert.equal(refusedOrigin.ok, false, "an Ollama that refuses the extension passed the connection test");
 assert.match(refusedOrigin.text, /OLLAMA_ORIGINS/);
 assert.equal(testBodies.at(-1).body.model, "qwen3:8b", "without a chosen model, the first listed one is tried");
+// Without a chosen model, models that cannot chat with tools are skipped: by their reported
+// capabilities, else by a name that looks like an embedding or speech model.
+const embedOnly = [{ name: "all-minilm", capabilities: ["embedding"] }, { name: "llava", capabilities: ["completion", "vision"] }, { name: "mxbai-embed-large" }];
+ollamaModels = [...embedOnly, { name: "whisper-1" }, { name: "qwen3:8b", capabilities: ["completion", "tools"] }];
+await testResult({ provider: "ollama", host: standInUrl });
+assert.equal(testBodies.filter((b) => b.path === "/api/chat").at(-1).body.model, "qwen3:8b", "a model that cannot chat with tools was tested");
+ollamaModels = embedOnly;
+const chats = testBodies.filter((b) => b.path === "/api/chat").length;
+const noChatModel = await testResult({ provider: "ollama", host: standInUrl });
+assert.equal(noChatModel.ok, false);
+assert.match(noChatModel.text, /None of the 3 listed models can chat with tools.*ollama pull <model>/);
+assert.equal(testBodies.filter((b) => b.path === "/api/chat").length, chats, "a test request went to a model that cannot chat");
 standIn.close();
 
 // Ollama gets a think field only for models that list the thinking capability: the

@@ -42,7 +42,7 @@ It works in regular web pages, not in Chrome's own pages.
 A short setup opens the first time:
 
 1. **Provider.** Pick the provider you have a key for, or a local model.
-2. **Key.** Paste your key (there is a link to the provider's key page), and the setup tests the connection. With a local model, no key is needed.
+2. **Key.** Paste your key (there is a link to the provider's key page), and the setup tests the connection with one tiny request to the model you chose, or else to the first listed model that can chat and use tools (embedding, moderation, OCR and speech models are skipped). With a local model, no key is needed.
 3. **Try it.** Pick an example task to start, or type your own.
 
 You can run setup again from Settings > General.
