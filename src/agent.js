@@ -482,7 +482,9 @@ export class Agent {
           this.mcp?.has(call.name) ? await this.mcp.call(call.name, call.input, { signal }) : await this.browser.run(call.name, call.input),
         );
         if (guarded) {
+          const scanStarted = Date.now();
           const warning = await this.guard.scanContent({ config, name: call.name, output, signal });
+          if (config.debugMode) this.emit({ type: "debug", text: `Content scan of ${call.name}: ${Date.now() - scanStarted} ms.` });
           if (warning) {
             this.emit({ type: "notice", text: `Possible prompt injection on this page: ${warning}` });
             output = [
@@ -625,6 +627,7 @@ export class Agent {
   async #safetyCheck(call, config, signal) {
     const page = await this.browser.currentPage();
     const target = ["browser", "form_input"].includes(call.name) ? await this.browser.describeTarget(call.input) : null;
+    const started = Date.now();
     const { verdict, reason } = await this.guard.checkAction({
       config,
       userRequests: this.#userRequests(),
@@ -635,6 +638,7 @@ export class Agent {
       declined: [...this.declinedCalls],
       signal,
     });
+    if (config.debugMode) this.emit({ type: "debug", text: `Safety check of ${call.name}: ${Date.now() - started} ms, ${verdict}.` });
     return { page, target, verdict, reason };
   }
 
