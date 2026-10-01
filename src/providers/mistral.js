@@ -8,7 +8,7 @@ const MAX_IMAGES = 4;
 
 const withEndpoint = (opts) => ({
   ...opts,
-  config: { ...opts.config, openaiBaseUrl: MISTRAL_BASE_URL, chatMaxImages: MAX_IMAGES },
+  config: { ...opts.config, openaiBaseUrl: MISTRAL_BASE_URL, chatMaxImages: MAX_IMAGES, chatTemplateKwargs: false },
 });
 
 export const turn = (opts) => openai.turn(withEndpoint(opts));

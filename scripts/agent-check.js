@@ -209,6 +209,32 @@ await assert.rejects(ask);
 assert.equal(hits, 1, "a 429 was retried by the SDK");
 server.close();
 
+// A custom base URL carries the thinking setting as chat_template_kwargs, and safety
+// checks never think. Mistral's adapter sends no such field.
+const kwargsBodies = [];
+const kwargsServer = createServer((req, res) => {
+  let data = "";
+  req.on("data", (c) => (data += c));
+  req.on("end", () => {
+    const body = JSON.parse(data);
+    kwargsBodies.push(body);
+    if (body.stream) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    } else res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ choices: [{ message: { content: "{}" } }], usage: { total_tokens: 1 } }));
+  });
+});
+await new Promise((r) => kwargsServer.listen(0, "127.0.0.1", r));
+const kwargsConfig = { ...config, openaiBaseUrl: `http://127.0.0.1:${kwargsServer.address().port}/v1` };
+const kwargsTurn = (thinking) =>
+  openai.turn({ apiKey: "test", model: "local", config: { ...kwargsConfig, thinking }, system: "s", tools: [], messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} });
+await kwargsTurn(true);
+await kwargsTurn(false);
+await openai.classify({ apiKey: "test", model: "local", config: { ...kwargsConfig, thinking: true }, system: "s", text: "t", schema: {} });
+await openai.classify({ apiKey: "test", model: "local", config: { ...kwargsConfig, chatTemplateKwargs: false }, system: "s", text: "t", schema: {} });
+assert.deepEqual(kwargsBodies.map((b) => b.chat_template_kwargs), [{ enable_thinking: true }, { enable_thinking: false }, { enable_thinking: false }, undefined]);
+kwargsServer.close();
+
 // Loop guard: a call that keeps failing the same way gets a note telling the model to
 // change approach, and the task stops before it burns the step budget.
 const probe = (n) => ({ type: "tool_call", id: `call_find${n}`, name: "find", input: { query: "quiz answer" } });
