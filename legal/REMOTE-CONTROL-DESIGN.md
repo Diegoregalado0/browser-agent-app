@@ -14,6 +14,8 @@ This document compares three ways to do it, recommends one, defines the command 
 
 **B, one official Browsby bot plus a relay, is the better experience** (one click to install, no developer portal, an answer even when Chrome is closed), but it adds a Browsby server that sees task text, Discord user ids and pressed prompts. It breaks the first line of the positioning ("nothing sent through us") and the privacy policy's "no server", adds running costs and an always-on service to keep secure. It is specified below so the owner can choose it later; the extension side is shaped so that the parts B would reuse (interaction replies that need no bot token, the session directory) are already separate.
 
+**If B, make it a paid convenience.** Hosting is cheap (about USD 5 a month up to a few thousand users and under USD 100 at 100,000 on Cloudflare Workers); the owner's time is the real cost. A Discord Premium Apps user subscription at about USD 2.99 a month covers it at roughly 65 subscribers, needs no Browsby account, and keeps bring-your-own-bot free.
+
 | | A. Your own bot, made easy (recommended) | B. Official bot plus relay | C1. Bridge in the service worker | C2. Telegram instead |
 | --- | --- | --- | --- | --- |
 | Setup the user sees | 6 short screens: allow access, create app in the portal (deep link and checklist), paste token (checked live), add to Discord (one link), pair (one command) | 2 screens: "Add Browsby to Discord" (one link), then run `/browsby link` and type the code into the panel | Same as A | 3 screens: message @BotFather, paste token, pair |
@@ -111,6 +113,56 @@ End-to-end encryption between the extension and Discord is not possible: Discord
 
 Relay: about 300 lines (signature check, command routing, link table, WebSocket hub) plus deploy configuration, secrets and monitoring. Extension: a `RelayTransport` beside the Gateway one, about 200 lines, reusing the session directory and the interaction reply code from A. Not built on this branch: it needs a Discord app, a domain and hosting, which the brief rules out, and it is larger than a small reference.
 
+### What B would cost to run
+
+Assumptions per user per month: about 20 commands and button presses a day (600 a month), Browsby panels open about 8 hours a day, one WebSocket per open panel, a keepalive every 30 seconds, no screenshots or page content through the relay (progress, prompts and answers go from the extension to Discord directly). That is about 1,500 relay requests and about 5 MB of traffic per user per month. At any moment about a third of users have a panel open.
+
+**Interaction endpoint, not the Gateway.** With an Interactions Endpoint URL the relay is plain HTTPS plus the device WebSockets, so it fits serverless hosting and needs no shards. A Gateway bot must keep a WebSocket to Discord and shard once it is in 2,500 servers (https://docs.discord.com/developers/events/gateway#sharding); user installs do not add servers, so sharding would rarely bind, but the always-on Gateway process and plain-DM support would add cost and code for little gain. B uses the endpoint and slash commands only.
+
+| Users | Cloudflare Workers + Durable Objects (hibernation) | DigitalOcean droplet | Hetzner Cloud | Fly.io | Railway |
+| --- | --- | --- | --- | --- | --- |
+| 100 | USD 5 (plan minimum; usage inside the included 10M requests and 1M DO requests) | USD 6 (1 GB) | about USD 7 (CX23 plus IPv4, EU only) | about USD 6 (shared-cpu-1x 512 MB) | USD 5 to 10 (Hobby, usage over the USD 5 credit) |
+| 1,000 | USD 5 | USD 6 | about USD 7 | about USD 6 | about USD 10 |
+| 10,000 | about USD 9 (15M Worker requests, 15M DO requests) | USD 12 to 24 (2 to 4 GB, about 3,000 sockets) | about USD 7 to 15 | about USD 20 (two 1 GB machines and IPv4) | about USD 25 to 40 |
+| 100,000 | about USD 80 to 90 (requests, DO requests, a little CPU and duration) | about USD 75 (two 4 GB droplets, load balancer, managed Redis for routing) | about USD 40 to 60 in the EU; US servers cost about three times more since June 2026 | about USD 50 to 70 (four 1 GB machines, Redis, about 500 GB egress at USD 0.02) | about USD 100 to 130 (Pro plan minimum and usage, egress at USD 0.05) |
+
+Bandwidth is small at every size: about 500 GB a month at 100,000 users, free on Cloudflare and inside the droplet allowance. A domain is about USD 12 a year. Uptime monitoring fits a free tier.
+
+**The bigger cost is the owner's time.** Expect 2 to 4 hours a month at small scale (updates, token rotation, Discord changes, an outage now and then) and support time that grows with paying users. At any hourly value that is more than the hosting until well past 10,000 users. Cloudflare is the least work to operate (no servers, no routing layer, global by default) and the cheapest until about 50,000 users; a VM is cheaper per user at scale but needs patching, failover and a shared routing store once there is more than one machine.
+
+Pricing sources (checked October 2026): Cloudflare Workers https://developers.cloudflare.com/workers/platform/pricing/ and Durable Objects https://developers.cloudflare.com/durable-objects/platform/pricing/ (USD 5 minimum, 10M requests and 30M CPU ms included, then USD 0.30 per million requests and USD 0.02 per million CPU ms; DO 1M requests and 400,000 GB-s included, then USD 0.15 per million and USD 12.50 per million GB-s; WebSocket messages billed 20 to 1; no egress charge). DigitalOcean https://www.digitalocean.com/pricing/droplets (USD 4 for 512 MiB, USD 6 for 1 GiB with 1,000 GiB transfer). Hetzner https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/ (from 15 June 2026: CX23 USD 6.49 and CAX11 USD 6.99 in Germany and Finland, CPX11 in the USA USD 20.49, IPv4 extra; the cost-optimized tier was reported unavailable in September 2026). Fly.io https://docs.fly.io/about/pricing/ (shared-cpu-1x USD 3.65 for 256 MB, USD 5.48 for 512 MB, USD 9.13 for 1 GB; egress USD 0.02 per GB in North America and Europe; dedicated IPv4 USD 2). Railway https://docs.railway.com/pricing/plans (Hobby USD 5 with USD 5 of usage; USD 20 per vCPU and USD 10 per GB RAM per month; egress USD 0.05 per GB; the pricing page itself could not be loaded from here, figures from the docs and https://makerkit.dev/pricing-calculator/railway).
+
+### Could the hosted bot be paid?
+
+Yes, as a paid convenience beside the free bring-your-own-bot path. Nothing about A changes.
+
+**How to charge.** The Chrome Web Store no longer takes payments (https://developer.chrome.com/docs/webstore/cws-payments-deprecation), so the choices are:
+
+| Route | Fee | Who handles tax | What the user needs | Fits Browsby's promise |
+| --- | --- | --- | --- | --- |
+| Discord Premium Apps, user subscription | 15% of the first USD 1M of sales, then 30%, less payment processing (https://support-dev.discord.com/hc/en-us/articles/17299902720919-Premium-Apps-Payout) | Discord sells it in Discord | Buys in Discord; the relay sees the subscription in each interaction's `entitlements` field (https://docs.discord.com/developers/monetization/implementing-app-subscriptions) | Best: no Browsby account and no license key, the Discord account is the subscription |
+| Merchant of record: Paddle or Lemon Squeezy | 5% plus USD 0.50 per sale, more for international cards, PayPal and subscriptions (https://www.lemonsqueezy.com/pricing, https://www.paddle.com/pricing) | The merchant of record (VAT and sales tax) | An email for the receipt and a license key typed into the panel | Adds a license key and an email; still no Browsby login |
+| Stripe directly | 2.9% plus USD 0.30, Billing 0.7%, tax on the seller (Stripe Tax from USD 90 a month, or Managed Payments at 3.5% extra) (https://stripe.com/pricing) | The publisher, unless Managed Payments | An email and a license key | As above, plus the publisher's own tax registrations |
+
+Discord's route requires a verified app owned by a Developer Team, a team owner over 18 with 2FA in a supported country (US, UK, EU), slash commands (which B uses anyway), and payouts after the first USD 100, then monthly above USD 25, within 45 days (https://support-dev.discord.com/hc/en-us/articles/17709085688727-What-Are-Premium-Apps, https://support-dev.discord.com/hc/en-us/articles/17708927296663-Premium-Apps-Onboarding).
+
+**Price points.** Fixed fees hurt small monthly prices: USD 0.50 on a USD 2 sale is 25%. Two workable shapes:
+
+- USD 2.99 a month through Discord: about USD 2.40 to 2.50 to the publisher after Discord's 15% and processing.
+- USD 19 a year through a merchant of record: about USD 17 to the publisher.
+
+Break-even on hosting alone is one or two subscribers at every size up to 100,000 users on Cloudflare (USD 5 to 90 a month). Counting 3 hours a month of the owner's time at USD 50 an hour, the target is about USD 160 a month, which is about 65 monthly subscribers at USD 2.99 through Discord, or about 115 annual ones at USD 19. At 1,000 users with 5% paying (50), it does not quite cover the time; at 10,000 users with 2% paying (200), it does.
+
+**What changes if it is paid.**
+
+- Promise: "No account, no Browsby server" becomes "No account. An optional hosted bot, run by the publisher, forwards your Discord commands to your browser and keeps no content." With Discord Premium Apps there is still no Browsby account.
+- Privacy policy: the relay as a service the publisher runs, what it processes (Discord user id, command text, pressed prompts), what it stores (the link table), retention, location, deletion (`/browsby unlink`); for a merchant of record, the buyer's email and billing country.
+- Terms: a USD 0 liability cap is weak for a paid service; cap liability at the fees paid in the last 12 months instead, add a refund policy (Discord's or the merchant's, plus the publisher's own), say there is no uptime guarantee but best effort, add a support contact and response time, and say what happens to a subscription if Discord or the relay changes. A paid service also makes the publisher a seller in consumer law terms (EU withdrawal rights, which the merchant of record or Discord handle at checkout).
+- Store listing: Chrome Web Store policy asks that paid features be disclosed in the listing; say "Free. Optional paid hosted Discord bot; bring your own bot for free." The privacy tab adds the relay as a recipient of personal communications.
+- Support: refunds, billing questions, lost licenses, and outages are now the publisher's job.
+
+**Recommendation for money.** If the owner chooses B, sell it as a Discord Premium Apps user subscription at about USD 2.99 a month, keep bring-your-own-bot free and first in the setup, and host the relay on Cloudflare Workers with Durable Objects. Discord's 15% is more than a merchant of record's fee at this price, but it removes license keys, accounts, tax handling and most refund work, which is where the real cost is. Revisit a merchant of record (annual plan) only if Discord's rules or regions block the app.
+
 ## Option C: other routes
 
 - **C1. Run the bridge in the service worker.** The Gateway would stay connected whenever Chrome is open, so the bot could answer "Open the Browsby panel to run tasks" instead of timing out, and the one-panel lock would go away. It cannot run tasks with the panel closed, because the agent and its debugger work live in the panel by design (closing the panel ends the task, a safety property kept here). It needs a 20-second keepalive and a store justification for an always-running worker. Worth doing after A if users miss the offline answer; not needed to ship.
@@ -143,7 +195,7 @@ Plain DM text to the bot still works as before: text runs a task, `stop` stops i
 
 ## Owner decisions
 
-1. **A now, B later?** This branch ships A. Choose B only if a one-click install is worth running a relay and changing "nothing sent through us" in every public text.
+1. **A now, B later?** This branch ships A. Choose B only if a one-click install is worth running a relay and changing "nothing sent through us" in every public text. If B, the recommended form is a paid Discord Premium Apps subscription with bring-your-own-bot kept free (see "Could the hosted bot be paid?").
 2. **Should progress lines include page addresses?** They do not now (only the kind of step). Addresses would make progress more useful and would count as browsing history sent to Discord; that would need a setting, off by default, and a privacy update.
 3. **A setting to send screenshots or page text to Discord?** Not built. The brief allows it only as an explicit owner setting; the recommendation is not to add it.
 4. **C1 (offline answer from the service worker):** worth a follow-up if users report "The application did not respond".
