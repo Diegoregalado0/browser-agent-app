@@ -136,6 +136,7 @@ function recordInput(model, usage) {
 
 async function chatTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking, onWait }) {
   await paceFor(model, nextEstimate(model), signal, onWait);
+  const started = Date.now();
   const stream = await client({ apiKey, config }).chat.completions.create(
     {
       model,
@@ -153,8 +154,12 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
   let text = "";
   let finish = null;
   let usage = null;
+  // Local servers such as llama.cpp add their own timings to the last chunks.
+  let timings = null;
+  let firstTokenMs = null;
   const calls = [];
   for await (const chunk of stream) {
+    if (chunk.timings) timings = chunk.timings;
     if (chunk.usage) {
       usage = {
         input: chunk.usage.prompt_tokens,
@@ -165,6 +170,7 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
     const choice = chunk.choices?.[0];
     if (!choice) continue;
     const delta = choice.delta || {};
+    if (firstTokenMs === null && (delta.content || delta.reasoning_content || delta.reasoning || delta.tool_calls)) firstTokenMs = Date.now() - started;
     if (delta.content) {
       text += delta.content;
       onText(delta.content);
@@ -189,7 +195,10 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
   const hasCalls = content.some((b) => b.type === "tool_call");
   const stop = finish === "length" ? "max_tokens" : finish === "content_filter" ? "refusal" : hasCalls ? "tool_use" : "end";
   recordInput(model, usage);
-  return { content, raw: null, stop, usage };
+  const metrics = timings
+    ? { generatedTokens: timings.predicted_n, generationMs: timings.predicted_ms, promptTokens: timings.prompt_n, promptMs: timings.prompt_ms, firstTokenMs }
+    : { firstTokenMs };
+  return { content, raw: null, stop, usage, metrics };
 }
 
 // Models that accept the reasoning parameter.

@@ -1,5 +1,5 @@
 import { providers } from "./providers/index.js";
-import { BROWSER_TOOL_DEFS, addressForToolCall, originForToolCall } from "./browser-tools.js";
+import { BROWSER_TOOL_DEFS, actionProblem, addressForToolCall, originForToolCall } from "./browser-tools.js";
 import { apiKeyFor } from "./config-core.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { Guard, isStateChanging } from "./guard.js";
@@ -8,6 +8,7 @@ import { passwordTargetScript } from "./page-scripts.js";
 import { CURRENT_TAB_TAG, currentTabTag } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
+import { TaskMetrics } from "./metrics.js";
 
 const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 
@@ -24,6 +25,9 @@ const DECLINED = "Do not retry it or work around it; tell the user what you want
 const callKey = (call) => `${call.name} ${JSON.stringify(call.input)}`;
 // What a tool result from a reopened conversation says in place of its output.
 const RESTORED_RESULT = "[output from before this conversation was reopened is not kept; run the tool again if you need it]";
+// Sent once when a turn ends with neither tool calls nor text (the answer was only in the
+// model's thinking, which the user does not see).
+const FINAL_ANSWER_PROMPT = "You ended your turn without writing a reply. Give your final answer to the user now, as plain text.";
 // An address as prompts show it: whole up to ADDRESS_MAX characters (data can ride in it),
 // else its start and how much is left out. The panel wraps it.
 const ADDRESS_MAX = 300;
@@ -250,6 +254,7 @@ export class Agent {
     const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
+    const metrics = (this.taskMetrics = new TaskMetrics());
     this.declinedCalls.clear();
     this.declinedHosts.clear();
     this.allowedPrivateOrigins.clear();
@@ -260,6 +265,14 @@ export class Agent {
 
     try {
       let requestStarted = 0;
+      // Time to the first streamed text or thinking, for providers that do not measure it.
+      let firstTokenMs = null;
+      // A message from the agent to the model (the re-prompt after an empty final turn, or a
+      // reply that could not be read), while it is in the history. It is the agent's, not the
+      // user's: once answered it leaves the history, so it neither shows as a request nor
+      // counts as one for the safety checks.
+      let agentPrompt = null;
+      let finalAnswerAsked = false;
       for (let step = 0; step < config.maxSteps; step++) {
         this.emit({ type: "assistant_start" });
         let result;
@@ -273,6 +286,8 @@ export class Agent {
             this.emit({ type: "debug", text: `Trimmed old screenshots and tool output (last request ${this.lastInput} input tokens).` });
           }
           requestStarted = Date.now();
+          firstTokenMs = null;
+          const firstToken = () => (firstTokenMs ??= Date.now() - requestStarted);
           for (;;) {
             try {
               result = await provider.turn({
@@ -283,8 +298,8 @@ export class Agent {
                 tools,
                 messages: this.messages,
                 signal,
-                onText: (delta) => this.emit({ type: "text", delta }),
-                onThinking: (delta) => this.emit({ type: "thinking", delta }),
+                onText: (delta) => (firstToken(), this.emit({ type: "text", delta })),
+                onThinking: (delta) => (firstToken(), this.emit({ type: "thinking", delta })),
                 onWait: (secs) => this.emit({ type: "notice", text: `Pacing for ${config.provider}'s token rate limit; waiting ${secs}s.` }),
               });
               break;
@@ -308,7 +323,27 @@ export class Agent {
           }
           throw new Error(provider.describeError(err) || err.message);
         }
+        const requestMs = Date.now() - requestStarted;
 
+        if (agentPrompt) {
+          this.messages.splice(this.messages.indexOf(agentPrompt), 1);
+          agentPrompt = null;
+        }
+        // A reply the provider could not read (Ollama's tool call parser failing mid-reply).
+        // The model is told and tries again; repeats count toward the loop guard.
+        if (result.stop === "unreadable") {
+          const error = result.error.slice(0, 300);
+          if (config.debugMode) this.emit({ type: "debug", text: `Request ${step + 1}: the reply could not be read, ${requestMs} ms: ${error}` });
+          const note = this.loopGuard.record("reply", {}, true, error);
+          if (this.loopGuard.stopReason) {
+            this.emit({ type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
+            return;
+          }
+          const text = `[Agent] Your last reply could not be read (${error}). Send it again: tool calls with valid arguments, or a plain text answer.`;
+          agentPrompt = { role: "user", content: [{ type: "text", text: note ? `${text}\n${note}` : text }] };
+          this.messages.push(agentPrompt);
+          continue;
+        }
         // Marked before the history is first saved, so no saved copy holds a password.
         for (const call of result.content.filter((b) => b.type === "tool_call")) {
           // Small models (Ministral) often send a ref as its bare number, "3" for "ref_3". This
@@ -318,11 +353,12 @@ export class Agent {
         }
         this.messages.push({ role: "assistant", content: result.content, raw: result.raw });
         if (result.usage?.input) this.lastInput = result.usage.input;
+        this.emit({ type: "speed", ...metrics.request({ usage: result.usage, metrics: result.metrics, ms: requestMs, firstTokenMs }) });
         if (config.debugMode && result.usage) {
           const u = result.usage;
           this.emit({
             type: "debug",
-            text: `Request ${step + 1}: ${u.input ?? 0} input tokens (${u.cachedInput ?? 0} cached), ${u.output ?? 0} output, ${Date.now() - requestStarted} ms, stop: ${result.stop}.`,
+            text: `Request ${step + 1}: ${u.input ?? 0} input tokens (${u.cachedInput ?? 0} cached), ${u.output ?? 0} output, ${requestMs} ms, stop: ${result.stop}.`,
           });
         }
         this.onHistory();
@@ -350,6 +386,18 @@ export class Agent {
         if (replyText) this.emit({ type: "reply", text: replyText });
         if (calls.length === 0) {
           if (result.stop === "max_tokens") this.emit({ type: "notice", text: "The reply hit the output limit." });
+          else if (!replyText) {
+            // An empty turn adds nothing the model needs to see again.
+            this.messages.pop();
+            this.onHistory();
+            if (!finalAnswerAsked) {
+              finalAnswerAsked = true;
+              agentPrompt = { role: "user", content: [{ type: "text", text: FINAL_ANSWER_PROMPT }] };
+              this.messages.push(agentPrompt);
+              continue;
+            }
+            this.emit({ type: "notice", text: "The model ended its turn without a reply. Ask again, or try another model or setting." });
+          }
           return;
         }
         if (result.stop === "max_tokens") {
@@ -373,6 +421,7 @@ export class Agent {
       this.emit({ type: "notice", text: `Stopped after ${config.maxSteps} steps (raise the limit in Settings).` });
     } finally {
       this.abortController = null;
+      if (metrics.input || metrics.output) this.emit({ type: "task_stats", text: metrics.summary() });
       await this.browser.endTask().catch(() => {});
       this.onHistory();
       this.emit({ type: "status", running: false });
@@ -419,6 +468,9 @@ export class Agent {
       let authorizing = false;
       try {
         if (call.input?.__invalid_json !== undefined) throw new Error("Tool arguments were not valid JSON.");
+        // Before the checks, so no safety check is spent on a call that cannot run.
+        const problem = actionProblem(call.name, call.input);
+        if (problem) throw new Error(problem);
         await this.limiter.take("action", config.limits.actionsPerMinute, signal, (secs) =>
           this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
         );
@@ -439,7 +491,14 @@ export class Agent {
           this.mcp?.has(call.name) ? await this.mcp.call(call.name, call.input, { signal }) : await this.browser.run(call.name, call.input),
         );
         if (guarded) {
+          const scanStarted = Date.now();
           const warning = await this.guard.scanContent({ config, name: call.name, output, signal });
+          // A scan this short made no model call (a tool that is not scanned, or output already scanned).
+          const scanMs = Date.now() - scanStarted;
+          if (scanMs >= 50) {
+            this.taskMetrics.check(scanMs);
+            if (config.debugMode) this.emit({ type: "debug", text: `Content scan of ${call.name}: ${scanMs} ms.` });
+          }
           if (warning) {
             this.emit({ type: "notice", text: `Possible prompt injection on this page: ${warning}` });
             output = [
@@ -582,6 +641,7 @@ export class Agent {
   async #safetyCheck(call, config, signal) {
     const page = await this.browser.currentPage();
     const target = ["browser", "form_input"].includes(call.name) ? await this.browser.describeTarget(call.input) : null;
+    const started = Date.now();
     const { verdict, reason } = await this.guard.checkAction({
       config,
       userRequests: this.#userRequests(),
@@ -592,6 +652,9 @@ export class Agent {
       declined: [...this.declinedCalls],
       signal,
     });
+    const ms = Date.now() - started;
+    this.taskMetrics.check(ms);
+    if (config.debugMode) this.emit({ type: "debug", text: `Safety check of ${call.name}: ${ms} ms, ${verdict}.` });
     return { page, target, verdict, reason };
   }
 

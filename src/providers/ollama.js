@@ -1,4 +1,5 @@
 import { Ollama } from "ollama/browser";
+import { MODEL_LOAD_MS } from "../metrics.js";
 
 // Native Ollama API rather than its OpenAI-compatible endpoint, so the context window
 // (num_ctx) can be raised; screenshots and tool definitions overflow the default.
@@ -36,8 +37,12 @@ function toMessages(system, messages) {
   return out;
 }
 
-function client(config) {
-  return new Ollama({ host: config.ollamaHost });
+// The library sends a request's own abort signal only once the response starts, and none
+// for a request that does not stream, so Stop could not cut short the prompt processing
+// before the first token. Every request made for a task carries the task's signal.
+function client(config, signal) {
+  const withSignal = (url, init = {}) => fetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal });
+  return new Ollama({ host: config.ollamaHost, ...(signal && { fetch: withSignal }) });
 }
 
 // Whether a model lists the "thinking" capability, asked once per host and model. Models
@@ -70,9 +75,46 @@ export async function canChat({ model, config }) {
   return capabilities ? capabilities.includes("completion") && capabilities.includes("tools") : null;
 }
 
-export async function turn({ model, config, system, tools, messages, signal, onText, onThinking }) {
-  const ollama = client(config);
-  const stream = await ollama.chat({
+// Ollama's parser for some models' tool calls (Qwen 3.5's XML format) can fail mid-reply on
+// output that a second sample usually gets right.
+const TOOL_CALL_PARSE_ERROR = /XML syntax error|tool ?call pars|pars(e|ing) tool ?call/i;
+
+// A reply that fails to parse is requested again once; a second failure comes back as an
+// unreadable reply, which the agent tells the model about, rather than as an error.
+export async function turn(opts) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await turnOnce(opts);
+    } catch (err) {
+      if (opts.signal.aborted || !TOOL_CALL_PARSE_ERROR.test(err?.message)) throw err;
+      if (attempt >= 1) return { content: [], raw: null, stop: "unreadable", error: err.message, usage: null };
+    }
+  }
+}
+
+// The share of a loaded model in GPU memory (the rest is in system memory and runs on the
+// CPU), from /api/ps. Asked once per host and model, and again after a model load, which can
+// place it differently. A failed lookup is not kept.
+const placements = new Map();
+function gpuShare(config, model, reloaded) {
+  const key = `${config.ollamaHost} ${model}`;
+  if (reloaded || !placements.has(key)) {
+    const lookup = client(config)
+      .ps()
+      .then(({ models }) => {
+        const loaded = models.find((m) => m.name === model || m.model === model);
+        if (!loaded?.size) throw new Error("not loaded");
+        return loaded.size_vram / loaded.size;
+      })
+      .catch(() => (placements.delete(key), null));
+    placements.set(key, lookup);
+  }
+  return placements.get(key);
+}
+
+async function turnOnce({ model, config, system, tools, messages, signal, onText, onThinking }) {
+  const started = Date.now();
+  const stream = await client(config, signal).chat({
     model,
     stream: true,
     messages: toMessages(system, messages),
@@ -83,28 +125,38 @@ export async function turn({ model, config, system, tools, messages, signal, onT
     options: { num_ctx: config.ollamaContext },
     ...((await canThink(config, model)) && { think: Boolean(config.thinking) }),
   });
-  const onAbort = () => stream.abort();
-  signal.addEventListener("abort", onAbort);
 
   let text = "";
   let doneReason = null;
   let usage = null;
+  let metrics = null;
+  let firstTokenMs = null;
   const calls = [];
-  try {
-    for await (const chunk of stream) {
-      if (chunk.message?.thinking) onThinking(chunk.message.thinking);
-      if (chunk.message?.content) {
-        text += chunk.message.content;
-        onText(chunk.message.content);
-      }
-      calls.push(...(chunk.message?.tool_calls || []));
-      if (chunk.done) {
-        doneReason = chunk.done_reason;
-        usage = { input: chunk.prompt_eval_count ?? 0, cachedInput: 0, output: chunk.eval_count ?? 0 };
-      }
+  for await (const chunk of stream) {
+    if (firstTokenMs === null && (chunk.message?.thinking || chunk.message?.content || chunk.message?.tool_calls)) firstTokenMs = Date.now() - started;
+    if (chunk.message?.thinking) onThinking(chunk.message.thinking);
+    if (chunk.message?.content) {
+      text += chunk.message.content;
+      onText(chunk.message.content);
     }
-  } finally {
-    signal.removeEventListener("abort", onAbort);
+    calls.push(...(chunk.message?.tool_calls || []));
+    if (chunk.done) {
+      doneReason = chunk.done_reason;
+      usage = { input: chunk.prompt_eval_count ?? 0, cachedInput: 0, output: chunk.eval_count ?? 0 };
+      // Durations are in nanoseconds.
+      metrics = {
+        generatedTokens: chunk.eval_count,
+        generationMs: chunk.eval_duration / 1e6,
+        promptTokens: chunk.prompt_eval_count,
+        promptMs: chunk.prompt_eval_duration / 1e6,
+        loadMs: chunk.load_duration / 1e6,
+        contextSize: config.ollamaContext,
+      };
+    }
+  }
+  if (metrics) {
+    metrics.firstTokenMs = firstTokenMs;
+    metrics.gpuShare = await gpuShare(config, model, metrics.loadMs > MODEL_LOAD_MS);
   }
 
   const content = [];
@@ -113,7 +165,7 @@ export async function turn({ model, config, system, tools, messages, signal, onT
     content.push({ type: "tool_call", id: `ollama_${Date.now()}_${i}`, name: c.function.name, input: c.function.arguments || {} }),
   );
   const stop = doneReason === "length" ? "max_tokens" : calls.length ? "tool_use" : "end";
-  return { content, raw: null, stop, usage };
+  return { content, raw: null, stop, usage, metrics };
 }
 
 // The connection test's one real request: the chosen model, one output token. A POST, so
@@ -141,8 +193,8 @@ export function describeError(err) {
 }
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
-export async function classify({ model, config, system, text, images = [], schema, onUsage }) {
-  const res = await client(config).chat({
+export async function classify({ model, config, system, text, images = [], schema, signal, onUsage }) {
+  const res = await client(config, signal).chat({
     model,
     stream: false,
     format: schema,

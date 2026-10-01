@@ -2,6 +2,7 @@ import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
 import { createWizard } from "./wizard.js";
 import { renderMarkdown } from "./markdown.js";
+import { speedParts } from "./speed.js";
 
 const $ = (id) => document.getElementById(id);
 const log = $("log");
@@ -347,13 +348,23 @@ const activity = (() => {
   let timer = null;
   let reportedTokens = 0;
   let streamedChars = 0;
+  // The current model request: when it started, its first token, what it streamed, and the
+  // agent's figures once it ended. local keeps the last context and GPU share reported.
+  let request = { started: 0, firstTokenAt: null, chars: 0, text: "", final: null };
+  let local = {};
 
   const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const render = () => {
     if (!still.matches) $("spinner").textContent = GLYPHS[(frame = (frame + 1) % GLYPHS.length)];
     const secs = Math.floor((Date.now() - started) / 1000);
     const tokens = reportedTokens + Math.round(streamedChars / 4);
-    $("activity-meta").textContent = `(${secs}s${tokens ? ` · ↓ ${fmt(tokens)} tokens` : ""})`;
+    // These states say what the task waits for; a rate beside them would mislead.
+    const waiting = /^(Rate limited|Waiting for your approval|Pausing)/.test($("activity-verb").textContent);
+    const { parts, tips } = waiting
+      ? { parts: [], tips: [] }
+      : speedParts({ now: Date.now(), requestStarted: request.started, firstTokenAt: request.firstTokenAt, chars: request.chars, text: request.text, final: request.final, local });
+    $("activity-meta").textContent = `(${[`${secs}s`, ...(tokens ? [`↓ ${fmt(tokens)} tokens`] : []), ...parts].join(" · ")})`;
+    $("activity-meta").title = tips.join(", ");
   };
   return {
     start() {
@@ -361,6 +372,8 @@ const activity = (() => {
       started = Date.now();
       reportedTokens = 0;
       streamedChars = 0;
+      request = { started: 0, firstTokenAt: null, chars: 0, text: "", final: null };
+      local = {};
       $("activity").hidden = false;
       this.set(randomVerb());
       timer = setInterval(render, 120);
@@ -374,8 +387,21 @@ const activity = (() => {
     set(text) {
       $("activity-verb").textContent = text;
     },
-    addChars(n) {
-      streamedChars += n;
+    // A model request starts.
+    startRequest() {
+      request = { started: Date.now(), firstTokenAt: null, chars: 0, text: "", final: null };
+    },
+    addText(delta) {
+      streamedChars += delta.length;
+      request.firstTokenAt ??= Date.now();
+      request.chars += delta.length;
+      request.text += delta;
+    },
+    // The agent's figures for the request that just ended.
+    setSpeed(figures) {
+      request.final = figures;
+      if (figures.contextShare != null) local.contextShare = figures.contextShare;
+      if (figures.gpuShare != null) local.gpuShare = figures.gpuShare;
     },
     // Exact output tokens for this task so far; replaces the streamed-text estimate.
     setOutputTokens(taskTotal) {
@@ -424,6 +450,7 @@ const handlers = {
   assistant_start() {
     textNode = null;
     thinkingBody = null;
+    activity.startRequest();
     activity.set(randomVerb());
   },
   text(msg) {
@@ -434,7 +461,7 @@ const handlers = {
     }
     textNode.raw += msg.delta;
     textNode.innerHTML = renderMarkdown(textNode.raw);
-    activity.addChars(msg.delta.length);
+    activity.addText(msg.delta);
     activity.set("Writing…");
   },
   thinking(msg) {
@@ -447,7 +474,7 @@ const handlers = {
       thinkingBody = details.appendChild(el("div"));
     }
     thinkingBody.textContent += msg.delta;
-    activity.addChars(msg.delta.length);
+    activity.addText(msg.delta);
     activity.set("Thinking…");
   },
   tool_call(msg) {
@@ -511,6 +538,12 @@ const handlers = {
   debug(msg) {
     debugLines.push(`${new Date().toISOString().slice(11, 19)} ${msg.text}`);
     if (debugLines.length > 200) debugLines.shift();
+    append(el("div", "msg debug", msg.text));
+  },
+  speed(msg) {
+    activity.setSpeed(msg);
+  },
+  task_stats(msg) {
     append(el("div", "msg debug", msg.text));
   },
   usage(msg) {

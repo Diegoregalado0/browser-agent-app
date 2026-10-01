@@ -22,7 +22,9 @@ import { DiscordBridge } from "../src/remote-discord.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
-import { Browser, formatHeaders } from "../src/browser-tools.js";
+import { TaskMetrics } from "../src/metrics.js";
+import { speedParts } from "../ui/speed.js";
+import { Browser, actionProblem, formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
 import { readPageScript, describeTargetScript } from "../src/page-scripts.js";
 
@@ -77,6 +79,50 @@ await agent.run("next", config);
 const sent = requests[0];
 assert.ok(!sent.some((m) => m.role === "assistant" && m.content.some((b) => b.type === "tool_call" && b.id === "call_click")), "unanswered call was sent");
 assert.equal(sent.at(-1).role, "user");
+
+// A turn that ends with no reply and no tool calls (the answer only in the thinking) gets
+// one re-prompt for the answer, which leaves the history once answered; a second empty turn
+// ends the task with a notice instead of another request.
+const emptyEvents = [];
+const quiet = new Agent({ emit: (e) => emptyEvents.push(e), askPermission: async () => "allow" });
+quiet.browser = agent.browser;
+const empty = { content: [], raw: null, stop: "end", usage: { input: 1, output: 1 } };
+requests = [];
+replies = [empty, { content: [{ type: "text", text: "The answer is 42." }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+await quiet.run("what is it?", config);
+assert.equal(requests.length, 2);
+assert.match(requests[1].at(-1).content[0].text, /final answer/);
+assert.ok(emptyEvents.some((e) => e.type === "reply" && e.text === "The answer is 42."));
+assert.deepEqual(quiet.messages.map((m) => m.role), ["user", "assistant"], "the re-prompt or the empty turn stayed in the history");
+requests = [];
+emptyEvents.length = 0;
+replies = [empty, empty, empty];
+await quiet.run("and now?", config);
+assert.equal(requests.length, 2, "an empty turn was re-prompted more than once");
+assert.ok(emptyEvents.some((e) => e.type === "notice" && /without a reply/.test(e.text)));
+assert.deepEqual(quiet.messages.map((m) => m.role), ["user", "assistant", "user"]);
+replies = [];
+
+// A browser or tabs call without a valid action names the field and the valid actions, and
+// fails before any safety check or action.
+assert.equal(actionProblem("tabs", { action: "open" }), '"open" is not a tabs action. Set "action" to one of: list, create, switch, close.');
+assert.equal(actionProblem("navigate", {}), null);
+const actionsBefore = actions;
+requests = [];
+replies = [
+  { content: [{ type: "tool_call", id: "no_action", name: "browser", input: { coordinate: [5, 5] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+await quiet.run("click", config);
+assert.match(requests[1].at(-1).content[0].content[0].text, /^The browser tool needs an "action" field\. Set "action" to one of: screenshot, left_click, /);
+assert.equal(actions, actionsBefore, "a call without an action ran");
+
+// Each request reports its speed to the panel, and the task ends with a one-line summary.
+emptyEvents.length = 0;
+replies = [{ content: [{ type: "text", text: "Two words." }], raw: null, stop: "end", usage: { input: 5, output: 3 }, metrics: { generatedTokens: 3, generationMs: 500 } }];
+await quiet.run("speed?", config);
+assert.deepEqual(emptyEvents.find((e) => e.type === "speed"), { type: "speed", exact: true, firstTokenMs: null, tokensPerSecond: 6, rateMs: 500 });
+assert.match(emptyEvents.find((e) => e.type === "task_stats").text, /^6 tok\/s average · 8 tokens \(5 in, 3 out\) · 0s · safety checks 0% of the time$/);
 
 // Compaction: once requests grow large, older long tool output and screenshots are trimmed
 // in one pass, the latest messages are kept whole, and no pass runs again until the
@@ -538,6 +584,17 @@ sse = [];
 globalThis.fetch = async (url, init) => (bodies.push(JSON.parse(init.body)), new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
 await oTurn({ ...config, openaiBaseUrl: "http://127.0.0.1:9/v1" }, userTurn);
 assert.ok(bodies.at(-1).tools.every((t) => t.type === "function"), "Chat Completions got a hosted search tool");
+// A local server's timings (llama.cpp) become speed figures; a hosted one gets only the
+// measured time to first token.
+const llamaChunks = [
+  { choices: [{ index: 0, delta: { content: "Hi" } }] },
+  { choices: [{ index: 0, delta: {}, finish_reason: "stop" }], timings: { prompt_n: 900, prompt_ms: 600, predicted_n: 40, predicted_ms: 800 } },
+];
+globalThis.fetch = async () => new Response(`${llamaChunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+const llama = await oTurn({ ...config, openaiBaseUrl: "http://127.0.0.1:9/v1" }, userTurn);
+assert.deepEqual({ ...llama.metrics, firstTokenMs: typeof llama.metrics.firstTokenMs }, { generatedTokens: 40, generationMs: 800, promptTokens: 900, promptMs: 600, firstTokenMs: "number" });
+llamaChunks[1] = { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] };
+assert.deepEqual(Object.keys((await oTurn({ ...config, openaiBaseUrl: "http://127.0.0.1:9/v1" }, userTurn)).metrics), ["firstTokenMs"]);
 globalThis.fetch = realFetch;
 
 assert.ok(!SYSTEM_PROMPT.includes("google.com/search"), "the prompt still sends the model to Google result pages");
@@ -692,6 +749,77 @@ assert.match(onBank.messages.at(-2).content[0].content[0].text, /declined acting
 assert.match(ollama.describeError(new TypeError("Failed to fetch")), /Is it running/);
 const ollamaError = (message, status) => Object.assign(new Error(message), { name: "ResponseError", status_code: status });
 assert.match(ollama.describeError(ollamaError("Forbidden", 403)), /OLLAMA_ORIGINS/);
+
+// Stop reaches Ollama while it is still processing the prompt (no response yet), for a
+// turn and for a safety check, against a stand-in that answers only after 5 seconds.
+const slowOllama = createServer((req, res) => {
+  if (req.url === "/api/show") return res.end(JSON.stringify({ capabilities: ["completion", "tools", "thinking"] }));
+  setTimeout(() => res.end("{}"), 5000);
+});
+await new Promise((r) => slowOllama.listen(0, "127.0.0.1", r));
+const slowConfig = { ...config, ollamaHost: `http://127.0.0.1:${slowOllama.address().port}` };
+for (const call of [
+  (signal) => ollama.turn({ model: "m", config: slowConfig, system: "s", tools: [], messages: [], signal, onText: () => {}, onThinking: () => {} }),
+  (signal) => ollama.classify({ model: "m", config: slowConfig, system: "s", text: "t", schema: {}, signal }),
+]) {
+  const controller = new AbortController();
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 200);
+  await assert.rejects(call(controller.signal), { name: "AbortError" });
+  assert.ok(Date.now() - started < 1000, `Stop took ${Date.now() - started} ms to reach Ollama`);
+}
+slowOllama.closeAllConnections();
+slowOllama.close();
+
+// A tool call Ollama fails to parse mid-reply is requested again once; a second failure
+// comes back as an unreadable reply instead of an error.
+let parseFailures = 0;
+let parseChats = 0;
+const parseOllama = createServer((req, res) => {
+  if (req.url === "/api/show") return res.end(JSON.stringify({ capabilities: ["completion", "tools"] }));
+  if (req.url === "/api/ps") return res.end(JSON.stringify({ models: [] }));
+  parseChats++;
+  const reply = { message: { role: "assistant", content: "hi" }, done: true, done_reason: "stop", prompt_eval_count: 1, eval_count: 1 };
+  const failed = parseFailures-- > 0;
+  res.end(`${JSON.stringify({ message: { role: "assistant", content: "" }, done: false })}\n${JSON.stringify(failed ? { error: "XML syntax error on line 3: element <function> closed by </parameter>" } : reply)}\n`);
+});
+await new Promise((r) => parseOllama.listen(0, "127.0.0.1", r));
+const parseTurn = () =>
+  ollama.turn({ model: "m", config: { ...config, ollamaHost: `http://127.0.0.1:${parseOllama.address().port}` }, system: "s", tools: [], messages: [], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} });
+parseFailures = 1;
+assert.equal((await parseTurn()).content[0].text, "hi");
+assert.equal(parseChats, 2);
+parseFailures = 2;
+parseChats = 0;
+const unreadable = await parseTurn();
+assert.equal(unreadable.stop, "unreadable");
+assert.match(unreadable.error, /XML syntax error/);
+assert.equal(parseChats, 2, "a failed parse was retried more than once");
+parseOllama.close();
+
+// The agent tells the model its reply could not be read, keeps the note out of the history
+// once answered, and stops through the loop guard when it keeps happening.
+const unreadableEvents = [];
+const garbled = new Agent({ emit: (e) => unreadableEvents.push(e), askPermission: async () => "allow" });
+garbled.browser = agent.browser;
+const unreadableTurn = { content: [], raw: null, stop: "unreadable", error: "XML syntax error on line 3", usage: null };
+const turnBefore = providers.openai.turn;
+providers.openai.turn = async ({ messages }) => (requests.push(structuredClone(messages)), replies.shift());
+requests = [];
+replies = [unreadableTurn, { content: [{ type: "text", text: "Done." }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+await garbled.run("go", config);
+assert.match(requests[1].at(-1).content[0].text, /could not be read \(XML syntax error on line 3\)/);
+assert.ok(unreadableEvents.some((e) => e.type === "reply" && e.text === "Done."));
+assert.deepEqual(garbled.messages.map((m) => m.role), ["user", "assistant"]);
+requests = [];
+unreadableEvents.length = 0;
+replies = Array(10).fill(unreadableTurn);
+await garbled.run("again", config);
+assert.equal(requests.length, 5, "unreadable replies were not bounded by the loop guard");
+assert.ok(unreadableEvents.some((e) => e.type === "notice" && /seems stuck/.test(e.text)));
+assert.equal(garbled.messages.at(-1).role, "user");
+providers.openai.turn = turnBefore;
+replies = [];
 
 // Stop during a streamed reply whose SDK ends the stream quietly: the partial reply is not
 // kept as an answer, and the user is told the task stopped.
@@ -965,7 +1093,12 @@ standIn.close();
 // user's setting in a task, off in safety checks. The capability is asked once per model.
 const ollamaChats = [];
 const shown = [];
+let placementsAsked = 0;
 const fakeOllama = createServer((req, res) => {
+  if (req.url === "/api/ps") {
+    placementsAsked++;
+    return res.end(JSON.stringify({ models: [{ name: "hybrid", model: "hybrid", size: 8e9, size_vram: 6e9 }, { name: "plain", model: "plain", size: 4e9, size_vram: 4e9 }] }));
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -977,7 +1110,9 @@ const fakeOllama = createServer((req, res) => {
     }
     ollamaChats.push(request);
     const message = { role: "assistant", content: request.format ? '{"verdict":"allow","reason":"ok"}' : "hi" };
-    const reply = { model: request.model, message, done: true, done_reason: "stop", prompt_eval_count: 1, eval_count: 1 };
+    // Durations in nanoseconds, as Ollama reports them.
+    const timing = { prompt_eval_count: 1000, prompt_eval_duration: 2e9, eval_count: 50, eval_duration: 2.5e9, load_duration: request.model === "hybrid" ? 3e9 : 1e6 };
+    const reply = { model: request.model, message, done: true, done_reason: "stop", ...timing };
     if (request.stream) return res.writeHead(200, { "content-type": "application/x-ndjson" }).end(`${JSON.stringify(reply)}\n`);
     json(reply);
   });
@@ -987,13 +1122,43 @@ const ollamaConfig = { ...config, ollamaHost: `http://127.0.0.1:${fakeOllama.add
 const ollamaTurn = (model, thinking) =>
   ollama.turn({ model, config: { ...ollamaConfig, thinking }, system: "s", tools: [], messages: userTurn, signal: new AbortController().signal, onText: noop, onThinking: noop });
 const ollamaClassify = (model) => ollama.classify({ model, config: ollamaConfig, system: "s", text: "t", schema: {} });
-await ollamaTurn("hybrid", true);
+// Local speed figures: generation and prompt rates from Ollama's durations, a cold start's
+// load time, context use against the window, and the GPU share, asked again only after a load.
+const hybridTurn = await ollamaTurn("hybrid", true);
+assert.deepEqual(
+  { ...hybridTurn.metrics, firstTokenMs: typeof hybridTurn.metrics.firstTokenMs },
+  { generatedTokens: 50, generationMs: 2500, promptTokens: 1000, promptMs: 2000, loadMs: 3000, contextSize: 32768, firstTokenMs: "number", gpuShare: 0.75 },
+);
 await ollamaTurn("hybrid", false);
 await ollamaClassify("hybrid");
 await ollamaTurn("plain", true);
 await ollamaClassify("plain");
 assert.deepEqual(ollamaChats.map((c) => c.think), [true, false, false, undefined, undefined], "wrong think field for Ollama");
 assert.deepEqual(shown, ["hybrid", "plain"], "Ollama capabilities were not asked once per model");
+await ollamaTurn("plain", false);
+assert.equal(placementsAsked, 3, "the GPU share was not asked once per model and again after a load");
+// The activity line's figures: exact ones from a local server (rate, prompt reading speed,
+// a cold start's load, context and GPU share), the stream's own timing for a hosted provider,
+// and no prompt figures made up for it.
+const local = new TaskMetrics();
+local.started = 0;
+const localFigures = local.request({ usage: { input: 30000, output: 50 }, metrics: { ...hybridTurn.metrics, firstTokenMs: 1500 }, ms: 7000 });
+assert.deepEqual(localFigures, { exact: true, firstTokenMs: 1500, tokensPerSecond: 20, rateMs: 2500, promptPerSecond: 500, loadMs: 3000, contextShare: 30000 / 32768, gpuShare: 0.75 });
+const lineFor = (args) => speedParts({ now: 10000, requestStarted: 500, firstTokenAt: null, chars: 0, text: "", ...args });
+assert.deepEqual(lineFor({ final: localFigures, text: "one two three four five", local: localFigures }), {
+  parts: ["20 tok/s", "~2 w/s", "ctx 92%", "GPU 75%"],
+  tips: ["pp 500 tok/s", "first token 1.5s", "model load 3.0s"],
+});
+assert.deepEqual(local.request({ usage: { input: 1000, output: 50 }, metrics: { generatedTokens: 50, generationMs: 1000, loadMs: 200, gpuShare: 1 }, ms: 1000 }).loadMs, undefined, "a warm model showed a load time");
+assert.deepEqual(lineFor({ local: { gpuShare: 1, contextShare: 0.5 } }).parts, ["reading prompt 9s", "ctx 50%"], "a model all on the GPU showed a split");
+assert.deepEqual(lineFor({ requestStarted: 1000, firstTokenAt: 6000, chars: 800, text: "word ".repeat(40) }).parts, ["50 tok/s", "~10 w/s"]);
+local.check(3000);
+assert.equal(local.summary(10000), "29 tok/s average · 31.1k tokens (31.0k in, 100 out) · 10s · safety checks 30% of the time");
+const hosted = new TaskMetrics();
+const hostedFigures = hosted.request({ usage: { input: 10, output: 50 }, metrics: { firstTokenMs: 400 }, ms: 1400 });
+assert.deepEqual(hostedFigures, { exact: false, firstTokenMs: 400, tokensPerSecond: 50, rateMs: 1000 });
+assert.deepEqual(lineFor({ final: hostedFigures, text: "a b c d e f g h i j" }), { parts: ["50 tok/s", "~10 w/s"], tips: ["first token 0.4s"] });
+assert.deepEqual(hosted.request({ usage: { input: 10, output: 5 }, ms: 900, firstTokenMs: null }), { exact: false, firstTokenMs: null });
 fakeOllama.close();
 
 // Sending mail and inviting people ask in every mode, Auto included, once: a safety check
