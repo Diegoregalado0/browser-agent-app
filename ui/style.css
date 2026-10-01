@@ -435,7 +435,7 @@ a.button-link:hover { filter: brightness(1.08); }
 .onboard-bar .done { background: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .onboard-bar .current { background: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .onboard-bar span { transition: none; } }
-.onboard-top { display: flex; align-items: center; min-height: 32px; margin: -8px 0 -4px; }
+.onboard-top { display: flex; align-items: center; align-self: stretch; min-height: 32px; margin: -8px 0 -4px; }
 .onboard-top .onboard-back { margin: 0 0 0 -6px; }
 .onboard-top .icon-btn { margin-right: -8px; }
 .onboard-body { display: flex; flex-direction: column; gap: 12px; }
@@ -466,12 +466,28 @@ a.button-link:hover { filter: brightness(1.08); }
 .onboard-checks .icon { width: 16px; height: 16px; margin-top: 2px; }
 .onboard-checks .ok { color: var(--ok); }
 .onboard-checks .fail { color: var(--error); }
-.onboard a.button-link.onboard-link { display: block; text-align: center; padding: 9px 16px; border-radius: 8px; font-size: 14px; color: var(--accent-fg); }
+.onboard a.button-link.onboard-link {
+  display: block; text-align: center; padding: 8px 16px; border-radius: 8px; font-size: 14px;
+  background: var(--panel); color: var(--accent); border: 1px solid var(--accent);
+}
+.onboard a.button-link.onboard-link:hover { filter: none; background: var(--hover); }
+.onboard a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .onboard-alt-link { font-size: 13px; }
-.pair-command { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px !important; padding: 8px 10px !important; }
+.pair-command { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 14px !important; letter-spacing: 0 !important; padding: 8px 10px !important; }
 .onboard-waiting { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
 
 /* Settings > Remote status card. */
 .remote-head { display: flex; gap: 10px; align-items: flex-start; }
 .remote-head .dot { margin-top: 7px; }
 .remote-howto code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+/* The Browsby mark on the welcome screen: Ink on light, Paper on dark, the lamp lit. */
+.onboard-mark { display: none; width: 72px; height: 72px; fill: #1f3a5f; }
+.onboard.welcome .onboard-mark { display: block; }
+.onboard-mark .mark-ring { fill: none; stroke: #1f3a5f; stroke-width: 15; }
+.onboard-mark .mark-lamp { fill: #e0a23b; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .onboard-mark { fill: #f6f1e7; }
+  :root:not([data-theme="light"]) .onboard-mark .mark-ring { stroke: #f6f1e7; }
+}
+.onboard.center-title .onboard-step-text { text-align: center; }

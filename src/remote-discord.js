@@ -132,7 +132,10 @@ export class DiscordBridge {
     try {
       app = await this.#api(token, "GET", "/applications/@me");
     } catch (err) {
-      const text = /\b401\b/.test(err.message) ? "Discord did not accept this token. Copy it again from Bot > Reset Token in the Developer Portal." : `Could not reach Discord: ${err.message}`;
+      const text =
+        /\b401\b/.test(err.message) ? "Discord did not accept this token. Copy it again from Bot > Reset Token in the Developer Portal."
+        : err instanceof TypeError ? "Could not reach Discord. Check your internet connection and try again."
+        : `Discord could not check the token: ${err.message}`;
       return { ok: false, checks: [{ id: "token", ok: false, text }] };
     }
     this.stop();

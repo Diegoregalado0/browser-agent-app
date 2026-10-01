@@ -79,6 +79,8 @@ export function createRemoteWizard({ $, el, icon, send, toast }) {
   function setOpen(open) {
     root.hidden = !open;
     if (open) wasInert = new Map([...document.body.children].map((node) => [node, node.inert]));
+    // Settings makes everything behind it inert, this flow included.
+    root.inert = false;
     for (const node of document.body.children) {
       if (node !== root && node.id !== "toast") node.inert = open || Boolean(wasInert.get(node));
     }
@@ -303,14 +305,14 @@ export function createRemoteWizard({ $, el, icon, send, toast }) {
       discord_checks(msg) {
         if (screen !== "token" || !checking) return;
         checking = false;
-        checks = msg;
-        renderChecks();
         $("remote-next").disabled = false;
         if (!msg.ok) {
           $("remote-next").textContent = "Check token";
           result("error", msg.checks?.[0]?.text ?? "Discord did not accept the token.");
           return $("remote-token").focus();
         }
+        checks = msg;
+        renderChecks();
         $("remote-token").value = "";
         result("ok", "Your bot is ready.");
         [$("remote-next").textContent, $("remote-next").onclick] = ["Continue", install];
