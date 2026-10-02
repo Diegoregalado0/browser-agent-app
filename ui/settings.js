@@ -4,12 +4,11 @@ import { keyProblem } from "../src/config-core.js";
 // section list and the open page sit side by side; in the side panel the list is its
 // own screen and a page opens over it with a back button.
 
-const PROVIDER_NAMES = { anthropic: "Anthropic", openai: "OpenAI", gemini: "Google Gemini", mistral: "Mistral", ollama: "Ollama" };
-const KEYED_PROVIDERS = ["anthropic", "openai", "gemini", "mistral"];
 const WIDE = window.matchMedia("(min-width: 640px)");
 
-// getDebugLines(): the chat's recent debug lines, for Copy diagnostics.
-export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [] }) {
+// getDebugLines(): the chat's recent debug lines, for Copy diagnostics. onPage(name): a
+// page was shown.
+export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [], onPage = () => {} }) {
   const sheet = $("settings");
   // Where focus goes back to when the sheet closes.
   let opener = null;
@@ -74,6 +73,7 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     if (name === "data") send({ type: "data_info" });
     if (name === "remote") send({ type: "discord_status" });
     if (name === "safety") send({ type: "data_info" });
+    onPage(name);
     // In the side panel the section list is gone now, and focus with it.
     if (!WIDE.matches) $("settings-title").focus();
   }
@@ -161,24 +161,9 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     });
   }
 
-  $("provider").addEventListener("change", () => {
-    const provider = $("provider").value;
-    save({ provider }, `Now using ${PROVIDER_NAMES[provider]}`);
-    $("model-input").value = config.models[provider] || "";
-    loadModels(provider);
-  });
-  $("model-input").addEventListener("change", () => {
-    save({ models: { [$("provider").value]: $("model-input").value.trim() } }, "Model saved");
-  });
-  $("refresh-models").onclick = () => loadModels($("provider").value);
   $("guard-model").addEventListener("change", () => {
     save({ guardModels: { ...config.guardModels, [config.provider]: $("guard-model").value.trim() } });
   });
-
-  function loadModels(provider) {
-    $("models-hint").textContent = "Loading models…";
-    send({ type: "list_models", provider });
-  }
 
   $("ghostMode").addEventListener("change", () => {
     pendingToast = $("ghostMode").checked ? "This session will not be saved" : "Ghost mode off. Started a new session.";
@@ -202,143 +187,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
         send({ type: "data_info" });
       },
     });
-  // Provider cards: key status, replace or remove the key, endpoints, connection test.
-
-  function field(labelText, input, note) {
-    const wrap = el("div", "card-field");
-    const id = `pc-${Math.random().toString(36).slice(2, 8)}`;
-    input.id = id;
-    const label = el("label", "card-label", labelText);
-    label.htmlFor = id;
-    wrap.append(label, input);
-    if (note) {
-      wrap.append(Object.assign(el("p", "field-note", note), { id: `${id}-note` }));
-      input.setAttribute("aria-describedby", `${id}-note`);
-    }
-    return wrap;
-  }
-
-  function buildProviderCard(p) {
-    const card = el("div", "provider-card");
-    card.dataset.provider = p;
-    const head = el("div", "pc-head");
-    head.append(el("span", "pc-name", PROVIDER_NAMES[p]), el("span", "tag pc-active", "In use"), el("span", "pc-status"));
-    card.append(head);
-
-    let keyInput = null;
-    if (KEYED_PROVIDERS.includes(p)) {
-      keyInput = Object.assign(el("input"), { type: "password", autocomplete: "off", spellcheck: false, placeholder: "Paste a new API key" });
-      const saveKey = el("button", null, "Save");
-      saveKey.type = "button";
-      const commit = () => {
-        const key = keyInput.value.trim();
-        if (showKeyProblem(card, key)) return keyInput.focus();
-        keyInput.value = "";
-        save({ keys: { [p]: key } }, `${PROVIDER_NAMES[p]} key saved`);
-        card.querySelector(".pc-result").textContent = "";
-      };
-      saveKey.onclick = commit;
-      keyInput.addEventListener("keydown", (e) => e.key === "Enter" && commit());
-      const row = el("div", "control-row");
-      row.append(keyInput, saveKey);
-      const label = el("label", "card-label", "API key");
-      keyInput.id = `key-${p}`;
-      label.htmlFor = keyInput.id;
-      card.append(el("div", "card-field"));
-      card.lastChild.append(label, row);
-    }
-
-    if (p === "openai") {
-      const baseUrl = Object.assign(el("input"), { placeholder: "https://api.openai.com/v1", spellcheck: false });
-      baseUrl.dataset.bind = "openaiBaseUrl";
-      baseUrl.addEventListener("change", () => save({ openaiBaseUrl: baseUrl.value.trim() }));
-      card.append(field("Base URL", baseUrl, "Leave blank for OpenAI. Set it to use OpenRouter, LM Studio, vLLM, or another OpenAI-compatible server."));
-    }
-    if (p === "ollama") {
-      const host = Object.assign(el("input"), { placeholder: "http://127.0.0.1:11434", spellcheck: false });
-      host.dataset.bind = "ollamaHost";
-      host.addEventListener("change", () => save({ ollamaHost: host.value.trim() || "http://127.0.0.1:11434" }));
-      card.append(field("Host", host, "Run ollama serve first. Use a model that supports tools, and a vision model to read screenshots."));
-      const origins = el("p", "field-note", "Start Ollama with OLLAMA_ORIGINS=chrome-extension://* so the panel is allowed to reach it.");
-      card.append(origins);
-      const ctx = Object.assign(el("input"), { type: "number", min: 4096, step: 1024 });
-      ctx.classList.add("narrow-input");
-      ctx.dataset.bind = "ollamaContext";
-      ctx.addEventListener("change", () => {
-        const value = Math.max(4096, parseInt(ctx.value, 10) || 32768);
-        ctx.value = value;
-        save({ ollamaContext: value });
-      });
-      card.append(field("Context window (tokens)", ctx));
-    }
-
-    const actions = el("div", "pc-actions");
-    const test = el("button", null, "Test connection");
-    test.type = "button";
-    test.onclick = () => {
-      const typed = keyInput?.value.trim();
-      if (typed && showKeyProblem(card, typed)) return keyInput.focus();
-      const result = card.querySelector(".pc-result");
-      result.className = "pc-result pending";
-      result.textContent = "Testing…";
-      send({
-        type: "test_provider",
-        provider: p,
-        key: typed || undefined,
-        baseUrl: p === "openai" ? card.querySelector('[data-bind="openaiBaseUrl"]').value : undefined,
-        host: p === "ollama" ? card.querySelector('[data-bind="ollamaHost"]').value : undefined,
-      });
-    };
-    actions.append(test);
-    if (keyInput) {
-      const remove = el("button", "link-danger pc-remove", "Remove key");
-      remove.type = "button";
-      remove.onclick = () =>
-        confirmInline(remove, {
-          question: `Remove the saved ${PROVIDER_NAMES[p]} key?`,
-          confirmLabel: "Remove",
-          onConfirm: () => save({ keys: { [p]: "__clear__" } }, `${PROVIDER_NAMES[p]} key removed`),
-        });
-      actions.append(remove);
-    }
-    const result = Object.assign(el("p", "pc-result"), { id: `pc-result-${p}` });
-    result.setAttribute("aria-live", "polite");
-    keyInput?.setAttribute("aria-describedby", result.id);
-    card.append(actions, result);
-    return card;
-  }
-
-  // Shows why a typed key cannot be one under its card; true when there was a problem.
-  function showKeyProblem(card, key) {
-    const problem = keyProblem(key);
-    if (!problem) return false;
-    const result = card.querySelector(".pc-result");
-    result.className = "pc-result error";
-    result.replaceChildren(icon("alert"), el("span", null, problem));
-    return true;
-  }
-
-  const cards = $("provider-cards");
-  for (const p of Object.keys(PROVIDER_NAMES)) cards.append(buildProviderCard(p));
-
-  function renderCards() {
-    for (const card of cards.children) {
-      const p = card.dataset.provider;
-      card.classList.toggle("active", p === config.provider);
-      const status = card.querySelector(".pc-status");
-      const info = config.keyInfo?.[p];
-      if (info) {
-        status.className = `pc-status ${info.source}`;
-        status.textContent =
-          info.source === "saved" ? `Saved · ${info.mask}` : "No key";
-        card.querySelector(".pc-remove").hidden = info.source !== "saved";
-      } else status.textContent = "";
-      for (const input of card.querySelectorAll("[data-bind]")) {
-        if (document.activeElement !== input) input.value = config[input.dataset.bind] ?? "";
-      }
-    }
-  }
-
   // Rendering from the saved config. Fields being edited are left alone.
 
   function setValue(id, value) {
@@ -350,13 +198,8 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
 
   function render(next) {
     config = next;
-    // The provider changed elsewhere (setup, another window) while the sheet is open: the
-    // list on screen, or the one still loading, is for the previous provider.
-    if (!sheet.hidden && $("provider").value !== config.provider) loadModels(config.provider);
     for (const control of sheet.querySelectorAll("[data-setting]")) setValue(control.id, readSetting(control.dataset.setting));
     setValue("sensitiveSites", (config.sensitiveSites || []).join("\n"));
-    setValue("provider", config.provider);
-    setValue("model-input", config.models[config.provider] || "");
     setValue("guard-model", config.guardModels?.[config.provider] || "");
     $("guard-model").placeholder = `Default: ${config.defaultGuardModels?.[config.provider] || "same as the main model"}`;
     setValue("ghostMode", config.ghostMode);
@@ -364,7 +207,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     $("ghost-locked-note").hidden = !config.ghostLocked;
     for (const radio of sheet.querySelectorAll('input[name="permissionMode"]')) radio.checked = radio.value === config.permissionMode;
     for (const row of sheet.querySelectorAll("[data-for-provider]")) row.hidden = !row.dataset.forProvider.split(" ").includes(config.provider);
-    renderCards();
     renderOrigins();
     if (pendingToast) {
       toast(pendingToast);
@@ -443,7 +285,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
       else if (WIDE.matches) showPage(page);
       else showNav();
       $("settings-title").focus();
-      if (config) loadModels(config.provider);
     },
     close() {
       if (sheet.hidden) return;
@@ -457,17 +298,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     },
     render,
     handlers: {
-      models(msg) {
-        if (msg.provider !== $("provider").value) return;
-        $("model-list").replaceChildren(...msg.models.map((m) => Object.assign(el("option"), { value: m })));
-        $("models-hint").className = `field-note${msg.error ? " error" : ""}`;
-        $("models-hint").textContent = msg.error || `${msg.models.length} models available. Click the field to pick one, or type an id.`;
-      },
-      provider_test(msg) {
-        const result = cards.querySelector(`[data-provider="${msg.provider}"] .pc-result`);
-        result.className = `pc-result ${msg.ok ? "ok" : "error"}`;
-        result.replaceChildren(icon(msg.ok ? "check" : "alert"), el("span", null, msg.text));
-      },
       data_info(msg) {
         $("tokens-today").textContent = `Used today: ${msg.tokensToday.toLocaleString()} tokens.`;
         $("sessions-count").textContent = `${msg.sessions} saved session${msg.sessions === 1 ? "" : "s"}`;
@@ -505,5 +335,6 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
       },
     },
     toast,
+    confirmInline,
   };
 }

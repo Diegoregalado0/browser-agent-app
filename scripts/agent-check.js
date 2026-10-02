@@ -450,6 +450,46 @@ assert.equal(retired.maxSteps, 7);
 // only unusable entries are dropped.
 assert.deepEqual(mergeConfig({ sensitiveSites: ["https://MyBank.example/login", "*.pay.example", "not a site", 7] }).sensitiveSites, ["mybank.example", "*.pay.example"]);
 
+// Model switcher: the quick selector lists the models already used whose provider can
+// still run, newest first, with the current one first; a switch saves the provider, model
+// and history in one patch, checked like any setting. Model lists leave out non-chat models.
+const { usedModels, switchPatch, forgetPatch, modelTags } = await import("../ui/models.js");
+const uiConfig = (c) => ({ ...c, keyInfo: Object.fromEntries(Object.entries(c.keys).map(([p, k]) => [p, { source: k ? "saved" : "none" }])) });
+const pairs = (list) => list.map((m) => `${m.provider}/${m.model}`);
+assert.deepEqual(pairs(usedModels(uiConfig(hostConfig))), [`openai/${hostConfig.models.openai}`], "the current model is not listed");
+assert.deepEqual(usedModels(uiConfig({ ...hostConfig, keys: { ...hostConfig.keys, openai: "" } })), [], "a model without a key was listed");
+const first = hostConfig.models.openai;
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "ollama", "qwen3:8b") });
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "mistral", "mistral-small-latest") });
+assert.equal(hostConfig.provider, "mistral");
+assert.deepEqual(pairs(hostConfig.modelHistory), ["mistral/mistral-small-latest", "ollama/qwen3:8b", `openai/${first}`]);
+// Mistral has no key, so its model is left out until one is saved.
+assert.deepEqual(pairs(usedModels(uiConfig(hostConfig))), ["ollama/qwen3:8b", `openai/${first}`]);
+await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", first) });
+assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest", "ollama/qwen3:8b"], "a model was listed twice");
+await fromLocal({ type: "save_config", patch: forgetPatch(uiConfig(hostConfig), { provider: "ollama", model: "qwen3:8b" }) });
+assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest"]);
+for (let i = 0; i < 20; i++) await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", `m-${i}`) });
+assert.equal(hostConfig.modelHistory.length, 12);
+for (const modelHistory of [{ openai: ["gpt"] }, [{ provider: "evil", model: "x" }], [{ provider: "openai", model: "a b" }], [{ provider: "openai" }], Array(13).fill({ provider: "openai", model: "a" })]) {
+  const kept = JSON.stringify(hostConfig);
+  await fromLocal({ type: "save_config", patch: { modelHistory } });
+  assert.equal(JSON.stringify(hostConfig), kept, `saved a bad model history: ${JSON.stringify(modelHistory).slice(0, 80)}`);
+}
+assert.deepEqual(mergeConfig({ modelHistory: [{ provider: "openai", model: "ok" }, { provider: "openai", model: 7 }] }).modelHistory, [{ provider: "openai", model: "ok" }]);
+await fromLocal({ type: "reset_config" });
+assert.deepEqual(hostConfig.modelHistory, [], "reset kept the model history");
+assert.equal(hostConfig.keys.openai, "test");
+assert.deepEqual(modelTags("ollama", "qwen3:8b"), ["Local"]);
+assert.deepEqual(modelTags("anthropic", "claude-haiku-4-5"), ["Fast"]);
+assert.deepEqual(modelTags("gemini", "gemini-2.5-flash"), ["Fast"]);
+assert.deepEqual(modelTags("mistral", "ministral-8b"), []);
+providers.openai.listModels = async () => ["gpt-6-sol", "text-embedding-3-small", "whisper-1", "gpt-image-1"];
+localEvents.length = 0;
+await fromLocal({ type: "list_models", provider: "openai" });
+assert.deepEqual(localEvents.find((e) => e.type === "models").models, ["gpt-6-sol"]);
+delete providers.openai.listModels;
+
 // Reply rendering: markup is escaped, only http(s) links become links, and a URL inside a
 // link cannot add attributes to it.
 for (const reply of [

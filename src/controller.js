@@ -421,7 +421,7 @@ export function createController(host) {
           return;
         }
         try {
-          const models = await provider.listModels({ apiKey, config });
+          const models = (await provider.listModels({ apiKey, config })).filter((m) => !NON_CHAT_MODEL.test(m));
           reply({ type: "models", provider: msg.provider, models });
         } catch (err) {
           reply({ type: "models", provider: msg.provider, models: [], error: provider.describeError(err) || err.message });
