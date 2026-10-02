@@ -270,9 +270,20 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   let finished = false;
   let timedOut = false;
   const end = started + timeoutMs;
+  // A deadline checked only between iterations does not bound an iteration already in
+  // flight: if a single drainEvents/cdp.send round trip itself stalls (the renderer busy
+  // with a slow model call, a CDP pipe hiccup), the loop can overrun --timeout by however
+  // long that one call takes - this is what produced "timed out after 60s" rows whose
+  // measured wall time was actually several minutes. Racing each iteration against the
+  // remaining budget caps it at the deadline regardless of how long any single await takes.
   while (!finished && Date.now() < end) {
-    await sleep(300);
-    const batch = await drainEvents(cdp, sessionId);
+    const remaining = end - Date.now();
+    const iteration = (async () => {
+      await sleep(300);
+      return drainEvents(cdp, sessionId);
+    })();
+    const batch = await Promise.race([iteration, sleep(remaining).then(() => null)]);
+    if (batch === null) break;
     for (const e of batch) {
       events.push(e);
       if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
