@@ -14,7 +14,11 @@ import { PROFILE_DIR } from "./config.js";
 import { EXTENSION_DIR, EXTENSION_ID, LOADED_FILE } from "./chrome.js";
 
 const CHROME_BINARY =
-  process.env.BROWSER_AGENT_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  process.env.BROWSER_AGENT_CHROME ||
+  (process.platform === "linux" ? "google-chrome" : "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+// Without a display (a Linux server, cron), Chrome runs headless; the new headless mode
+// still loads extensions and opens the side panel.
+const HEADLESS = process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 
 // Pins the extension's toolbar icon. Only valid while Chrome is not running (it rewrites
 // Preferences on exit).
@@ -44,6 +48,7 @@ const chrome = spawn(
     "--restore-last-session",
     "--no-first-run",
     "--no-default-browser-check",
+    ...(HEADLESS ? ["--headless=new"] : []),
   ],
   { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
 );
