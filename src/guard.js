@@ -104,7 +104,7 @@ export class Guard {
         }
         const permanent = zeroQuota || (status >= 400 && status < 500 && status !== 429);
         if (attempt >= 2 || signal?.aborted || permanent) throw err;
-        await sleep(err?.status === 429 ? 8000 : 1000);
+        await sleep(err?.status === 429 ? 8000 : 1000, signal);
       }
     }
   }
@@ -148,7 +148,7 @@ export class Guard {
     if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
     let text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     let images = output.filter((b) => b.type === "image");
-    if (!url) return this.#scan(config, name, text, images, signal);
+    if (!url) return (await this.#scan(config, name, text, images, signal)).warning;
     if (this.scannedPages.has(url)) return this.scannedPages.get(url);
     const page = String((await pageText?.().catch(() => "")) ?? "").trim();
     if (page.length >= 40) {
@@ -156,21 +156,24 @@ export class Guard {
       images = [];
     } else if (!images.length) {
       // Nothing of the page itself to scan yet; its first screenshot will be.
-      return this.#scan(config, name, text, images, signal);
+      return (await this.#scan(config, name, text, images, signal)).warning;
     }
-    const warning = await this.#scan(config, name, text, images, signal);
-    this.scannedPages.set(url, warning);
+    const { warning, failed } = await this.#scan(config, name, text, images, signal);
+    if (!failed) this.scannedPages.set(url, warning);
     return warning;
   }
 
+  // Returns { warning, failed }. failed: the safety model gave no answer, so the content is
+  // not remembered and is scanned again the next time it is read.
   async #scan(config, name, text, images, signal) {
     text = text.slice(0, SCAN_MAX_CHARS);
-    if (!images.length && text.length < 40) return null;
+    if (!images.length && text.length < 40) return { warning: null, failed: false };
 
     const key = await sha256(text + images.map((i) => i.data).join(""));
-    if (this.scanned.has(key)) return this.scanned.get(key);
+    if (this.scanned.has(key)) return { warning: this.scanned.get(key), failed: false };
 
     let warning = null;
+    let failed = false;
     try {
       const res = await this.#classify(
         config,
@@ -183,8 +186,12 @@ export class Guard {
       }
     } catch {
       // A failed scan does not block reading; the action checker still gates what happens next.
+      failed = true;
     }
-    this.scanned.set(key, warning);
-    return warning;
+    // A scan cut short by Stop found nothing either way. It is not cached, so the content is
+    // scanned again the next time it is read, and the caller gets no answer to act on.
+    if (signal?.aborted) throw new DOMException("The scan was stopped.", "AbortError");
+    if (!failed) this.scanned.set(key, warning);
+    return { warning, failed };
   }
 }

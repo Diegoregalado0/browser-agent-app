@@ -14,12 +14,12 @@
 // tests must pass a throwaway BROWSER_AGENT_HOME.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { HOME_DIR } from "../src/config.js";
-import { connectChrome, browserProcesses, activePort, EXTENSION_DIR, EXTENSION_ID, LOADED_FILE } from "../src/chrome.js";
+import { connectChrome, browserProcesses, activePort, buildOutdated, EXTENSION_DIR, EXTENSION_ID, LOADED_FILE } from "../src/chrome.js";
 
 // The app is launched by launchd (parent pid 1) without a terminal.
 if (!process.env.BROWSER_AGENT_HOME && !process.stdin.isTTY && process.ppid !== 1) {
@@ -30,22 +30,12 @@ if (!process.env.BROWSER_AGENT_HOME && !process.stdin.isTTY && process.ppid !== 
 const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOG_FILE = join(HOME_DIR, "chrome.log");
 const MANIFEST = join(EXTENSION_DIR, "manifest.json");
-// What the extension build reads.
-const SOURCES = ["extension", "src", "ui", "scripts/build-extension.js", "scripts/icon-16.png", "scripts/icon-32.png", "scripts/icon-48.png", "scripts/icon-128.png", "package.json", "package-lock.json"];
 
 const args = process.argv.slice(2);
 const command = args.find((a) => !a.startsWith("--")) || "open";
 const devtoolsPort = Number(args.find((a) => a.startsWith("--port="))?.split("=")[1]) || 0;
 
 const mtime = (path) => statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? 0;
-
-function newestSource(path) {
-  const stat = statSync(path, { throwIfNoEntry: false });
-  if (!stat?.isDirectory()) return stat?.mtimeMs ?? 0;
-  return Math.max(stat.mtimeMs, ...readdirSync(path).map((name) => newestSource(join(path, name))));
-}
-
-const buildOutdated = () => mtime(MANIFEST) < Math.max(...SOURCES.map((s) => newestSource(join(PROJECT_DIR, s))));
 
 function build(force) {
   if (!force && !buildOutdated()) return;

@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 // Builds the Chrome Web Store edition into dist/extension and packs it as
 // dist/browser-agent-extension.zip. The bundle is not minified, so reviewers can read it.
+// Both are built beside their final paths and moved into place once complete, so a build
+// that is interrupted leaves the previous ones as they were.
 
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync, rmSync, renameSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OUTLOOK_CLIENT_ID } from "../src/outlook-graph.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "dist", "extension");
-const ZIP = join(ROOT, "dist", "browser-agent-extension.zip");
+const DEST = join(ROOT, "dist", "extension");
+const OUT = join(ROOT, "dist", "extension.tmp");
+const ZIP_DEST = join(ROOT, "dist", "browser-agent-extension.zip");
+const ZIP = join(ROOT, "dist", "browser-agent-extension.tmp.zip");
 const { version } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
 // Model provider APIs the extension calls with the user's key. Ollama runs locally.
@@ -124,4 +128,7 @@ for (const size of [16, 32, 48, 128]) {
 rmSync(ZIP, { force: true });
 execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));
-console.log(`Built ${OUT}\nPacked ${ZIP}`);
+rmSync(DEST, { recursive: true, force: true });
+renameSync(OUT, DEST);
+renameSync(ZIP, ZIP_DEST);
+console.log(`Built ${DEST}\nPacked ${ZIP_DEST}`);

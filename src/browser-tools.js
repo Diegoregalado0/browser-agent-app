@@ -23,6 +23,10 @@ const NETWORK_LOG_MAX_ENTRIES = 500;
 const NETWORK_BODY_MAX_CHARS = 8000;
 // Typing shown character by character takes at most about this long in total.
 const SHOWN_TYPING_MAX_MS = 3000;
+// How long one call to the browser (a DevTools command, a page script, starting a
+// navigation) may take. One that does not answer fails the step with a tool error, so a
+// frozen page or a stuck debugger costs one step instead of the task.
+export const BROWSER_CALL_TIMEOUT_MS = 30000;
 
 // The easing of the visible pointer (CSS ease-out), applied to the real mouse path too.
 const easeOut = (t) => 1 - (1 - t) ** 3;
@@ -271,6 +275,7 @@ export class Browser {
     this.pointers = new Map();
     // The controls in view per tab, as last reported to the model: { url, title, items }.
     this.views = new Map();
+    this.callTimeoutMs = BROWSER_CALL_TIMEOUT_MS;
     transport.onAttach = (id) => this.#prepareTab(id);
     transport.onEvent = (id, method, params) => this.#onNetworkEvent(id, method, params);
     transport.onDetach = (id) => {
@@ -413,7 +418,19 @@ export class Browser {
 
   async send(method, params = {}) {
     const { id } = await this.currentPage();
-    return this.transport.send(id, method, params);
+    return this.#bounded(method, this.transport.send(id, method, params));
+  }
+
+  // A browser call's answer, or an error once callTimeoutMs passes without one.
+  #bounded(what, promise) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const secs = Math.round(this.callTimeoutMs / 1000);
+        reject(new Error(`The browser did not answer ${what} within ${secs}s, so this step was stopped. The page may be busy or frozen; take a screenshot to see it, or try another way.`));
+      }, this.callTimeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 
   async evaluate(expression) {
@@ -863,7 +880,7 @@ export class Browser {
         } else {
           const url = normalizeUrl(input.url);
           const { id } = await this.currentPage();
-          const errorText = await this.transport.navigate(id, url);
+          const errorText = await this.#bounded("the navigation", this.transport.navigate(id, url));
           if (errorText) throw new Error(`Navigation failed: ${errorText}`);
         }
         this.cssPerPixel = null;

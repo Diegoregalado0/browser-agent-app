@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, openSync, writeFileSync, statSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, openSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -10,11 +10,33 @@ const KEEPER = join(dirname(fileURLToPath(import.meta.url)), "chrome-keeper.js")
 const ACTIVE_PORT_FILE = join(PROFILE_DIR, "DevToolsActivePort");
 // The built extension the test browser loads (npm run build:extension).
 export const EXTENSION_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "extension");
+const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+const MANIFEST = join(EXTENSION_DIR, "manifest.json");
+// What the extension build reads.
+const BUILD_SOURCES = ["extension", "src", "ui", "scripts/build-extension.js", "scripts/icon-16.png", "scripts/icon-32.png", "scripts/icon-48.png", "scripts/icon-128.png", "package.json", "package-lock.json"];
 // Fixed by the manifest's "key" (scripts/build-extension.js); Outlook's redirect relies on it.
 export const EXTENSION_ID = "fddhceodbfeklilaakgioapmildcmgjo";
 // The build the running browser has loaded: the manifest's mtime at install, written by the
 // keeper and removed when the browser exits.
 export const LOADED_FILE = join(HOME_DIR, "extension-loaded");
+
+const mtime = (path) => statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? 0;
+
+function newestSource(path) {
+  const stat = statSync(path, { throwIfNoEntry: false });
+  if (!stat?.isDirectory()) return stat?.mtimeMs ?? 0;
+  return Math.max(stat.mtimeMs, ...readdirSync(path).map((name) => newestSource(join(path, name))));
+}
+
+// Whether the extension needs building: there is no build, its manifest lacks the key that
+// fixes the extension id, or a source changed after it.
+export function buildOutdated() {
+  let keyed = false;
+  try {
+    keyed = Boolean(JSON.parse(readFileSync(MANIFEST, "utf8")).key);
+  } catch {}
+  return !keyed || mtime(MANIFEST) < Math.max(...BUILD_SOURCES.map((s) => newestSource(join(PROJECT_DIR, s))));
+}
 // Held while one caller launches Chrome, so two launches at once do not start a second
 // keeper (whose Chrome would hand off to the first and open an extra window).
 const LAUNCH_LOCK = join(PROFILE_DIR, "launching");
