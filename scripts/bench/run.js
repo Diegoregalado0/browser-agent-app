@@ -105,6 +105,20 @@ function buildConfig() {
   return mergeConfig(overrides);
 }
 
+// A cheap, fast reachability check before each task - not a real model call, just whether
+// the local server/tunnel answers at all. Mistral is a cloud API, not a local tunnel that
+// can drop out from under the Mac sleeping, so it is not checked here.
+async function endpointReachable() {
+  if (args.provider === "mistral") return { ok: true };
+  const url = args.provider === "ollama" ? `${args.host || "http://localhost:11436"}/api/tags` : `${(args.baseUrl || args["base-url"] || "http://localhost:8081/v1").replace(/\/$/, "")}/models`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return res.ok ? { ok: true } : { ok: false, reason: `${url} answered with HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, reason: `${url} is unreachable (${err.message})` };
+  }
+}
+
 // Pricing is only meaningful for billed cloud calls; local servers run on hardware already
 // paid for, so their cost column reads "-". $0.20/1M tokens (in and out) for Ministral 14B,
 // from docs.mistral.ai/inference/pricing as of 2026-10 - reported as an estimate below
@@ -179,6 +193,15 @@ async function runBenchmark() {
       if (done.has(`${run}:${task.id}`)) {
         console.log(`\n[run ${run}] ${task.id}: already done (resumed), skipping`);
         continue;
+      }
+      // A dead tunnel (the Mac sleeping, a dropped SSH forward) used to grind through
+      // every remaining task recording a fake 0-step, full-timeout "fail" against a model
+      // that was never actually reached. Check first and abort the whole run instead -
+      // what is already in rows/on disk stands, and nothing misleading gets added to it.
+      const reachable = await endpointReachable();
+      if (!reachable.ok) {
+        console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
+        process.exit(1);
       }
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
