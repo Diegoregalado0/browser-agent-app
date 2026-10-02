@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Offline checks of Stop and of the extension build, with a scripted provider and browser:
 // Stop ends a task whose model request, browser action or safety check never returns, and
-// nothing of that task reaches the user or the history afterwards; a safety scan cut short
-// by Stop or failed is not remembered as clean; and an interrupted build never leaves a
-// build that looks current without its key.
+// nothing of that task reaches the user or the history afterwards; a browser call that
+// never answers fails its step; a safety scan cut short by Stop or failed is not remembered
+// as clean; and an interrupted build never leaves a build that looks current without its key.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Agent } from "../src/agent.js";
 import { Guard } from "../src/guard.js";
+import { Browser } from "../src/browser-tools.js";
 import { providers } from "../src/providers/index.js";
 import { DEFAULTS } from "../src/config-core.js";
 
@@ -188,6 +189,27 @@ assert.equal(
   "asks the agent to send passwords",
   "the page was not scanned again after a failed scan",
 );
+
+// A browser call that never answers (a frozen page script) fails its step with a tool error
+// once the call timeout passes, and the task goes on to its next request.
+const frozen = new Browser({
+  pages: async () => [{ id: "1", title: "Frozen", url: "https://frozen.example/" }],
+  activeId: async () => "1",
+  activate: async () => {},
+  highlight: async () => {},
+  send: (id, method) => (method === "Runtime.evaluate" ? new Promise(() => {}) : Promise.resolve({})),
+});
+frozen.callTimeoutMs = 300;
+const timed = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+timed.browser = frozen;
+script = [{ content: [{ type: "tool_call", id: "r1", name: "get_page_text", input: {} }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, done];
+const timedStarted = Date.now();
+await timed.run("read the page", auto);
+assert.ok(Date.now() - timedStarted < 5000, "the frozen call held the task past its timeout");
+const frozenResult = timed.messages[2].content[0];
+assert.equal(frozenResult.isError, true, "a frozen call did not fail its step");
+assert.match(frozenResult.content[0].text, /did not answer Runtime\.evaluate within \d+s/);
+assert.equal(timed.messages.at(-1).content[0].text, "done", "the task did not go on after the frozen call");
 
 // The build, killed between any two of its steps in a copy of the project, leaves either
 // the previous complete build or none; a manifest without its key counts as outdated.
