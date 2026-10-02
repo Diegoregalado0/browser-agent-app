@@ -1851,6 +1851,27 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
     assert.equal(events.find((e) => e.type === "context").fresh, false);
   }
 
+  // A check that does not answer in time continues the task too.
+  taskAnswer = () => new Promise(() => {});
+  providers.openai.classify = (args) =>
+    new Promise((resolve, reject) => args.signal.addEventListener("abort", () => reject(new Error("Request was aborted."))));
+  const slow = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  slow.browser = freshBrowser;
+  slow.newTaskCheckMs = 50;
+  sentHistories = [];
+  freshReplies = [said("one"), said("two")];
+  await slow.run("first", { ...config, freshContext: true });
+  // AbortSignal.timeout does not hold the process open; the app's server or panel does.
+  const keepAlive = setInterval(() => {}, 1000);
+  await slow.run("second", { ...config, freshContext: true });
+  clearInterval(keepAlive);
+  assert.equal(sentHistories[1].length, 3, "a check that timed out started fresh");
+  providers.openai.classify = async (args) => {
+    if (args.schema.properties.new_task) return (taskChecks.push(args.text), taskAnswer());
+    actionChecks.push(args.text);
+    return { verdict: "allow", reason: "ok" };
+  };
+
   // Cheap signals skip the model: an explicit "new task", and a long pause.
   taskChecks = [];
   taskAnswer = async () => ({ new_task: false });

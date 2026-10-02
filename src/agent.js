@@ -174,6 +174,8 @@ export class Agent {
     this.secretCalls = new WeakSet();
     // When the last task ended, for the new-task check.
     this.lastTaskEnd = 0;
+    // A new-task check that takes longer (a busy local model) continues the current task.
+    this.newTaskCheckMs = 20000;
   }
 
   get running() {
@@ -503,7 +505,7 @@ export class Agent {
             requests: requestsIn(earlier.slice(start)),
             reply: reply ? reply.content.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "",
             message: userText,
-            signal,
+            signal: AbortSignal.any([signal, AbortSignal.timeout(this.newTaskCheckMs)]),
           })
           .catch(() => ((why = "the new-task check failed"), false));
       }
