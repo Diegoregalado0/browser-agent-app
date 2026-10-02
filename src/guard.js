@@ -43,8 +43,10 @@ const SCAN_SCHEMA = {
 };
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
-const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "network_requests"]);
-const SCAN_MAX_CHARS = 60000;
+const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "navigate", "form_input", "tabs", "network_requests"]);
+// Scans read at most this much text: the start of a page is where text aimed at the agent
+// has to be to steer it, and a longer scan costs seconds per step on local models.
+export const SCAN_MAX_CHARS = 8000;
 
 export function isStateChanging(name, input) {
   if (name === "browser") return !READ_ONLY_BROWSER_ACTIONS.has(input.action);
@@ -62,30 +64,44 @@ export class Guard {
   constructor({ onUsage = () => {} } = {}) {
     this.onUsage = onUsage;
     this.scanned = new Map();
+    // Default safety models the account turned out not to have, for the rest of the session.
+    this.unavailable = new Set();
+    // Addresses whose page was scanned, with the warning (see scanContent).
+    this.scannedPages = new Map();
     this.flags = [];
   }
 
   reset() {
     this.scanned.clear();
+    this.scannedPages.clear();
     this.flags = [];
   }
 
+  // fallback: the model is a default the main model can stand in for.
   #resolve(config) {
     const provider = config.provider;
-    const model = config.guardModels?.[provider] || defaultGuardModel(config, provider) || config.models[provider];
-    return { impl: providers[provider], provider, model, apiKey: apiKeyFor(config, provider) };
+    const main = config.models[provider];
+    let model = config.guardModels?.[provider] || defaultGuardModel(config, provider) || main;
+    if (!config.guardModels?.[provider] && this.unavailable.has(`${provider} ${model}`)) model = main;
+    return { impl: providers[provider], provider, model, fallback: model !== main && !config.guardModels?.[provider], apiKey: apiKeyFor(config, provider) };
   }
 
   async #classify(config, args, signal) {
-    const { impl, model, apiKey } = this.#resolve(config);
     // Brief retries cover rate limits and transient errors on the small model. Other client
     // errors (bad key, model not in the plan) and a zero quota fail at once.
     for (let attempt = 0; ; attempt++) {
+      const { impl, provider, model, fallback, apiKey } = this.#resolve(config);
       try {
         return await impl.classify({ apiKey, model, config, signal, onUsage: this.onUsage, ...args });
       } catch (err) {
         const status = err?.status;
         const zeroQuota = status === 429 && err.headers?.get?.("x-ratelimit-limit-req-minute") === "0";
+        // A default model the account cannot use (not enabled, or not found) gives way to the
+        // main model, which the account already runs.
+        if (fallback && (zeroQuota || status === 403 || status === 404)) {
+          this.unavailable.add(`${provider} ${model}`);
+          continue;
+        }
         const permanent = zeroQuota || (status >= 400 && status < 500 && status !== 429);
         if (attempt >= 2 || signal?.aborted || permanent) throw err;
         await sleep(err?.status === 429 ? 8000 : 1000);
@@ -123,11 +139,32 @@ export class Guard {
   }
 
   // Returns a warning string when the tool output looks like a prompt injection, else null.
-  async scanContent({ config, name, output, signal }) {
+  // url: the page the output shows, for output that observes the current page (a
+  // screenshot, the controls an action or navigation reports). Such output is scanned once
+  // per address, with the page's text (pageText(), a promise of it) in place of pixels
+  // when the page has text; a page without text (a canvas) is scanned by its screenshot.
+  async scanContent({ config, name, output, signal, url = null, pageText = null }) {
     // MCP results (emails, calendar entries) are outside content too.
     if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
-    const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n").slice(0, SCAN_MAX_CHARS);
-    const images = output.filter((b) => b.type === "image");
+    let text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    let images = output.filter((b) => b.type === "image");
+    if (!url) return this.#scan(config, name, text, images, signal);
+    if (this.scannedPages.has(url)) return this.scannedPages.get(url);
+    const page = String((await pageText?.().catch(() => "")) ?? "").trim();
+    if (page.length >= 40) {
+      text = `Text of the page:\n${page.slice(0, SCAN_MAX_CHARS / 2)}\n\n${text}`;
+      images = [];
+    } else if (!images.length) {
+      // Nothing of the page itself to scan yet; its first screenshot will be.
+      return this.#scan(config, name, text, images, signal);
+    }
+    const warning = await this.#scan(config, name, text, images, signal);
+    this.scannedPages.set(url, warning);
+    return warning;
+  }
+
+  async #scan(config, name, text, images, signal) {
+    text = text.slice(0, SCAN_MAX_CHARS);
     if (!images.length && text.length < 40) return null;
 
     const key = await sha256(text + images.map((i) => i.data).join(""));

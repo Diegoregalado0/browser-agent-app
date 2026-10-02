@@ -191,16 +191,19 @@ assert.deepEqual(filled, ["a", "c"], "the blocked field ran, or an allowed one d
 assert.ok(batchMs < 800, `three 300ms safety checks took ${batchMs}ms, so they did not run together`);
 
 // A safety model the account cannot use (Mistral's zero quota) fails at once instead of
-// retrying, and the action falls back to asking.
+// retrying: a default one gives way to the main model once, and when that cannot run
+// either, the action falls back to asking.
 let guardCalls = 0;
-providers.openai.classify = async () => {
+const guardModelsTried = [];
+providers.openai.classify = async ({ model }) => {
   guardCalls++;
+  guardModelsTried.push(model);
   throw Object.assign(new Error("Rate limit exceeded"), { status: 429, headers: new Headers({ "x-ratelimit-limit-req-minute": "0" }) });
 };
 started = Date.now();
 const blocked = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://example.com/" }, name: "browser", input: {} });
 assert.equal(blocked.verdict, "ask");
-assert.equal(guardCalls, 1, `a zero-quota safety model was retried ${guardCalls - 1} times`);
+assert.deepEqual(guardModelsTried, ["gpt-6-luna", "gpt-6-sol"], `a zero-quota safety model was retried: ${guardModelsTried}`);
 assert.ok(Date.now() - started < 500, "a zero-quota safety model was retried after a wait");
 
 // Network recording hides sign-in headers from the model.
@@ -1340,5 +1343,232 @@ for (const url of ["http://2130706433/", "http://10.0.0.8/", "http://172.20.1.1/
 for (const url of ["https://example.com/", "http://172.32.0.1/", "http://[2001:db8::1]/", "https://local.example.com/"]) {
   assert.ok(!isPrivateAddress(url), `${url} was seen as private`);
 }
+
+// Anthropic: old tool results are cleared by the API's context editing, so the history the
+// agent sends stays append-only (replayed thinking stays valid and the cached prefix holds),
+// and the request carries the clearing strategy and its beta.
+const anthropicSent = [];
+const plainFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  anthropicSent.push({ url: String(url), headers: new Headers(init.headers), body: JSON.parse(init.body) });
+  throw new Error("offline");
+};
+const anthropicModule = await import("../src/providers/anthropic.js");
+await anthropicModule
+  .turn({ apiKey: "test", model: "claude-opus-5", config: { ...config, thinking: true, effort: "high" }, system: "s", tools: [], messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], onText() {}, onThinking() {} })
+  .catch(() => {});
+globalThis.fetch = plainFetch;
+const clearing = anthropicSent[0].body.context_management?.edits?.[0];
+assert.equal(clearing?.type, "clear_tool_uses_20250919", "the Anthropic request does not clear old tool results on the server");
+assert.ok(clearing.clear_at_least?.value >= 5000, "server-side clearing is not batched");
+assert.match(anthropicSent[0].headers.get("anthropic-beta") ?? "", /context-management-2025-06-27/);
+assert.match(anthropicSent[0].headers.get("anthropic-beta") ?? "", /server-side-fallback-2026-07-01/);
+const savedAnthropic = providers.anthropic;
+const anthropicRequests = [];
+const anthropicReplies = ["a1", "a2", "a3", "a4", "a5"].map((id, i) => ({
+  content: [read(id)],
+  raw: { provider: "anthropic", model: "claude-opus-5", data: [{ type: "thinking", thinking: "t", signature: id }] },
+  stop: "tool_use",
+  usage: { input: [5000, 13000, 20000, 40000, 70000][i], output: 1 },
+}));
+anthropicReplies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+providers.anthropic = { describeError: () => null, turn: async ({ messages }) => (anthropicRequests.push(structuredClone(messages)), anthropicReplies.shift()) };
+const thinker = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+thinker.browser = { ...agent.browser, run: async () => [{ type: "text", text: longText }, { type: "image", mediaType: "image/jpeg", data: "AAAA" }] };
+await thinker.run("read them", { ...config, provider: "anthropic", permissionMode: "auto", keys: { ...config.keys, anthropic: "test" } });
+providers.anthropic = savedAnthropic;
+for (let i = 1; i < anthropicRequests.length; i++) {
+  assert.deepEqual(anthropicRequests[i].slice(0, anthropicRequests[i - 1].length), anthropicRequests[i - 1], `request ${i + 1} edited the history sent before`);
+}
+// A reopened conversation stubs its tool output, so replies lose their replayable thinking.
+const reopenedThinking = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+reopenedThinking.restore({ messages: thinker.messages });
+assert.ok(reopenedThinking.messages.every((m) => !m.raw), "a reopened conversation replays thinking written before its tool output was stubbed");
+
+// Content scans: a screenshot is scanned once per address, by the page's text when it has
+// some (its pixels only when it has none, as on a canvas), and scans read at most 8k
+// characters. Text tools are still scanned on every new output.
+const scans = [];
+const classifyBefore = providers.openai.classify;
+providers.openai.classify = async (args) => (scans.push(args), { injection: false, reason: "ok" });
+const scanGuard = new Guard();
+const screenshotOutput = (data) => [{ type: "image", mediaType: "image/jpeg", data }, { type: "text", text: "Browser screenshot 1280x800" }];
+const pageWords = async () => "Welcome to the shop. Today's offers are listed below. ".repeat(400);
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A1"), url: "https://shop.example/", pageText: pageWords });
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A2"), url: "https://shop.example/", pageText: pageWords });
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("A3"), url: "https://shop.example/", pageText: pageWords });
+assert.equal(scans.length, 1, `three screenshots of one page were scanned ${scans.length} times`);
+assert.equal(scans[0].images.length, 0, "a page with text was scanned by its pixels");
+assert.match(scans[0].text, /Welcome to the shop/);
+assert.ok(scans[0].text.length <= 8200, `a scan sent ${scans[0].text.length} characters`);
+await scanGuard.scanContent({ config, name: "browser", output: screenshotOutput("B1"), url: "https://game.example/", pageText: async () => "" });
+assert.equal(scans.length, 2, "a new address was not scanned");
+assert.equal(scans[1].images.length, 1, "a page without text was not scanned by its image");
+await scanGuard.scanContent({ config, name: "get_page_text", output: [{ type: "text", text: "y".repeat(50000) }] });
+assert.equal(scans.length, 3);
+assert.ok(scans[2].text.length <= 8200, `a text scan sent ${scans[2].text.length} characters`);
+providers.openai.classify = classifyBefore;
+
+// Text-first observation: read_page lists the controls in view with boxes, an action
+// reports only what changed among them with refs kept, a new address lists what is in
+// view there, and a large canvas comes with a screenshot.
+const viewDoc = { defaultView: { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }) } };
+const control = (tag, name, top, { w = 100, h = 20, interactive = true } = {}) => {
+  const el = {
+    tagName: tag, innerText: name, textContent: name, children: [], labels: [], ownerDocument: viewDoc, isConnected: true,
+    getAttribute: () => null, matches: () => interactive,
+    getBoundingClientRect: () => ({ left: 10, top, right: 10 + w, bottom: top + h, width: w, height: h }),
+  };
+  return el;
+};
+const viewPage = { url: "https://shop.example/", title: "Shop" };
+const buy = control("BUTTON", "Buy", 10);
+const cart = control("A", "Cart", 40);
+const help = control("BUTTON", "Help", 70);
+const footer = control("A", "Imprint", 3000);
+const viewBody = { children: [buy, cart, help, footer] };
+Object.assign(globalThis, {
+  window: {}, innerWidth: 2560, innerHeight: 1600, scrollX: 0, scrollY: 0, devicePixelRatio: 1, visualViewport: { pageLeft: 0, pageTop: 0 },
+  location: { get href() { return viewPage.url; } },
+  document: { get title() { return viewPage.title; }, body: viewBody, documentElement: { scrollWidth: 2560, scrollHeight: 4000 } },
+});
+const viewShots = [];
+const viewTransport = {
+  pages: async () => [{ id: "v1", ...viewPage }],
+  activeId: async () => "v1",
+  activate: async () => {},
+  send: async (id, method, params) => {
+    if (method === "Page.captureScreenshot") return (viewShots.push(1), { data: "AAAA" });
+    if (method === "Runtime.evaluate") return { result: { value: await (0, eval)(params.expression) } };
+    return {};
+  },
+};
+const viewBrowser = new Browser(viewTransport);
+const inView = await viewBrowser.run("read_page", {});
+assert.match(inView, /button "Buy" \[ref_1\] @5,5 50x10/, "a control in view lacks its ref or its box in screenshot pixels");
+assert.doesNotMatch(inView, /Imprint/, "read_page listed a control outside the view by default");
+assert.match(await viewBrowser.run("read_page", { filter: "all" }), /Imprint/, "filter all left out the rest of the page");
+buy.innerText = "Bought";
+viewBody.children = [buy, help, control("BUTTON", "Checkout", 100), footer];
+const changes = await viewBrowser.run("browser", { action: "wait", duration: 0 });
+assert.match(changes, /~ button "Bought" \[ref_1\]/, "a changed control was not reported under its ref");
+assert.match(changes, /\+ button "Checkout" \[ref_\d+\]/, "a new control was not reported");
+assert.match(changes, /removed: ref_2/, "a control that left was not reported");
+assert.doesNotMatch(changes, /Help/, "an unchanged control was reported again");
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /No change among the controls in view/);
+viewPage.url = "https://shop.example/checkout";
+viewPage.title = "Checkout";
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /Now on: Checkout \| https:\/\/shop\.example\/checkout\nIn view:\nbutton "Bought" \[ref_1\]/);
+// A new document at the same address (a form posted back to its own page) numbers its refs
+// anew, so it is reported as a new page, not as changes.
+globalThis.window = {};
+assert.match(await viewBrowser.run("browser", { action: "wait", duration: 0 }), /Now on: Checkout/, "a new document at the same address was reported as changes");
+assert.equal(viewShots.length, 0, "a screenshot was taken without a reason");
+viewBody.children = [buy, control("CANVAS", "", 100, { w: 2000, h: 1200, interactive: false })];
+const canvasRead = await viewBrowser.run("read_page", {});
+assert.ok(Array.isArray(canvasRead) && canvasRead.some((b) => b.type === "image"), "a large canvas in view came without a screenshot");
+for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "devicePixelRatio", "visualViewport", "location", "document"]) delete globalThis[name];
+
+// The agent attaches a screenshot when the page moves to another site or an action fails,
+// and not to an ordinary action on the same site.
+let siteUrl = "https://a.example/";
+const shotCalls = [];
+const shooter = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+shooter.browser = {
+  ...agent.browser,
+  currentUrl: async () => siteUrl,
+  currentPage: async () => ({ id: "t1", title: "", url: siteUrl }),
+  run: async (name, input) => {
+    shotCalls.push(input.action ?? name);
+    if (input.action === "screenshot") return [{ type: "image", mediaType: "image/jpeg", data: "AAAA" }, { type: "text", text: "Browser screenshot" }];
+    if (name === "navigate") siteUrl = input.url;
+    if (input.ref === "ref_9") throw new Error("ref_9 not found");
+    return "done";
+  },
+};
+const shotReplies = [
+  { content: [{ type: "tool_call", id: "s1", name: "browser", input: { action: "left_click", ref: "ref_1" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "s2", name: "navigate", input: { url: "https://b.example/" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "tool_call", id: "s3", name: "browser", input: { action: "left_click", ref: "ref_9" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+const shooterTurn = providers.openai.turn;
+providers.openai.turn = async () => shotReplies.shift();
+await shooter.run("buy it", { ...config, permissionMode: "auto" });
+providers.openai.turn = shooterTurn;
+const shotResults = shooter.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result");
+const hasShot = (r) => r.content.some((b) => b.type === "image");
+assert.ok(!hasShot(shotResults[0]), "an ordinary action came with a screenshot");
+assert.ok(hasShot(shotResults[1]), "moving to another site came without a screenshot");
+assert.ok(hasShot(shotResults[2]) && shotResults[2].isError, "a failed action came without a screenshot");
+
+// Cheap safety checks: a small default model per provider (Flash-Lite for Gemini, Small for
+// Mistral, the main model for Ollama), a verdict of about a hundred tokens with thinking
+// off, and the main model when the account cannot use the default.
+const { DEFAULT_GUARD_MODELS } = await import("../src/config-core.js");
+assert.match(DEFAULT_GUARD_MODELS.gemini, /flash-lite/);
+assert.match(DEFAULT_GUARD_MODELS.mistral, /^mistral-small/);
+assert.equal(DEFAULT_GUARD_MODELS.ollama, "");
+const guardBodies = [];
+const guardFetchBefore = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  guardBodies.push({ url: String(url), body: JSON.parse(init.body) });
+  throw new Error("offline");
+};
+const verdictSchema = { type: "object", properties: { verdict: { type: "string" } }, required: ["verdict"], additionalProperties: false };
+const guardRequest = { system: "s", text: "t", schema: verdictSchema };
+await anthropicModule.classify({ apiKey: "test", model: "claude-haiku-4-5", ...guardRequest }).catch(() => {});
+await (await import("../src/providers/mistral.js")).classify({ apiKey: "test", model: "mistral-small-latest", config, ...guardRequest }).catch(() => {});
+await ollama.classify({ model: "qwen3:8b", config: { ...config, ollamaHost: "http://127.0.0.1:9" }, ...guardRequest }).catch(() => {});
+globalThis.fetch = guardFetchBefore;
+const bodyFor = (re) => guardBodies.find((b) => re.test(b.url) && b.body.messages)?.body;
+assert.ok(bodyFor(/anthropic/).max_tokens <= 150 && !bodyFor(/anthropic/).thinking, "the Anthropic safety check is not short with thinking off");
+assert.ok(bodyFor(/mistral/).max_tokens <= 150, "the Mistral safety check is not short");
+assert.ok(bodyFor(/127\.0\.0\.1:9\/api\/chat/).options.num_predict <= 150, "the Ollama safety check is not short");
+const mistralTried = [];
+const mistralBefore = providers.mistral;
+providers.mistral = {
+  describeError: () => null,
+  classify: async ({ model }) => {
+    mistralTried.push(model);
+    if (model === "mistral-small-latest") throw Object.assign(new Error("quota"), { status: 429, headers: new Headers({ "x-ratelimit-limit-req-minute": "0" }) });
+    return { verdict: "allow", reason: "ok" };
+  },
+};
+const mistralConfig = { ...config, provider: "mistral", models: { ...config.models, mistral: "ministral-8b-latest" }, keys: { ...config.keys, mistral: "test" } };
+const mistralGuard = new Guard();
+const guardAsk = { config: mistralConfig, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} };
+assert.equal((await mistralGuard.checkAction(guardAsk)).verdict, "allow", "an unavailable default safety model did not fall back to the main model");
+assert.equal((await mistralGuard.checkAction(guardAsk)).verdict, "allow");
+assert.deepEqual(mistralTried, ["mistral-small-latest", "ministral-8b-latest", "ministral-8b-latest"], "the unavailable default was tried again");
+providers.mistral = mistralBefore;
+
+// Mistral's image cap drops old screenshots in batches: each request carries at most 4,
+// and what is sent before the newest messages changes once per batch, not with every
+// new screenshot.
+const imageBodies = [];
+const imageFetchBefore = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  imageBodies.push(JSON.parse(init.body));
+  throw new Error("offline");
+};
+const mistralModule = await import("../src/providers/mistral.js");
+const imageHistory = [{ role: "user", content: [{ type: "text", text: "look around" }] }];
+for (let i = 1; i <= 12; i++) {
+  imageHistory.push({ role: "assistant", content: [{ type: "tool_call", id: `i${i}`, name: "browser", input: { action: "screenshot" } }], raw: null });
+  imageHistory.push({ role: "user", content: [{ type: "tool_result", id: `i${i}`, name: "browser", content: [{ type: "image", mediaType: "image/jpeg", data: `IMG${i}` }] }] });
+  await mistralModule
+    .turn({ apiKey: "test", model: "ministral-8b-latest", config, system: "s", tools: [], messages: imageHistory, signal: undefined, onText() {}, onThinking() {}, onWait() {} })
+    .catch(() => {});
+}
+globalThis.fetch = imageFetchBefore;
+const sentImages = (body) => (JSON.stringify(body.messages).match(/IMG\d+/g) ?? []).length;
+assert.ok(imageBodies.every((b) => sentImages(b) <= 4), `a request carried ${Math.max(...imageBodies.map(sentImages))} images`);
+let prefixBreaks = 0;
+for (let i = 1; i < imageBodies.length; i++) {
+  const before = JSON.stringify(imageBodies[i - 1].messages);
+  if (!JSON.stringify(imageBodies[i].messages).startsWith(before.slice(0, -1))) prefixBreaks++;
+}
+assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${prefixBreaks} changed prefixes in 12 requests)`);
 
 console.log("agent checks passed");

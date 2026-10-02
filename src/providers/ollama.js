@@ -202,7 +202,8 @@ export async function classify({ model, config, system, text, images = [], schem
       { role: "system", content: system },
       { role: "user", content: text, ...(images.length && { images: images.map((b) => b.data) }) },
     ],
-    options: { num_ctx: config.ollamaContext },
+    // Thinking is off, so the short JSON verdict is all there is to generate.
+    options: { num_ctx: config.ollamaContext, num_predict: 128 },
     ...((await canThink(config, model)) && { think: false }),
   });
   onUsage?.((res.prompt_eval_count ?? 0) + (res.eval_count ?? 0));
