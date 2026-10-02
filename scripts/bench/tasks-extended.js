@@ -30,6 +30,25 @@ const replyTask = (...res) => ({ reply }) => {
   return { ok: !missing.length, reason: missing.length ? `reply did not match ${missing.join(", ")}` : "reply states the expected facts" };
 };
 
+// Each checkbox's wording is read from its own segment of the reply, so "unchecked" is never
+// mistaken for "checked".
+const checkboxStates = ({ reply }) => {
+  const text = reply || "";
+  const segment = (n) => {
+    const start = text.search(new RegExp(`check\\s?box\\s*#?${n}\\b`, "i"));
+    if (start < 0) return "";
+    const rest = text.slice(start + 1);
+    const next = rest.search(/check\s?box\s*#?\d\b/i);
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+  const off = /\b(unchecked|unticked|not (checked|ticked)|empty|off)\b/i;
+  const on = /\b(checked|ticked|selected|on)\b/i;
+  const one = segment(1);
+  const two = segment(2);
+  const ok = !!one && !!two && on.test(one) && !off.test(one) && off.test(two);
+  return { ok, reason: ok ? "checkbox 1 on and checkbox 2 off" : `reply states: 1="${one.trim()}" 2="${two.trim()}"` };
+};
+
 const urlAndText = (urlRe, textRe, label) => ({ finalUrl, pageText, reply }) => {
   const onUrl = urlRe.test(finalUrl);
   const hasText = has(pageText, textRe) || has(reply, textRe);
@@ -64,7 +83,11 @@ const NEW_TASKS = [
   task("books.toscrape.com", "easy", "books-first-price", "First book price", "On books.toscrape.com, tell me the title and price of the book \"A Light in the Attic\".", replyTask(/light in the attic/i, /51\.77/)),
   task("books.toscrape.com", "medium", "books-mystery-count", "Mystery category size", "On books.toscrape.com, open the \"Mystery\" category and tell me how many books it contains.", replyTask(/\b32\b/)),
   task("books.toscrape.com", "medium", "books-poetry-count", "Poetry category size", "On books.toscrape.com, open the \"Poetry\" category and tell me how many books it lists.", replyTask(/\b19\b/)),
-  task("books.toscrape.com", "hard", "books-page-two-third", "Third book on page 2", "On books.toscrape.com, go to the second page of the full catalogue and tell me the title of the third book listed.", urlAndText(/books\.toscrape\.com\/catalogue\/page-2\.html/, /\S/, "on catalogue page 2 and answered")),
+  task("books.toscrape.com", "hard", "books-page-two-third", "Third book on page 2", "On books.toscrape.com, go to the second page of the full catalogue and tell me the title of the third book listed.", ({ finalUrl, reply }) => {
+    const onUrl = /books\.toscrape\.com\/catalogue\/page-2\.html/.test(finalUrl);
+    const named = /foolproof preserving/i.test(reply || "");
+    return { ok: onUrl && named, reason: onUrl && named ? "on catalogue page 2 and named the third book" : `url=${finalUrl} named=${named}` };
+  }),
 
   // quotes.toscrape.com
   task("quotes.toscrape.com", "easy", "quotes-first-author", "First quote author", "On quotes.toscrape.com, tell me who said the first quote on the home page.", replyTask(/einstein/i)),
@@ -79,7 +102,7 @@ const NEW_TASKS = [
 
   // the-internet.herokuapp.com
   task("the-internet.herokuapp.com", "easy", "heroku-dropdown", "Select a dropdown option", "Go to the-internet.herokuapp.com/dropdown, choose \"Option 2\" and tell me what is selected.", replyTask(/option 2/i)),
-  task("the-internet.herokuapp.com", "easy", "heroku-checkboxes", "Toggle checkboxes", "Go to the-internet.herokuapp.com/checkboxes, tick checkbox 1 and untick checkbox 2, then tell me the final state of both.", replyTask(/checkbox 1.*(checked|ticked)/is, /checkbox 2.*(unchecked|unticked|not checked)/is)),
+  task("the-internet.herokuapp.com", "easy", "heroku-checkboxes", "Toggle checkboxes", "Go to the-internet.herokuapp.com/checkboxes, tick checkbox 1 and untick checkbox 2, then tell me the final state of both.", checkboxStates),
   task("the-internet.herokuapp.com", "medium", "heroku-dynamic-loading", "Wait for dynamic content", "Go to the-internet.herokuapp.com/dynamic_loading/1, press Start, wait for the content and tell me the text that appears.", replyTask(/hello world/i)),
   task("the-internet.herokuapp.com", "medium", "heroku-add-remove", "Add and remove elements", "Go to the-internet.herokuapp.com/add_remove_elements/, click \"Add Element\" three times, then remove one, and tell me how many Delete buttons remain.", replyTask(/\b(2|two)\b/i)),
   task("the-internet.herokuapp.com", "medium", "heroku-js-alert", "Accept a JavaScript alert", "Go to the-internet.herokuapp.com/javascript_alerts, trigger the plain JS Alert, accept it and tell me the result message shown.", replyTask(/successfully clicked an alert/i)),
@@ -91,12 +114,12 @@ const NEW_TASKS = [
   task("wikipedia.org", "medium", "wiki-australia-capital", "Capital by following links", "Starting at the Wikipedia article for Australia, follow the link to its capital city and tell me the capital's name.", replyTask(/canberra/i)),
 
   // wiktionary.org
-  task("wiktionary.org", "easy", "wikt-ephemeral", "Part of speech lookup", "On en.wiktionary.org, look up the word \"ephemeral\" and tell me its part of speech.", replyTask(/adjective/i)),
+  task("wiktionary.org", "easy", "wikt-ephemeral", "Part of speech lookup", "On en.wiktionary.org, look up the word \"ephemeral\" and tell me its first listed part of speech.", replyTask(/adjective/i)),
   task("wiktionary.org", "medium", "wikt-serendipity-origin", "Etymology lookup", "On en.wiktionary.org, look up \"serendipity\" and tell me which story or place its etymology refers to.", replyTask(/serendip|sri lanka|ceylon|three princes/i)),
   task("wiktionary.org", "medium", "wikt-translation-german", "Translation lookup", "On en.wiktionary.org, look up \"library\" and tell me the German translation of its main noun sense.", replyTask(/bibliothek/i)),
 
   // github.com
-  task("github.com", "easy", "gh-linux-license", "Repository license", "Go to github.com/torvalds/linux and tell me which license the repository uses.", replyTask(/gpl/i)),
+  task("github.com", "easy", "gh-flask-license", "Repository license", "Go to github.com/pallets/flask and tell me which license the repository uses.", replyTask(/\bbsd\b/i)),
   task("github.com", "easy", "gh-react-license", "Another repository license", "Go to github.com/facebook/react and tell me which license the repository uses.", replyTask(/\bmit\b/i)),
   task("github.com", "medium", "gh-django-readme", "Repository file navigation", "Go to github.com/django/django, open the README file from the file list and tell me the project's tagline.", replyTask(/web framework/i)),
 
@@ -106,11 +129,11 @@ const NEW_TASKS = [
 
   // developer.mozilla.org
   task("developer.mozilla.org", "easy", "mdn-teapot", "MDN HTTP status", "On MDN, open the documentation for HTTP status 418 and tell me its status text.", replyTask(/teapot/i)),
-  task("developer.mozilla.org", "medium", "mdn-array-flat", "MDN default parameter", "On MDN, open Array.prototype.flat and tell me the default value of its depth parameter.", replyTask(/\b1\b|one/i)),
+  task("developer.mozilla.org", "medium", "mdn-array-flat", "MDN default parameter", "On MDN, open Array.prototype.flat and tell me the default value of its depth parameter.", replyTask(/\b(1|one)\b/i)),
 
   // gutenberg.org
   task("gutenberg.org", "easy", "gutenberg-pride", "Ebook author", "Open gutenberg.org/ebooks/1342 and tell me the book's title and author.", replyTask(/pride and prejudice/i, /austen/i)),
-  task("gutenberg.org", "medium", "gutenberg-frankenstein", "Search an ebook", "On gutenberg.org, search for \"Frankenstein\" and open the book by Mary Wollstonecraft Shelley.", urlAndText(/gutenberg\.org\/ebooks\/\d+/, /frankenstein/i, "on the Frankenstein ebook page")),
+  task("gutenberg.org", "medium", "gutenberg-frankenstein", "Search an ebook", "On gutenberg.org, search for \"Frankenstein\" and open the book by Mary Wollstonecraft Shelley.", urlAndText(/gutenberg\.org\/ebooks\/\d+/, /(?=[\s\S]*frankenstein)(?=[\s\S]*shelley)/i, "on the Frankenstein ebook page")),
 
   // openlibrary.org
   task("openlibrary.org", "medium", "openlibrary-hobbit", "Library search", "On openlibrary.org, search for \"The Hobbit\" and tell me who the author of the top result is.", replyTask(/tolkien/i)),
@@ -121,7 +144,7 @@ const NEW_TASKS = [
   task("scrapethissite.com", "hard", "scrape-oscar-2015", "Click-through dynamic table", "Open scrapethissite.com/pages/ajax-javascript/, select the year 2015 and tell me which film is marked as the Best Picture winner.", replyTask(/spotlight/i)),
 
   // example.com
-  task("example.com", "easy", "example-heading", "Read a page heading", "Open example.com and tell me the page's heading.", replyTask(/example domain/i)),
+  task("example.com", "easy", "example-purpose", "Read the page text", "Open example.com and tell me what the page says the domain is for.", replyTask(/documentation/i)),
   task("example.com", "medium", "example-follow-link", "Follow the page's link", "Open example.com and follow its \"Learn more\" or \"More information\" link.", urlTask(/iana\.org\//, "reached the IANA page")),
 
   // automationexercise.com
