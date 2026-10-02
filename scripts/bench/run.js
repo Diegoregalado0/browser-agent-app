@@ -25,7 +25,6 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { mergeConfig } from "../../src/config-core.js";
-import { TASKS } from "./tasks.js";
 
 const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
@@ -47,6 +46,9 @@ process.on("uncaughtException", (err) => console.error("UNCAUGHT EXCEPTION:", er
 process.on("exit", (code) => console.error(`process exiting with code ${code}`));
 
 const args = parseArgs(process.argv.slice(2));
+// --taskfile picks an alternate task module (e.g. tasks-stress.js), same TASKS shape.
+const taskFilePath = args.taskfile ? join(PROJECT_DIR, "scripts", "bench", args.taskfile) : join(PROJECT_DIR, "scripts", "bench", "tasks.js");
+const { TASKS } = await import(`file://${taskFilePath}`);
 if (!args.provider || !args.model) {
   console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--thinking on|off]");
   process.exit(1);
@@ -303,65 +305,64 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId);
   await drainEvents(cdp, sessionId);
 
+  // task.prompts (an array) chains several user turns in one conversation, with no reset
+  // between them, before the checker runs; task.prompt (a single string) is still the
+  // common case and behaves exactly as before.
+  const prompts = task.prompts || [task.prompt];
   const started = Date.now();
-  await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
-  // The controller rejects "run" with an error reply, not a thrown exception, when the
-  // previous task's agent is still finishing (see the stop-grace wait below); catch that
-  // here and retry once it actually stops, rather than silently recording an empty task.
-  let rejected = (await drainEvents(cdp, sessionId)).find((e) => e.type === "error" && /already running/i.test(e.text));
-  if (rejected) {
-    console.error(`  -> previous task's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
-    const waitDeadline = Date.now() + STOP_GRACE_MS;
-    while (Date.now() < waitDeadline) {
-      await sleep(500);
-      const batch = await drainEvents(cdp, sessionId);
-      if (batch.some((e) => e.type === "status" && e.running === false)) break;
-    }
-    await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
-  }
-
-  const events = [];
-  let finished = false;
-  let timedOut = false;
   const end = started + timeoutMs;
-  // A deadline checked only between iterations does not bound an iteration already in
-  // flight: if a single drainEvents/cdp.send round trip itself stalls (the renderer busy
-  // with a slow model call, a CDP pipe hiccup), the loop can overrun --timeout by however
-  // long that one call takes - this is what produced "timed out after 60s" rows whose
-  // measured wall time was actually several minutes. Racing each iteration against the
-  // remaining budget caps it at the deadline regardless of how long any single await takes.
-  while (!finished && Date.now() < end) {
-    const remaining = end - Date.now();
-    const iteration = (async () => {
-      await sleep(300);
-      return drainEvents(cdp, sessionId);
-    })();
-    const batch = await Promise.race([iteration, sleep(remaining).then(() => null)]);
-    if (batch === null) break;
-    for (const e of batch) {
-      events.push(e);
-      if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
-      if (e.type === "status" && e.running === false) finished = true;
+  const events = [];
+  let timedOut = false;
+
+  for (let i = 0; i < prompts.length && !timedOut; i++) {
+    const prompt = prompts[i];
+    await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: prompt })})`, returnByValue: true }, sessionId);
+    // The controller rejects "run" with an error reply, not a thrown exception, when the
+    // previous turn's agent is still finishing (see the stop-grace wait below); catch that
+    // here and retry once it actually stops, rather than silently recording an empty turn.
+    let rejected = (await drainEvents(cdp, sessionId)).find((e) => e.type === "error" && /already running/i.test(e.text));
+    if (rejected) {
+      console.error(`  -> previous turn's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
+      const waitDeadline = Date.now() + STOP_GRACE_MS;
+      while (Date.now() < waitDeadline) {
+        await sleep(500);
+        const batch = await drainEvents(cdp, sessionId);
+        if (batch.some((e) => e.type === "status" && e.running === false)) break;
+      }
+      await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: prompt })})`, returnByValue: true }, sessionId);
     }
-  }
-  if (!finished) {
-    timedOut = true;
-    await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
-    // "Stop" only takes effect once the in-flight model request starts streaming (Ollama's
-    // client does not pass the abort signal through while still prefilling, per
-    // src/providers/ollama.js); agent.running can stay true for a while after this. The
-    // next task's "run" would be silently rejected ({type:"error", "already running"}) if
-    // we moved on before it actually stopped, so wait here, bounded, instead of one sleep.
-    const stopDeadline = Date.now() + STOP_GRACE_MS;
-    while (!finished && Date.now() < stopDeadline) {
-      await sleep(500);
-      const batch = await drainEvents(cdp, sessionId);
+
+    let finished = false;
+    // A deadline checked only between iterations does not bound an iteration already in
+    // flight; see the identical comment on this pattern this logic replaced.
+    while (!finished && Date.now() < end) {
+      const remaining = end - Date.now();
+      const iteration = (async () => {
+        await sleep(300);
+        return drainEvents(cdp, sessionId);
+      })();
+      const batch = await Promise.race([iteration, sleep(remaining).then(() => null)]);
+      if (batch === null) break;
       for (const e of batch) {
         events.push(e);
+        if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
         if (e.type === "status" && e.running === false) finished = true;
       }
     }
-    if (!finished) console.error(`  -> agent did not report stopped within ${STOP_GRACE_MS / 1000}s of grace; the next task may start blocked`);
+    if (!finished) {
+      timedOut = true;
+      await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
+      const stopDeadline = Date.now() + STOP_GRACE_MS;
+      while (!finished && Date.now() < stopDeadline) {
+        await sleep(500);
+        const batch = await drainEvents(cdp, sessionId);
+        for (const e of batch) {
+          events.push(e);
+          if (e.type === "status" && e.running === false) finished = true;
+        }
+      }
+      if (!finished) console.error(`  -> agent did not report stopped within ${STOP_GRACE_MS / 1000}s of grace; the next task may start blocked`);
+    }
   }
   const wallMs = Date.now() - started;
 
