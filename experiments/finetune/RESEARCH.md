@@ -109,3 +109,11 @@ One example per agent step (not per task): messages = system prompt (as shipped)
 
 ## 7. Unverified summary
 Official GPU hourly prices; quota approval behaviour for new paid accounts; whether credit covers Spot and Vertex managed training; MoE expert LoRA support in PEFT, ms-swift, LLaMA-Factory and llama.cpp LoRA loader; training time estimates (4 h per run is a guess).
+
+## 8. Data milestone status
+
+Built 2026-10-02, no model requests and no GPU involved.
+
+- Exporter: `node scripts/finetune/export-trajectories.js [--in DIR[,DIR]] [--out FILE] [--min-steps N] [--max-steps N]`. It reads every `<run-id>.json` plus its `<run-id>/<task>[.runN].events.jsonl` under `--in` (default `~/bench-results` and its `runs/` subdirectories), keeps rows whose check passed and whose log has no timeout marker, dedups by (task, model, run stamp, run) and writes one chat-format record per trajectory with metadata (task, model, run stamp, steps, wall ms). Screenshots become `[screenshot omitted]`; secrets are redacted by key name and value pattern. The summary line goes to stderr.
+- Task set: `scripts/bench/tasks-extended.js` has 55 tasks (the original 10 plus 45 new) across 17 named sites plus one open-web task, tagged by site and difficulty, with 42 train and 13 held-out (six whole sites held out, so the eval measures unseen sites). Run it with `run.js --taskfile tasks-extended.js`. The new tasks have not been run against a model, so each target and check still needs one validation pass.
+- Current count: 33 benchmark rows found, 17 passed, 9 exported as trajectories. The other 8 passes predate the event log and have no log to export. Target is about 300.
