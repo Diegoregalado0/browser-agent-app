@@ -121,6 +121,9 @@ async function main() {
   }
 
   const cdp = await connectChrome({ devtoolsPort: Number(args.port) || 0 });
+  // A transient socket error (the tunnel or the test browser blipping) must not crash the
+  // whole run; the current task's checks below will see a dead connection and fail it.
+  cdp.on("error", (err) => console.error(`CDP socket error: ${err.message}`));
   // A fresh launch opens the panel itself, but that race occasionally loses (no tab yet
   // when the keeper tries); ask the keeper to open it explicitly, same as `browser-agent
   // open` falls back to.
@@ -141,7 +144,16 @@ async function main() {
   for (let run = 1; run <= Number(args.runs); run++) {
     for (const task of selectedTasks) {
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
-      const result = await runTask(cdp, sessionId, task, Number(args.timeout));
+      let result;
+      try {
+        result = await runTask(cdp, sessionId, task, Number(args.timeout));
+      } catch (err) {
+        // A dropped connection (tunnel or test browser blip) fails this task instead of
+        // the whole run, so the remaining tasks and the report still happen; rerun the
+        // task flagged this way once the underlying disruption is resolved.
+        console.error(`  -> harness error: ${err.message}`);
+        result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
+      }
       const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
       rows.push({
         run,
