@@ -104,7 +104,7 @@ export class Guard {
         }
         const permanent = zeroQuota || (status >= 400 && status < 500 && status !== 429);
         if (attempt >= 2 || signal?.aborted || permanent) throw err;
-        await sleep(err?.status === 429 ? 8000 : 1000);
+        await sleep(err?.status === 429 ? 8000 : 1000, signal);
       }
     }
   }
@@ -184,6 +184,9 @@ export class Guard {
     } catch {
       // A failed scan does not block reading; the action checker still gates what happens next.
     }
+    // A scan cut short by Stop found nothing either way. It is not cached, so the content is
+    // scanned again the next time it is read, and the caller gets no answer to act on.
+    if (signal?.aborted) throw new DOMException("The scan was stopped.", "AbortError");
     this.scanned.set(key, warning);
     return warning;
   }
