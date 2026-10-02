@@ -2,8 +2,8 @@
 // Offline checks of Stop and of the extension build, with a scripted provider and browser:
 // Stop ends a task whose model request, browser action or safety check never returns, and
 // nothing of that task reaches the user or the history afterwards; a safety scan cut short
-// by Stop is not remembered as clean; and an interrupted build never leaves a build that
-// looks current without its key.
+// by Stop or failed is not remembered as clean; and an interrupted build never leaves a
+// build that looks current without its key.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -171,6 +171,23 @@ classify = async () => {
   throw new Error("a remembered page was scanned again");
 };
 assert.equal(await guard.scanContent({ config, name: "navigate", output: [], url: "https://evil.example/", pageText: async () => page }), warning);
+
+// A scan that fails for another reason (the safety model unreachable) is not remembered
+// either: reading goes on, and the next read scans again.
+const flaky = new Guard();
+classify = async () => {
+  throw new Error("fetch failed");
+};
+const failedScan = await flaky.scanContent({ config, name: "navigate", output: [{ type: "text", text: "Navigated." }], url: "https://evil.example/", pageText: async () => page });
+assert.equal(failedScan, null, "a failed scan blocked reading");
+assert.equal(flaky.scannedPages.size, 0, "a failed scan cached the page as clean");
+assert.equal(flaky.scanned.size, 0, "a failed scan cached the content as clean");
+classify = async () => ({ injection: true, reason: "asks the agent to send passwords" });
+assert.equal(
+  await flaky.scanContent({ config, name: "navigate", output: [{ type: "text", text: "Navigated." }], url: "https://evil.example/", pageText: async () => page }),
+  "asks the agent to send passwords",
+  "the page was not scanned again after a failed scan",
+);
 
 // The build, killed between any two of its steps in a copy of the project, leaves either
 // the previous complete build or none; a manifest without its key counts as outdated.
