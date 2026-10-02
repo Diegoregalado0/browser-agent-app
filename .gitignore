@@ -7,3 +7,4 @@ dist/
 !README.md
 !SECURITY.md
 !legal/*.md
+!docs/*.md
