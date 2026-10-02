@@ -19,7 +19,7 @@
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -160,9 +160,10 @@ async function runBenchmark() {
   process.env.BROWSER_AGENT_HOME = home;
   console.log(`Profile: ${home}`);
 
-  const { connectChrome, browserProcesses } = await import("../../src/chrome.js");
-  const manifestPath = join(PROJECT_DIR, "dist", "extension", "manifest.json");
-  if (!existsSync(manifestPath)) {
+  const { connectChrome, browserProcesses, buildOutdated } = await import("../../src/chrome.js");
+  // The agent under test is the built extension, not src/: a build older than the sources
+  // (a checkout moved to another commit) would benchmark the code it was built from.
+  if (buildOutdated()) {
     console.log("Building the extension...");
     const { spawnSync } = await import("node:child_process");
     const res = spawnSync(process.execPath, [join(PROJECT_DIR, "scripts", "build-extension.js")], { stdio: "inherit" });
@@ -322,8 +323,7 @@ async function readActiveTab(cdp, sessionId) {
   return { url, title, pageText };
 }
 
-// How long to wait for the agent to actually stop after a timed-out task, since Stop
-// cannot interrupt a request still prefilling (see the comment where this is used below).
+// How long to wait for the agent to report stopped after a timed-out task.
 const STOP_GRACE_MS = 120000;
 
 async function runTask(cdp, sessionId, task, timeoutMs) {
@@ -338,8 +338,9 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   const end = started + timeoutMs;
   const events = [];
   let timedOut = false;
+  let agentError = null;
 
-  for (let i = 0; i < prompts.length && !timedOut; i++) {
+  for (let i = 0; i < prompts.length && !timedOut && !agentError; i++) {
     const prompt = prompts[i];
     await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: prompt })})`, returnByValue: true }, sessionId);
     let finished = false;
@@ -350,6 +351,11 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     const firstBatch = await drainEvents(cdp, sessionId);
     events.push(...firstBatch);
     if (firstBatch.some((e) => e.type === "status" && e.running === false)) finished = true;
+    const firstError = firstBatch.find((e) => e.type === "error" && !/already running/i.test(e.text));
+    if (firstError) {
+      agentError = firstError.text;
+      finished = true;
+    }
     if (!finished && firstBatch.some((e) => e.type === "error" && /already running/i.test(e.text))) {
       console.error(`  -> previous turn's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
       const waitDeadline = Date.now() + STOP_GRACE_MS;
@@ -362,39 +368,50 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
       await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: prompt })})`, returnByValue: true }, sessionId);
     }
 
-    // A deadline checked only between iterations does not bound an iteration already in
-    // flight: if one drainEvents/cdp.send round trip stalls, the loop could overrun
-    // --timeout. Racing each iteration against the remaining budget caps it at the deadline.
-    while (!finished && Date.now() < end) {
-      const remaining = end - Date.now();
-      const iteration = (async () => {
-        await sleep(300);
-        return drainEvents(cdp, sessionId);
-      })();
-      const batch = await Promise.race([iteration, sleep(remaining).then(() => null)]);
-      if (batch === null) break;
+    // Records drained events: the agent's answers to permission prompts, the end of the
+    // turn, and an error the agent ended it with (a run it rejected or that threw before
+    // the task began sends no status at all, so waiting out the timeout would hide why).
+    const take = async (batch) => {
       for (const e of batch) {
         events.push(e);
         if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
         if (e.type === "status" && e.running === false) finished = true;
+        if (e.type === "error" && !timedOut) {
+          agentError = e.text;
+          finished = true;
+        }
+      }
+    };
+
+    // A deadline checked only between iterations does not bound an iteration already in
+    // flight: if one drainEvents/cdp.send round trip stalls, the loop could overrun
+    // --timeout. Racing each iteration against the remaining budget caps it at the deadline.
+    // An iteration that loses the race still records what it drains when it lands: Stop,
+    // sent right after, ends the task at once, and its events would otherwise be drained
+    // by that iteration and lost, leaving the stop-grace wait below to time out.
+    while (!finished && Date.now() < end) {
+      const remaining = end - Date.now();
+      const iteration = sleep(300).then(() => drainEvents(cdp, sessionId)).then(take);
+      const inTime = await Promise.race([iteration.then(() => true), sleep(remaining).then(() => false)]);
+      if (!inTime) {
+        iteration.catch(() => {});
+        break;
       }
     }
     if (!finished) {
       timedOut = true;
       await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
-      // "Stop" only takes effect once the in-flight model request starts streaming (Ollama's
-      // client does not pass the abort signal through while still prefilling); the next
-      // "run" would be rejected as "already running" if we moved on early, so wait, bounded.
+      // Stop ends the task at once; the wait is bounded for an agent that does not answer,
+      // since the next "run" would be rejected as "already running" if we moved on early.
       const stopDeadline = Date.now() + STOP_GRACE_MS;
       while (!finished && Date.now() < stopDeadline) {
         await sleep(500);
-        const batch = await drainEvents(cdp, sessionId);
-        for (const e of batch) {
-          events.push(e);
-          if (e.type === "status" && e.running === false) finished = true;
-        }
+        await take(await drainEvents(cdp, sessionId));
       }
-      if (!finished) console.error(`  -> agent did not report stopped within ${STOP_GRACE_MS / 1000}s of grace; the next task may start blocked`);
+      if (!finished) {
+        const last = events.slice(-5).map((e) => e.type + (e.text ? `: ${e.text.slice(0, 120)}` : "")).join(" | ");
+        console.error(`  -> agent did not report stopped within ${STOP_GRACE_MS / 1000}s of grace; the next task may start blocked. Last events: ${last || "none"}`);
+      }
     }
   }
   const wallMs = Date.now() - started;
@@ -406,7 +423,9 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   const { url: finalUrl, pageText } = await readActiveTab(cdp, sessionId);
 
   let verdict;
-  if (timedOut) {
+  if (agentError) {
+    verdict = { ok: false, reason: `agent error: ${agentError}` };
+  } else if (timedOut) {
     verdict = { ok: false, reason: `timed out after ${timeoutMs / 1000}s` };
   } else {
     try {
