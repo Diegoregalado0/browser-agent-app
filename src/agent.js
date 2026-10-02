@@ -19,6 +19,14 @@ const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ?
 // (thinking blocks, thought signatures) while the same model is in use.
 
 const MAX_RATE_LIMIT_WAITS = 8;
+// How long a task waits for the previous task's browser release before it starts anyway.
+const ENDING_WAIT_MS = 5000;
+// Resolves when the promise settles or after ms, whichever comes first.
+function within(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve) => (timer = setTimeout(resolve, ms)));
+  return Promise.race([Promise.resolve(promise).catch(() => {}), timeout]).finally(() => clearTimeout(timer));
+}
 // Follows a decline, so the model asks instead of retrying the action another way.
 const DECLINED = "Do not retry it or work around it; tell the user what you wanted to do and ask how to proceed.";
 // A call as the declined-action records match it: its tool and exact input.
@@ -130,7 +138,9 @@ export class Agent {
     // Safety checks bill the same account, so their tokens count toward the limits too.
     this.guard = new Guard({ onUsage: (tokens) => this.#countTokens(tokens) });
     this.taskTokens = 0;
-    this.abortController = null;
+    // The running task (see run), and the browser release of the last one to end.
+    this.task = null;
+    this.ending = null;
     this.usage = { input: 0, cachedInput: 0, output: 0 };
     // Input tokens of the latest request, and of the request that triggered the last compaction.
     this.lastInput = 0;
@@ -149,7 +159,7 @@ export class Agent {
   }
 
   get running() {
-    return this.abortController !== null;
+    return this.task !== null;
   }
 
   // Trims old screenshots and long tool output when the last request was large (see
@@ -174,9 +184,9 @@ export class Agent {
 
   // The first time a conversation reaches a site with notes (site-guides.js), they ride
   // along with the tool result, once.
-  async #addSiteGuide(results) {
+  async #addSiteGuide(results, signal) {
     const guide = siteGuide(await this.browser.currentUrl().catch(() => ""));
-    if (!guide || this.guidesGiven.has(guide.key) || !results.length) return;
+    if (signal.aborted || !guide || this.guidesGiven.has(guide.key) || !results.length) return;
     this.guidesGiven.add(guide.key);
     results.at(-1).content = [...results.at(-1).content, { type: "text", text: guide.text }];
   }
@@ -226,8 +236,51 @@ export class Agent {
     if (usage) this.usage = { ...this.usage, ...usage };
   }
 
+  // Ends the running task at once, whatever call it is waiting on (a model request that
+  // does not abort, a safety check, a page script that never returns): the task stops
+  // counting as running, the history is left valid, and the browser is released. The run
+  // still waiting checks the task's signal before every event, prompt, browser action and
+  // history write, so nothing of it reaches the user or the history afterwards.
   stop() {
-    this.abortController?.abort();
+    const task = this.task;
+    if (!task) return;
+    this.task = null;
+    task.controller.abort();
+    this.#closeHistory(task);
+    this.emit({ type: "notice", text: "Stopped." });
+    this.#finish(task);
+  }
+
+  // A stopped task's history, made valid for the next request: a request still waiting for
+  // its reply is dropped, and tool calls get the results they finished with, or a note
+  // that Stop came first.
+  #closeHistory(task) {
+    if (!task.started) return;
+    const last = this.messages.at(-1);
+    const calls = last?.role === "assistant" ? last.content.filter((b) => b.type === "tool_call") : [];
+    if (!calls.length) return this.#dropUnansweredTurn();
+    const done = new Map((task.results ?? []).map((r) => [r.id, r]));
+    const results = calls.map(
+      (call) =>
+        done.get(call.id) ?? {
+          type: "tool_result",
+          id: call.id,
+          nativeId: call.nativeId,
+          name: call.name,
+          isError: true,
+          content: [{ type: "text", text: "Stopped by the user before this finished; its outcome is unknown." }],
+        },
+    );
+    this.messages.push({ role: "user", content: results });
+  }
+
+  // The end of a task, stopped or finished: its stats, the browser released, the history
+  // saved and the status shown. The next task waits for the release (see run).
+  #finish(task) {
+    if (task.metrics.input || task.metrics.output) this.emit({ type: "task_stats", text: task.metrics.summary() });
+    this.ending = this.browser.endTask().catch(() => {});
+    this.onHistory();
+    this.emit({ type: "status", running: false });
   }
 
   async run(userText, config) {
@@ -245,31 +298,46 @@ export class Agent {
       );
     }
 
-    this.browser.showActions = config.showActions;
-    await this.browser.startTask({ highlight: config.highlightTab });
-    const page = await this.browser.currentPage();
-    // A task that ended between a tool call and its results (a usage limit, or a
-    // conversation saved mid-task and reopened) leaves calls no provider will accept.
-    // They never ran, so they are dropped.
-    if (this.messages.at(-1)?.role === "assistant" && this.messages.at(-1).content.some((b) => b.type === "tool_call")) {
-      this.messages.pop();
+    // Set before the first wait, so Stop works from here on. started: the task's request is
+    // in the history; results: the tool results of the current step so far.
+    const task = (this.task = { controller: new AbortController(), metrics: new TaskMetrics(), started: false, results: null });
+    const signal = task.controller.signal;
+    const metrics = task.metrics;
+    try {
+      // The previous task's browser release, which a Stop does not wait for. A release that
+      // hangs holds the next task back only briefly.
+      await within(this.ending, ENDING_WAIT_MS);
+      if (signal.aborted) return;
+      this.browser.showActions = config.showActions;
+      await this.browser.startTask({ highlight: config.highlightTab });
+      const page = await this.browser.currentPage();
+      if (signal.aborted) return;
+      // A task that ended between a tool call and its results (a usage limit, or a
+      // conversation saved mid-task and reopened) leaves calls no provider will accept.
+      // They never ran, so they are dropped.
+      if (this.messages.at(-1)?.role === "assistant" && this.messages.at(-1).content.some((b) => b.type === "tool_call")) {
+        this.messages.pop();
+      }
+      this.messages.push({
+        role: "user",
+        content: [{ type: "text", text: `${userText}\n\n${currentTabTag(page)}` }],
+      });
+      task.started = true;
+    } catch (err) {
+      if (this.task === task) this.task = null;
+      if (signal.aborted) return;
+      throw err;
     }
-    this.messages.push({
-      role: "user",
-      content: [{ type: "text", text: `${userText}\n\n${currentTabTag(page)}` }],
-    });
 
     const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
-    const metrics = (this.taskMetrics = new TaskMetrics());
+    this.taskMetrics = metrics;
     this.declinedCalls.clear();
     this.declinedHosts.clear();
     this.allowedPrivateOrigins.clear();
-    this.abortController = new AbortController();
-    const signal = this.abortController.signal;
     const outputAtStart = this.usage.output;
-    this.emit({ type: "status", running: true });
+    this.#emit(signal, { type: "status", running: true });
 
     try {
       let requestStarted = 0;
@@ -282,16 +350,16 @@ export class Agent {
       let agentPrompt = null;
       let finalAnswerAsked = false;
       for (let step = 0; step < config.maxSteps; step++) {
-        this.emit({ type: "assistant_start" });
+        this.#emit(signal, { type: "assistant_start" });
         let result;
         let waits = 0;
         try {
           await this.limiter.take("request", limits.requestsPerMinute, signal, (secs) =>
-            this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
+            this.#emit(signal, { type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
           );
           if (signal.aborted) throw new DOMException("Stopped", "AbortError");
           if (this.#compact(this.lastInput, config) && config.debugMode) {
-            this.emit({ type: "debug", text: `Trimmed old screenshots and tool output (last request ${this.lastInput} input tokens).` });
+            this.#emit(signal, { type: "debug", text: `Trimmed old screenshots and tool output (last request ${this.lastInput} input tokens).` });
           }
           requestStarted = Date.now();
           firstTokenMs = null;
@@ -306,16 +374,16 @@ export class Agent {
                 tools,
                 messages: this.messages,
                 signal,
-                onText: (delta) => (firstToken(), this.emit({ type: "text", delta })),
-                onThinking: (delta) => (firstToken(), this.emit({ type: "thinking", delta })),
-                onWait: (secs) => this.emit({ type: "notice", text: `Pacing for ${config.provider}'s token rate limit; waiting ${secs}s.` }),
+                onText: (delta) => (firstToken(), this.#emit(signal, { type: "text", delta })),
+                onThinking: (delta) => (firstToken(), this.#emit(signal, { type: "thinking", delta })),
+                onWait: (secs) => this.#emit(signal, { type: "notice", text: `Pacing for ${config.provider}'s token rate limit; waiting ${secs}s.` }),
               });
               break;
             } catch (err) {
               const delay = rateLimitDelay(err);
               if (delay === null || waits++ >= MAX_RATE_LIMIT_WAITS || signal.aborted) throw err;
               const wait = Math.min(Math.ceil(delay) + 500, 65000);
-              this.emit({ type: "notice", text: `Rate limited by ${config.provider}; waiting ${Math.round(wait / 1000)}s.` });
+              this.#emit(signal, { type: "notice", text: `Rate limited by ${config.provider}; waiting ${Math.round(wait / 1000)}s.` });
               await sleep(wait, signal);
               if (signal.aborted) throw err;
             }
@@ -324,9 +392,11 @@ export class Agent {
           // request cut short by Stop returns a partial reply as if it were complete.
           if (signal.aborted) throw new DOMException("Stopped", "AbortError");
         } catch (err) {
+          // Stop already closed out the history.
+          if (signal.aborted) return;
           this.#dropUnansweredTurn();
-          if (signal.aborted || err.name === "AbortError") {
-            this.emit({ type: "notice", text: "Stopped." });
+          if (err.name === "AbortError") {
+            this.#emit(signal, { type: "notice", text: "Stopped." });
             return;
           }
           throw new Error(provider.describeError(err) || err.message);
@@ -343,10 +413,10 @@ export class Agent {
         // The model is told and tries again; repeats count toward the loop guard.
         if (result.stop === "unreadable") {
           const error = result.error.slice(0, 300);
-          if (config.debugMode) this.emit({ type: "debug", text: `Request ${step + 1}: the reply could not be read, ${requestMs} ms: ${error}` });
+          if (config.debugMode) this.#emit(signal, { type: "debug", text: `Request ${step + 1}: the reply could not be read, ${requestMs} ms: ${error}` });
           const note = this.loopGuard.record("reply", {}, true, error);
           if (this.loopGuard.stopReason) {
-            this.emit({ type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
+            this.#emit(signal, { type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
             return;
           }
           const text = `[Agent] Your last reply could not be read (${error}). Send it again: tool calls with valid arguments, or a plain text answer.`;
@@ -361,16 +431,17 @@ export class Agent {
           if (/^\d+$/.test(call.input?.ref)) call.input.ref = `ref_${call.input.ref}`;
           if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
         }
+        if (signal.aborted) return;
         // A reply to an agent prompt that has left the history was written with the prompt in
         // place, so its thinking is not replayed. A pending tool round keeps it, since the
         // provider needs the thinking that led to the calls.
         const pendingCalls = result.content.some((b) => b.type === "tool_call");
         this.messages.push({ role: "assistant", content: result.content, raw: promptDropped && !pendingCalls ? null : result.raw });
         if (result.usage?.input) this.lastInput = result.usage.input;
-        this.emit({ type: "speed", ...metrics.request({ usage: result.usage, metrics: result.metrics, ms: requestMs, firstTokenMs }) });
+        this.#emit(signal, { type: "speed", ...metrics.request({ usage: result.usage, metrics: result.metrics, ms: requestMs, firstTokenMs }) });
         if (config.debugMode && result.usage) {
           const u = result.usage;
-          this.emit({
+          this.#emit(signal, {
             type: "debug",
             text: `Request ${step + 1}: ${u.input ?? 0} input tokens (${u.cachedInput ?? 0} cached), ${u.output ?? 0} output, ${requestMs} ms, stop: ${result.stop}.`,
           });
@@ -378,28 +449,29 @@ export class Agent {
         this.onHistory();
         if (result.usage) {
           for (const k of Object.keys(this.usage)) this.usage[k] += result.usage[k] ?? 0;
-          this.emit({ type: "usage", model, usage: { ...this.usage }, taskOutput: this.usage.output - outputAtStart });
+          this.#emit(signal, { type: "usage", model, usage: { ...this.usage }, taskOutput: this.usage.output - outputAtStart });
           await this.#countTokens((result.usage.input ?? 0) + (result.usage.output ?? 0));
           if (limits.taskTokens && this.taskTokens >= limits.taskTokens) {
-            this.emit({ type: "notice", text: `Stopped: this task used ${formatTokens(this.taskTokens)} tokens, its limit. You can raise it in Settings > Permissions and safety > Usage limits.` });
+            this.#emit(signal, { type: "notice", text: `Stopped: this task used ${formatTokens(this.taskTokens)} tokens, its limit. You can raise it in Settings > Permissions and safety > Usage limits.` });
             return;
           }
           if (limits.dailyTokens && this.ledger && (await this.ledger.used()) >= limits.dailyTokens) {
-            this.emit({ type: "notice", text: `Stopped: today's limit of ${formatTokens(limits.dailyTokens)} tokens is reached. You can raise it in Settings > Permissions and safety > Usage limits.` });
+            this.#emit(signal, { type: "notice", text: `Stopped: today's limit of ${formatTokens(limits.dailyTokens)} tokens is reached. You can raise it in Settings > Permissions and safety > Usage limits.` });
             return;
           }
         }
+        if (signal.aborted) return;
 
         if (result.stop === "refusal") {
-          this.emit({ type: "notice", text: "The model declined this request." });
+          this.#emit(signal, { type: "notice", text: "The model declined this request." });
           return;
         }
         if (result.stop === "pause") continue;
         const calls = result.content.filter((b) => b.type === "tool_call");
         const replyText = result.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-        if (replyText) this.emit({ type: "reply", text: replyText });
+        if (replyText) this.#emit(signal, { type: "reply", text: replyText });
         if (calls.length === 0) {
-          if (result.stop === "max_tokens") this.emit({ type: "notice", text: "The reply hit the output limit." });
+          if (result.stop === "max_tokens") this.#emit(signal, { type: "notice", text: "The reply hit the output limit." });
           else if (!replyText) {
             // An empty turn adds nothing the model needs to see again.
             this.messages.pop();
@@ -410,7 +482,7 @@ export class Agent {
               this.messages.push(agentPrompt);
               continue;
             }
-            this.emit({ type: "notice", text: "The model ended its turn without a reply. Ask again, or try another model or setting." });
+            this.#emit(signal, { type: "notice", text: "The model ended its turn without a reply. Ask again, or try another model or setting." });
           }
           return;
         }
@@ -419,26 +491,29 @@ export class Agent {
           throw new Error("The reply hit the output limit in the middle of a tool call.");
         }
 
-        const results = await this.#runTools(calls, config, signal);
-        await this.#addSiteGuide(results);
+        const results = (task.results = []);
+        await this.#runTools(calls, config, signal, results);
+        await this.#addSiteGuide(results, signal);
+        if (signal.aborted) return;
+        task.results = null;
         this.messages.push({ role: "user", content: results });
         this.onHistory();
-        if (signal.aborted) {
-          this.emit({ type: "notice", text: "Stopped." });
-          return;
-        }
         if (this.loopGuard.stopReason) {
-          this.emit({ type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
+          this.#emit(signal, { type: "notice", text: `Stopped because the agent seems stuck: ${this.loopGuard.stopReason} Tell it how to proceed, or try a different request.` });
           return;
         }
       }
-      this.emit({ type: "notice", text: `Stopped after ${config.maxSteps} steps (raise the limit in Settings).` });
+      this.#emit(signal, { type: "notice", text: `Stopped after ${config.maxSteps} steps (raise the limit in Settings).` });
+    } catch (err) {
+      // A stopped task has ended already (see stop); what it was waiting on is moot.
+      if (signal.aborted) return;
+      throw err;
     } finally {
-      this.abortController = null;
-      if (metrics.input || metrics.output) this.emit({ type: "task_stats", text: metrics.summary() });
-      await this.browser.endTask().catch(() => {});
-      this.onHistory();
-      this.emit({ type: "status", running: false });
+      if (this.task === task) {
+        this.task = null;
+        this.#finish(task);
+        await this.ending;
+      }
     }
   }
 
@@ -453,7 +528,8 @@ export class Agent {
     }
   }
 
-  async #runTools(calls, config, signal) {
+  // Pushes each call's result to results as it finishes, so Stop can keep them.
+  async #runTools(calls, config, signal, results) {
     const guarded = config.permissionMode !== "auto";
     // Filling a form field does not change which page the next field is on, so the
     // safety checks for a batch of form fields start together; each action still waits
@@ -466,7 +542,6 @@ export class Agent {
         prechecks.set(call.id, check);
       }
     }
-    const results = [];
     for (const call of calls) {
       const base = { type: "tool_result", id: call.id, nativeId: call.nativeId, name: call.name };
       if (signal.aborted || this.loopGuard.stopReason) {
@@ -477,7 +552,7 @@ export class Agent {
       // Checked again as the call runs: an earlier call in the batch can move focus to a
       // password field. The next save of the history then hides it too.
       if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
-      this.emit({ type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
+      this.#emit(signal, { type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
       // Declined or blocked actions are the user's and the safety check's decisions, not loops.
       let authorizing = false;
       // Set while a page tool runs, so a failure there comes back with a screenshot.
@@ -488,7 +563,7 @@ export class Agent {
         const problem = actionProblem(call.name, call.input);
         if (problem) throw new Error(problem);
         await this.limiter.take("action", config.limits.actionsPerMinute, signal, (secs) =>
-          this.emit({ type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
+          this.#emit(signal, { type: "notice", text: `Pausing ${secs}s to stay under your limit of ${config.limits.actionsPerMinute} browser actions per minute.` }),
         );
         if (signal.aborted) throw new Error("Cancelled by the user.");
         // Counted by the loop guard, so a model that keeps retrying is stopped.
@@ -505,32 +580,33 @@ export class Agent {
         if (signal.aborted) throw new Error("Cancelled by the user.");
         const pageTool = PAGE_TOOLS.has(call.name);
         const originBefore = pageTool ? await this.#origin() : null;
+        if (signal.aborted) throw new Error("Cancelled by the user.");
         running = pageTool;
         let output = toBlocks(
           this.mcp?.has(call.name) ? await this.mcp.call(call.name, call.input, { signal }) : await this.browser.run(call.name, call.input),
         );
         running = false;
+        if (signal.aborted) throw new Error("Cancelled by the user.");
         const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
         const note = this.loopGuard.record(call.name, call.input, false, text);
-        if (note) output = [...output, ...(await this.#autoScreenshot(output, "of the loop check")), { type: "text", text: note }];
+        if (note) output = [...output, ...(await this.#autoScreenshot(output, "of the loop check", signal)), { type: "text", text: note }];
         else if (pageTool && originBefore !== (await this.#origin())) {
-          output = [...output, ...(await this.#autoScreenshot(output, "the page is on a different site now"))];
+          output = [...output, ...(await this.#autoScreenshot(output, "the page is on a different site now", signal))];
         }
         if (guarded) output = await this.#scanned(call, output, config, signal);
-        this.emit({ type: "tool_result", id: call.id, content: output });
+        this.#emit(signal, { type: "tool_result", id: call.id, content: output });
         results.push({ ...base, content: output });
       } catch (err) {
         const note = authorizing || signal.aborted ? null : this.loopGuard.record(call.name, call.input, true, err.message);
         let content = [{ type: "text", text: note ? `${err.message}\n\n${note}` : err.message }];
         if ((running || note) && !signal.aborted) {
-          content = [...content, ...(await this.#autoScreenshot(content, running ? "the action failed" : "of the loop check"))];
+          content = [...content, ...(await this.#autoScreenshot(content, running ? "the action failed" : "of the loop check", signal))];
           if (guarded) content = await this.#scanned(call, content, config, signal);
         }
-        this.emit({ type: "tool_result", id: call.id, isError: true, content });
+        this.#emit(signal, { type: "tool_result", id: call.id, isError: true, content });
         results.push({ ...base, isError: true, content });
       }
     }
-    return results;
   }
 
   // The origin of the current tab, or "" when it has none.
@@ -544,8 +620,8 @@ export class Agent {
 
   // A screenshot to attach to tool output, with why it came, when the output has none.
   // Observation is text first; these are the moments the model needs to see the page.
-  async #autoScreenshot(output, why) {
-    if (output.some((b) => b.type === "image")) return [];
+  async #autoScreenshot(output, why, signal) {
+    if (signal.aborted || output.some((b) => b.type === "image")) return [];
     try {
       return [{ type: "text", text: `[Screenshot attached because ${why}.]` }, ...toBlocks(await this.browser.run("browser", { action: "screenshot" }))];
     } catch {
@@ -568,12 +644,13 @@ export class Agent {
     });
     // A scan this short made no model call (a tool that is not scanned, or output already scanned).
     const scanMs = Date.now() - scanStarted;
+    if (signal.aborted) return output;
     if (scanMs >= 50) {
       this.taskMetrics.check(scanMs);
-      if (config.debugMode) this.emit({ type: "debug", text: `Content scan of ${call.name}: ${scanMs} ms.` });
+      if (config.debugMode) this.#emit(signal, { type: "debug", text: `Content scan of ${call.name}: ${scanMs} ms.` });
     }
     if (!warning) return output;
-    this.emit({ type: "notice", text: `Possible prompt injection on this page: ${warning}` });
+    this.#emit(signal, { type: "notice", text: `Possible prompt injection on this page: ${warning}` });
     return [
       {
         type: "text",
@@ -583,6 +660,19 @@ export class Agent {
       },
       ...output,
     ];
+  }
+
+  // A task's events and prompts. Once the task is stopped they do nothing, so a run still
+  // waiting on a call when Stop came cannot reach the user (see stop).
+  #emit(signal, event) {
+    if (!signal.aborted) this.emit(event);
+  }
+
+  async #ask(signal, request) {
+    if (signal.aborted) throw new Error("Cancelled by the user.");
+    const decision = await this.askPermission(request);
+    if (signal.aborted) throw new Error("Cancelled by the user.");
+    return decision;
   }
 
   // A call's input as events show it: without text typed into a password field.
@@ -613,8 +703,8 @@ export class Agent {
   // "auto".
   // precheck: this call's safety check, already started (see #runTools).
   async #authorize(call, config, signal, precheck) {
-    await this.#checkSensitive(call, config);
-    if (config.permissionMode === "ask") await this.#checkSite(call, config);
+    await this.#checkSensitive(call, config, signal);
+    if (config.permissionMode === "ask") await this.#checkSite(call, config, signal);
     const isMcp = Boolean(this.mcp?.has(call.name));
     // What the call would do, when its tool server says it always asks (Outlook send).
     const confirm = (isMcp && (await this.mcp.confirmation?.(call.name, call.input, { signal }))) || null;
@@ -625,9 +715,9 @@ export class Agent {
       // A check cut short by Stop is not a reason to ask; the action is not going to run.
       if (signal.aborted) throw new Error("Cancelled by the user.");
       const { page, target, verdict, reason } = check;
-      this.emit({ type: "guard", name: call.name, input: this.#shownInput(call), target, page: page.url, verdict, reason });
+      this.#emit(signal, { type: "guard", name: call.name, input: this.#shownInput(call), target, page: page.url, verdict, reason });
       if (verdict === "block") {
-        this.emit({ type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
+        this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
         throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);
       }
       if (verdict === "allow" && !confirm) return;
@@ -639,7 +729,7 @@ export class Agent {
       : `${call.name} ${describeInput(call.name, call.input, await this.#typesPassword(call))}${check.target ? ` on ${check.target}` : ""}`;
     // A remote client may answer this kind, as it may any safety prompt, since tasks
     // started remotely send mail too; sensitive-site and password prompts stay local.
-    const decision = await this.askPermission({ text: `${flagged ? `Safety check: ${flagged} ` : ""}Allow ${action}?`, allowAlways: false, kind: "safety" });
+    const decision = await this.#ask(signal, { text: `${flagged ? `Safety check: ${flagged} ` : ""}Allow ${action}?`, allowAlways: false, kind: "safety" });
     if (decision === "deny") {
       // A navigation's site is where it goes; an Outlook tool acts on no site.
       this.#decline(call, isMcp ? null : originForToolCall(call.name, call.input, check.page.url), "safety");
@@ -659,12 +749,12 @@ export class Agent {
   // Navigating, or opening a tab, to a site where the user declined an action during this
   // task asks again with the same kind of prompt, so a sensitive-site decline is still
   // answered only at the computer.
-  async #checkDeclinedSite(call) {
+  async #checkDeclinedSite(call, signal) {
     const origin = originForToolCall(call.name, call.input, "");
     const host = origin && new URL(origin).hostname;
     const kind = host && this.declinedHosts.get(host);
     if (!kind) return;
-    const decision = await this.askPermission({
+    const decision = await this.#ask(signal, {
       text: `You declined an action on ${host} earlier in this task. Allow the agent to open ${clipAddress(String(call.input.url))}?`,
       allowAlways: false,
       kind,
@@ -678,11 +768,11 @@ export class Agent {
   // Opening an address on this computer or the local network (a router, a printer, an
   // intranet page) asks at the computer, like a sensitive site. An approval covers the same
   // origin for the rest of the task and is never saved. Returns whether it asked.
-  async #checkPrivateAddress(call) {
+  async #checkPrivateAddress(call, signal) {
     const origin = originForToolCall(call.name, call.input, "");
     if (!origin || !isPrivateAddress(origin) || this.allowedPrivateOrigins.has(origin)) return false;
     const host = new URL(origin).hostname;
-    const decision = await this.askPermission({
+    const decision = await this.#ask(signal, {
       text: `${host} is on this computer or your local network (a router, printer, intranet or local server). Allow the agent to open ${clipAddress(String(call.input.url))}? This allows ${origin} for the rest of this task.`,
       allowAlways: false,
       kind: "sensitive",
@@ -711,16 +801,16 @@ export class Agent {
       signal,
     });
     const ms = Date.now() - started;
-    this.taskMetrics.check(ms);
-    if (config.debugMode) this.emit({ type: "debug", text: `Safety check of ${call.name}: ${ms} ms, ${verdict}.` });
+    if (!signal.aborted) this.taskMetrics.check(ms);
+    if (config.debugMode) this.#emit(signal, { type: "debug", text: `Safety check of ${call.name}: ${ms} ms, ${verdict}.` });
     return { page, target, verdict, reason };
   }
 
-  async #checkSensitive(call, config) {
+  async #checkSensitive(call, config, signal) {
     if (call.name === "navigate" || call.name === "tabs") {
       // One prompt is enough when the address is private and was declined before too.
-      if (config.confirmSensitiveSites && (await this.#checkPrivateAddress(call))) return;
-      return this.#checkDeclinedSite(call);
+      if (config.confirmSensitiveSites && (await this.#checkPrivateAddress(call, signal))) return;
+      return this.#checkDeclinedSite(call, signal);
     }
     if (!isStateChanging(call.name, call.input)) return;
     const url = await this.browser.currentUrl();
@@ -732,7 +822,7 @@ export class Agent {
       const site = new URL(sensitive).hostname;
       const where = sensitive === url ? "" : ` (in a frame on ${new URL(url).hostname})`;
       const target = await this.browser.describeTarget(call.input);
-      const decision = await this.askPermission({
+      const decision = await this.#ask(signal, {
         text: `${site}${where} is a sensitive site (banking, payments, passwords, or account security). Allow ${call.name} ${describeInput(call.name, call.input, await this.#typesPassword(call))}${target ? ` on ${target}` : ""}?`,
         allowAlways: false,
         kind: "sensitive",
@@ -744,7 +834,7 @@ export class Agent {
       return;
     }
     if (await this.#typesPassword(call)) {
-      const decision = await this.askPermission({ text: "The agent wants to type into a password field. Allow it?", allowAlways: false, kind: "password" });
+      const decision = await this.#ask(signal, { text: "The agent wants to type into a password field. Allow it?", allowAlways: false, kind: "password" });
       if (decision === "deny") {
         this.#decline(call, url, "password");
         throw new Error("The user declined entering a password. Ask them to sign in themselves.");
@@ -765,7 +855,7 @@ export class Agent {
     return this.mcp?.has(call.name) ? !this.mcp.isReadOnly(call.name) : isStateChanging(call.name, call.input);
   }
 
-  async #checkSite(call, config) {
+  async #checkSite(call, config, signal) {
     if (this.mcp?.has(call.name)) return;
     const address = addressForToolCall(call.name, call.input, await this.browser.currentUrl());
     const origin = originForToolCall(call.name, call.input, address);
@@ -774,7 +864,7 @@ export class Agent {
 
     // The site is what gets approved; the full address shows any data riding along.
     const full = address === origin || address === `${origin}/` ? "" : ` Full address: ${clipAddress(address)}`;
-    const decision = await this.askPermission({ text: `Allow the agent to use ${call.name} on ${origin}?${full}`, allowAlways: true, origin, kind: "site" });
+    const decision = await this.#ask(signal, { text: `Allow the agent to use ${call.name} on ${origin}?${full}`, allowAlways: true, origin, kind: "site" });
     // The site prompt asks again on its own, so only the exact call is recorded.
     if (decision === "deny") {
       this.declinedCalls.add(callKey(call));
