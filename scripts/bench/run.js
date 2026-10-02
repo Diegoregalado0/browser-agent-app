@@ -64,6 +64,20 @@ if (!selectedTasks.length) {
   process.exit(1);
 }
 
+// --resume <file>: continue a run a crash interrupted. Its json names the rows already
+// done (run+task pairs), which are skipped; its runId is reused so the same two files get
+// overwritten in place rather than starting a new pair.
+let resumedRows = [];
+let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+if (args.resume) {
+  const { readFileSync } = await import("node:fs");
+  const prior = JSON.parse(readFileSync(args.resume, "utf8"));
+  resumedRows = prior.rows;
+  runId = args.resume.replace(/\.json$/, "").split("/").pop();
+  console.log(`Resuming ${args.resume}: ${resumedRows.length} row(s) already done.`);
+}
+const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
+
 // Build the config the panel will read for this run. Reuses the app's own merge/validation
 // instead of hand-rolling a config shape.
 function buildConfig() {
@@ -159,9 +173,13 @@ async function runBenchmark() {
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
 
-  const rows = [];
+  const rows = [...resumedRows];
   for (let run = 1; run <= Number(args.runs); run++) {
     for (const task of selectedTasks) {
+      if (done.has(`${run}:${task.id}`)) {
+        console.log(`\n[run ${run}] ${task.id}: already done (resumed), skipping`);
+        continue;
+      }
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
       try {
@@ -187,6 +205,9 @@ async function runBenchmark() {
         costUsd: cost,
       });
       console.log(`  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s`);
+      // Written after every task, not just at the end, so a crash mid-run only costs the
+      // task in flight: --resume picks up from here, same two files, overwritten in place.
+      writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, rows });
     }
   }
 
@@ -274,12 +295,30 @@ async function readActiveTab(cdp, sessionId) {
   return { url, title, pageText };
 }
 
+// How long to wait for the agent to actually stop after a timed-out task, since Stop
+// cannot interrupt a request still prefilling (see the comment where this is used below).
+const STOP_GRACE_MS = 120000;
+
 async function runTask(cdp, sessionId, task, timeoutMs) {
   await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId);
   await drainEvents(cdp, sessionId);
 
   const started = Date.now();
   await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
+  // The controller rejects "run" with an error reply, not a thrown exception, when the
+  // previous task's agent is still finishing (see the stop-grace wait below); catch that
+  // here and retry once it actually stops, rather than silently recording an empty task.
+  let rejected = (await drainEvents(cdp, sessionId)).find((e) => e.type === "error" && /already running/i.test(e.text));
+  if (rejected) {
+    console.error(`  -> previous task's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
+    const waitDeadline = Date.now() + STOP_GRACE_MS;
+    while (Date.now() < waitDeadline) {
+      await sleep(500);
+      const batch = await drainEvents(cdp, sessionId);
+      if (batch.some((e) => e.type === "status" && e.running === false)) break;
+    }
+    await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
+  }
 
   const events = [];
   let finished = false;
@@ -308,9 +347,21 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   if (!finished) {
     timedOut = true;
     await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
-    // Drain whatever trails the stop.
-    await sleep(500);
-    events.push(...(await drainEvents(cdp, sessionId)));
+    // "Stop" only takes effect once the in-flight model request starts streaming (Ollama's
+    // client does not pass the abort signal through while still prefilling, per
+    // src/providers/ollama.js); agent.running can stay true for a while after this. The
+    // next task's "run" would be silently rejected ({type:"error", "already running"}) if
+    // we moved on before it actually stopped, so wait here, bounded, instead of one sleep.
+    const stopDeadline = Date.now() + STOP_GRACE_MS;
+    while (!finished && Date.now() < stopDeadline) {
+      await sleep(500);
+      const batch = await drainEvents(cdp, sessionId);
+      for (const e of batch) {
+        events.push(e);
+        if (e.type === "status" && e.running === false) finished = true;
+      }
+    }
+    if (!finished) console.error(`  -> agent did not report stopped within ${STOP_GRACE_MS / 1000}s of grace; the next task may start blocked`);
   }
   const wallMs = Date.now() - started;
 
@@ -345,9 +396,8 @@ function fmtCost(c) {
   return c == null ? "-" : `~$${c.amount.toFixed(4)} (estimate)`;
 }
 
-function writeReport({ provider, model, thinking, rows }) {
+function writeReport({ runId, provider, model, thinking, rows }) {
   mkdirSync(RESULTS_DIR, { recursive: true });
-  const runId = `${provider}-${model.replace(/[^\w.-]/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   const jsonPath = join(RESULTS_DIR, `${runId}.json`);
   const mdPath = join(RESULTS_DIR, `${runId}.md`);
   writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, rows }, null, 2));
