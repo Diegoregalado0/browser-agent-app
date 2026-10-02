@@ -2,7 +2,8 @@
 // Runs the Browsby benchmark: one command drives the real built extension in a throwaway
 // Chrome profile over DevTools, same as `browser-agent` does, and runs each task by
 // talking to the panel's in-page controller (globalThis.agentHost) the way the UI does.
-// Writes bench-results/<run-id>.json and .md.
+// Writes bench-results/<run-id>.json and .md, and every agent event per task to
+// bench-results/<run-id>/<task>.events.jsonl.
 //
 // Usage:
 //   node scripts/bench/run.js --provider openai --model qwen3.6-35b-a3b \
@@ -19,7 +20,7 @@
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -210,6 +211,7 @@ async function runBenchmark() {
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
       try {
+        openEventLog(task, run);
         result = await runTask(cdp, sessionId, task, Number(args.timeout));
       } catch (err) {
         // A dropped connection (tunnel or test browser blip) fails this task instead of
@@ -283,9 +285,38 @@ async function setConfig(cdp, sessionId, config) {
   await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, sessionId);
 }
 
+// Every agent event of a task goes to bench-results/<run-id>/<task>.events.jsonl, one JSON
+// line each with the time it was drained, so a stalled task shows where it hung. Values under
+// credential-looking keys are replaced before anything is written.
+let eventLogPath = null;
+const SECRET_KEY = /key|token|secret|password|authorization|credential/i;
+
+function redact(value) {
+  if (Array.isArray(value)) return value.map(redact);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SECRET_KEY.test(k) ? "[redacted]" : redact(v)]));
+  }
+  return value;
+}
+
+function logEvent(entry) {
+  if (!eventLogPath) return;
+  try {
+    appendFileSync(eventLogPath, JSON.stringify(redact({ t: Date.now(), ...entry })) + "\n");
+  } catch {}
+}
+
+function openEventLog(task, run) {
+  const dir = join(RESULTS_DIR, runId);
+  mkdirSync(dir, { recursive: true });
+  eventLogPath = join(dir, `${task.id}${Number(args.runs) > 1 ? `.run${run}` : ""}.events.jsonl`);
+}
+
 async function drainEvents(cdp, sessionId) {
   const { result } = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify(window.__bench.events.splice(0))", returnByValue: true }, sessionId);
-  return JSON.parse(result.value);
+  const events = JSON.parse(result.value);
+  for (const e of events) logEvent({ event: e });
+  return events;
 }
 
 // Fixed permission policy: allow ordinary prompts (safety checks, new-site approvals),
@@ -400,6 +431,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     }
     if (!finished) {
       timedOut = true;
+      logEvent({ marker: "timeout" });
+      logEvent({ marker: "stop_sent" });
       await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
       // Stop ends the task at once; the wait is bounded for an agent that does not answer,
       // since the next "run" would be rejected as "already running" if we moved on early.
@@ -415,6 +448,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     }
   }
   const wallMs = Date.now() - started;
+  logEvent({ marker: "task_end", timedOut });
 
   const steps = events.filter((e) => e.type === "tool_call").length;
   const usage = [...events].reverse().find((e) => e.type === "usage");
