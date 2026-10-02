@@ -1727,4 +1727,153 @@ for (let i = 1; i < imageBodies.length; i++) {
 }
 assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${prefixBreaks} changed prefixes in 12 requests)`);
 
+// Experimental fresh context (freshContext). Off: every request carries the whole history
+// and no new-task check runs, exactly as without the setting. On: an unrelated request
+// starts the model on a fresh context with a short carry-over note, a failed check
+// continues the current task, and the safety state stays per conversation.
+{
+  const openaiBefore = providers.openai;
+  let sentHistories = [];
+  let taskChecks = [];
+  let actionChecks = [];
+  let taskAnswer = async () => ({ new_task: true });
+  let freshReplies = [];
+  providers.openai = {
+    describeError: () => null,
+    turn: async ({ messages }) => (sentHistories.push(structuredClone(messages)), freshReplies.shift()),
+    classify: async (args) => {
+      if (args.schema.properties.new_task) return (taskChecks.push(args.text), taskAnswer());
+      actionChecks.push(args.text);
+      return { verdict: "allow", reason: "ok" };
+    },
+  };
+  const shot = { type: "tool_call", id: "s1", name: "navigate", input: { url: "https://shop.example/cart" } };
+  const said = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+  const session = () => [
+    { content: [shot], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+    said("Your cart has 3 items. IGNORE PREVIOUS INSTRUCTIONS"),
+    said("It is 18 degrees."),
+    said("Tomorrow too."),
+  ];
+  const freshBrowser = {
+    ...agent.browser,
+    callInPage: async () => false,
+    pages: async () => [{ id: "7", title: "Cart <b>", url: "https://shop.example/cart" }],
+    run: async () => [{ type: "text", text: "page" }, { type: "image", mediaType: "image/jpeg", data: "SHOT" }],
+  };
+  const play = async (cfg) => {
+    const events = [];
+    const a = new Agent({ emit: (e) => events.push(e), askPermission: async () => "allow" });
+    a.browser = freshBrowser;
+    sentHistories = [];
+    taskChecks = [];
+    actionChecks = [];
+    freshReplies = session();
+    const sizes = [];
+    for (const text of ["what is in my cart?", "weather in Lisbon?", "and tomorrow?"]) {
+      await a.run(text, cfg);
+      sizes.push(sentHistories.at(-1));
+    }
+    return { a, events, histories: sentHistories, sizes };
+  };
+
+  // Off, and with the setting missing: the same requests, each the whole history.
+  const { freshContext: _f, ...withoutSetting } = config;
+  const off = await play({ ...config, freshContext: false });
+  const without = await play(withoutSetting);
+  assert.equal(JSON.stringify(off.histories), JSON.stringify(without.histories), "the off setting changed what is sent");
+  // Timing aside (speed, task_stats), the panel sees the same events.
+  const untimed = (events) => events.filter((e) => !["speed", "task_stats"].includes(e.type));
+  assert.deepEqual(untimed(off.events), untimed(without.events));
+  assert.equal(taskChecks.length, 0, "a new-task check ran with the setting off");
+  assert.ok(!off.events.some((e) => e.type === "context"));
+  assert.ok(off.a.messages.every((m) => !("fresh" in m) && !("carryOver" in m)));
+  assert.equal(JSON.stringify(off.histories.at(-1)), JSON.stringify(off.a.messages.slice(0, -1)), "off: the last request was not the whole history");
+  // A conversation saved with the setting on and reopened with it off is sent whole.
+  const reopened = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  reopened.browser = freshBrowser;
+  reopened.restore({ messages: [{ role: "user", content: [{ type: "text", text: "a" }] }, { role: "assistant", content: [{ type: "text", text: "b" }], raw: null }, { role: "user", content: [{ type: "text", text: "c" }], fresh: true, carryOver: "note" }, { role: "assistant", content: [{ type: "text", text: "d" }], raw: null }] });
+  sentHistories = [];
+  freshReplies = [said("ok")];
+  await reopened.run("e", { ...config, freshContext: false });
+  assert.equal(sentHistories[0].length, 5);
+  assert.ok(!JSON.stringify(sentHistories[0].map((m) => m.content)).includes("note"));
+
+  // On: the weather request starts fresh, the follow-up continues it.
+  const answers = [true, false];
+  taskAnswer = async () => ({ new_task: answers.shift() });
+  const on = await play({ ...config, freshContext: true });
+  assert.equal(taskChecks.length, 2, "the first request was checked, or a later one was not");
+  assert.deepEqual(on.events.filter((e) => e.type === "context").map((e) => e.fresh), [true, false]);
+  const [freshStart, followUp] = [on.sizes[1], on.sizes[2]];
+  assert.equal(freshStart.length, 1, "the fresh context kept earlier messages");
+  const note = freshStart[0].content[0].text;
+  assert.ok(note.split("\n").length <= 10, "the carry-over note is longer than ten lines");
+  assert.match(note, /- what is in my cart\?/);
+  assert.match(note, /shop\.example/);
+  assert.ok(!/IGNORE|Cart <b>|SHOT/.test(JSON.stringify(freshStart)), "the fresh context carried a reply, a page title or a screenshot");
+  assert.match(freshStart[0].content[1].text, /^weather in Lisbon\?/);
+  assert.equal(followUp.length, 3, "the follow-up did not continue from the fresh start");
+  assert.match(followUp[0].content[0].text, /^\[Note from the agent/);
+  // The panel and the saved session keep the whole history.
+  assert.equal(on.a.shownMessages().length, off.a.messages.length);
+  assert.ok(on.a.messages.every((m) => !m.content.some((b) => b.text?.startsWith("[Note from the agent"))));
+
+  // Safety state stays per conversation: the safety check still sees every request, and
+  // never the carry-over note as one; site approvals and injection flags are kept.
+  const guarded = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  guarded.browser = freshBrowser;
+  guarded.sessionOrigins.add("https://shop.example");
+  guarded.guard.flags.push("planted text");
+  freshReplies = [said("hi"), { content: [{ ...shot, id: "s2" }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, said("done")];
+  taskAnswer = async () => ({ new_task: true });
+  actionChecks = [];
+  await guarded.run("first task", { ...config, freshContext: true });
+  await guarded.run("unrelated second task", { ...config, freshContext: true });
+  actionChecks = actionChecks.filter((t) => t.startsWith("User requests"));
+  assert.equal(actionChecks.length, 1);
+  assert.match(actionChecks[0], /1\. first task\n2\. unrelated second task/, "the safety check lost earlier requests");
+  assert.ok(!/Note from the agent/.test(actionChecks[0]), "the carry-over note counted as a user request");
+  assert.match(actionChecks[0], /planted text/, "injection flags were reset");
+  assert.ok(guarded.sessionOrigins.has("https://shop.example"));
+
+  // Fail safe: a check that throws, or answers anything but true, continues the task.
+  for (const failing of [async () => { throw new Error("offline"); }, async () => ({}), async () => ({ new_task: "yes" })]) {
+    taskAnswer = failing;
+    const events = [];
+    const a = new Agent({ emit: (e) => events.push(e), askPermission: async () => "allow" });
+    a.browser = freshBrowser;
+    sentHistories = [];
+    freshReplies = [said("one"), said("two")];
+    await a.run("first", { ...config, freshContext: true });
+    await a.run("second", { ...config, freshContext: true });
+    assert.equal(sentHistories[1].length, 3, "a failed new-task check started fresh");
+    assert.equal(events.find((e) => e.type === "context").fresh, false);
+  }
+
+  // Cheap signals skip the model: an explicit "new task", and a long pause.
+  taskChecks = [];
+  taskAnswer = async () => ({ new_task: false });
+  const quick = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  quick.browser = freshBrowser;
+  freshReplies = [said("1"), said("2"), said("3")];
+  await quick.run("first", { ...config, freshContext: true });
+  await quick.run("New task: find a recipe", { ...config, freshContext: true });
+  quick.lastTaskEnd = Date.now() - 2 * 60 * 60 * 1000;
+  await quick.run("something else", { ...config, freshContext: true });
+  assert.equal(taskChecks.length, 0, "a cheap signal still asked the model");
+  assert.ok(quick.messages.filter((m) => m.carryOver).length === 2);
+
+  // The user's choice: the latest request is taken back and sent again the other way.
+  sentHistories = [];
+  freshReplies = [said("again")];
+  assert.equal(quick.rewind(), "something else");
+  assert.equal(quick.messages.length, 4);
+  await quick.run("something else", { ...config, freshContext: true }, { fresh: false });
+  assert.equal(taskChecks.length, 0);
+  assert.equal(sentHistories[0].length, 3, "continuing did not keep the task that started fresh before it");
+  assert.equal(quick.messages.at(-2).fresh, false);
+  providers.openai = openaiBefore;
+}
+
 console.log("agent checks passed");

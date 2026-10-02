@@ -86,6 +86,8 @@ button:disabled:not(.icon-btn) { opacity: 0.55; cursor: not-allowed; filter: non
 .ghost #composer textarea { border-color: var(--ghost-fg); }
 .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user { background: var(--user); padding: 8px 12px; border-radius: 10px; align-self: flex-end; max-width: 85%; }
+.context-choice { align-self: flex-end; background: none; border: 0; padding: 0 4px; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.context-choice:hover, .context-choice:focus-visible { color: var(--accent); text-decoration: underline; }
 .msg.notice { color: var(--muted); font-style: italic; }
 .msg.error { color: var(--error); }
 details.thinking { color: var(--muted); font-size: 12px; }

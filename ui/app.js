@@ -443,6 +443,21 @@ const handlers = {
     mcpPanel.render(config);
     wizard.render(config);
   },
+  // The new-task check's choice for the latest request (experimental setting), with a
+  // button that sends the request again with the other choice.
+  context(msg) {
+    const user = [...log.querySelectorAll(".msg.user")].at(-1);
+    if (!user) return;
+    log.querySelector(".context-choice")?.remove();
+    const button = el("button", "context-choice", msg.fresh ? "Started fresh · Continue previous" : "Continued previous · Start fresh");
+    button.type = "button";
+    button.title = `Chosen by ${msg.why}. Click to send this request again with the other choice.`;
+    button.addEventListener("click", () => {
+      button.remove();
+      send({ type: "rerun", fresh: !msg.fresh });
+    });
+    user.after(button);
+  },
   conversation(msg) {
     currentSession = msg.id;
     renderTranscript(msg.transcript);

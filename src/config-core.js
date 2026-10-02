@@ -50,6 +50,9 @@ export const DEFAULTS = {
   sensitiveSites: [],
   // Extra detail in the chat (tokens and timing per request) and in Settings.
   debugMode: false,
+  // Experimental: a request that starts a new, unrelated task starts the model on a fresh
+  // context with a short carry-over note (see Agent). Off keeps the whole history.
+  freshContext: false,
   // Set when the first-run setup has been finished or skipped.
   setupDone: false,
   // Remote control over the owner's Discord bot. The token never leaves settings storage;

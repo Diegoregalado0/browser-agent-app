@@ -42,6 +42,17 @@ const SCAN_SCHEMA = {
   additionalProperties: false,
 };
 
+const TASK_SYSTEM = `A user is chatting with a browser agent. Decide whether the user's new message starts a new task that needs nothing from the current one, or continues the current task: a follow-up, a correction, an answer to the agent's question, or anything that refers to earlier steps or results ("it", "that page", "the same for ...").
+
+Answer new_task true only when the new message is clearly unrelated and self-contained. When unsure, answer false.`;
+
+const TASK_SCHEMA = {
+  type: "object",
+  properties: { new_task: { type: "boolean" } },
+  required: ["new_task"],
+  additionalProperties: false,
+};
+
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
 const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "navigate", "form_input", "tabs", "network_requests"]);
 // Scans read at most this much text: the start of a page is where text aimed at the agent
@@ -136,6 +147,22 @@ export class Guard {
       const { impl, model } = this.#resolve(config);
       return { verdict: "ask", reason: `Safety check unavailable (${model}: ${(impl.describeError(err) || err.message).slice(0, 160).replace(/\.$/, "")}).` };
     }
+  }
+
+  // Whether the user's new message starts a new task (see Agent, config.freshContext).
+  // requests: the current task's requests, oldest first; reply: the agent's last reply.
+  // Throws when the check fails; the caller then continues the current task.
+  async isNewTask({ config, requests, reply, message, signal }) {
+    const text = [
+      "The current task, the user's requests oldest first:",
+      ...requests.slice(-3).map((r, i) => `${i + 1}. ${r.slice(0, 500)}`),
+      "",
+      `The agent's last reply: ${reply.slice(0, 500) || "(none)"}`,
+      "",
+      `New message: ${message.slice(0, 1000)}`,
+    ].join("\n");
+    const res = await this.#classify(config, { system: TASK_SYSTEM, text, schema: TASK_SCHEMA }, signal);
+    return res?.new_task === true;
   }
 
   // Returns a warning string when the tool output looks like a prompt injection, else null.

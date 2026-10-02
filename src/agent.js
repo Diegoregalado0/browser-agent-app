@@ -47,6 +47,32 @@ const SERVER_CLEARED = new Set(["anthropic"]);
 // Tools whose output shows the current page as it is after the call.
 const PAGE_TOOLS = new Set(["browser", "navigate", "form_input", "tabs"]);
 
+// Experimental (config.freshContext): a request that starts a new, unrelated task starts the
+// model on a fresh context: the system prompt, a short carry-over note, and the request.
+// The full history stays for the panel, the saved session and the safety checks. Such a
+// request holds its note (carryOver); the model sees the history from the latest one on.
+// Every request checked holds the choice (fresh), which the user can reverse (see rewind).
+// A gap this long since the last task, or a request that says so, starts fresh without a check.
+const IDLE_NEW_TASK_MS = 30 * 60 * 1000;
+const EXPLICIT_NEW_TASK = /^\s*(new task|new topic|start over|start fresh|unrelated)\b/i;
+const CARRY_OVER_REQUESTS = 5;
+const CARRY_OVER_SITES = 8;
+
+// The user's requests in these messages, without the current-tab notes.
+const requestsIn = (messages) =>
+  messages.filter((m) => m.role === "user").flatMap((m) => m.content.filter((b) => b.type === "text").map((b) => b.text.replace(CURRENT_TAB_TAG, "")));
+const oneLine = (text, max) => {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+};
+const hostOf = (url) => {
+  try {
+    return new URL(/^[a-z][\w+.-]*:/i.test(url) ? url : `https://${url}`).hostname;
+  } catch {
+    return "";
+  }
+};
+
 function compactBlocks(blocks) {
   return blocks.map((b) => {
     if (b.type === "image") return { type: "text", text: "[earlier screenshot removed to save space]" };
@@ -146,6 +172,8 @@ export class Agent {
     // Tool calls that typed into a password field; their text is hidden everywhere but in
     // the requests to the provider (see shownMessages).
     this.secretCalls = new WeakSet();
+    // When the last task ended, for the new-task check.
+    this.lastTaskEnd = 0;
   }
 
   get running() {
@@ -192,6 +220,7 @@ export class Agent {
     // Sites whose notes this conversation already has.
     this.guidesGiven = new Set();
     this.secretCalls = new WeakSet();
+    this.lastTaskEnd = 0;
   }
 
   // The conversation as it is saved and shown again: a call that typed into a password
@@ -230,7 +259,8 @@ export class Agent {
     this.abortController?.abort();
   }
 
-  async run(userText, config) {
+  // options.fresh: the user's choice for the new-task check (see rewind); left out, it is checked.
+  async run(userText, config, { fresh } = {}) {
     const provider = providers[config.provider];
     if (!provider) throw new Error(`Unknown provider ${config.provider}`);
     const model = config.models[config.provider];
@@ -254,10 +284,9 @@ export class Agent {
     if (this.messages.at(-1)?.role === "assistant" && this.messages.at(-1).content.some((b) => b.type === "tool_call")) {
       this.messages.pop();
     }
-    this.messages.push({
-      role: "user",
-      content: [{ type: "text", text: `${userText}\n\n${currentTabTag(page)}` }],
-    });
+    const earlier = this.messages.some((m) => m.role === "user");
+    const request = { role: "user", content: [{ type: "text", text: `${userText}\n\n${currentTabTag(page)}` }] };
+    this.messages.push(request);
 
     const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
@@ -272,6 +301,7 @@ export class Agent {
     this.emit({ type: "status", running: true });
 
     try {
+      if (config.freshContext && earlier) await this.#chooseContext(request, userText, config, signal, fresh);
       let requestStarted = 0;
       // Time to the first streamed text or thinking, for providers that do not measure it.
       let firstTokenMs = null;
@@ -304,7 +334,7 @@ export class Agent {
                 config,
                 system: systemPrompt(config),
                 tools,
-                messages: this.messages,
+                messages: this.#context(config),
                 signal,
                 onText: (delta) => (firstToken(), this.emit({ type: "text", delta })),
                 onThinking: (delta) => (firstToken(), this.emit({ type: "thinking", delta })),
@@ -434,12 +464,92 @@ export class Agent {
       }
       this.emit({ type: "notice", text: `Stopped after ${config.maxSteps} steps (raise the limit in Settings).` });
     } finally {
+      this.lastTaskEnd = Date.now();
       this.abortController = null;
       if (metrics.input || metrics.output) this.emit({ type: "task_stats", text: metrics.summary() });
       await this.browser.endTask().catch(() => {});
       this.onHistory();
       this.emit({ type: "status", running: false });
     }
+  }
+
+  // The history the model is sent (see the note above IDLE_NEW_TASK_MS): all of it, or from the latest
+  // request that started fresh, with its carry-over note in front.
+  #context(config) {
+    const start = config.freshContext ? this.messages.findLastIndex((m) => m.carryOver) : -1;
+    if (start < 0) return this.messages;
+    const [first, ...rest] = this.messages.slice(start);
+    return [{ ...first, content: [{ type: "text", text: first.carryOver }, ...first.content] }, ...rest];
+  }
+
+  // Decides whether `request` starts a new task: forced (the user's choice), an explicit
+  // request or a long idle gap, else one short check by the safety model. A failed check
+  // continues the current task.
+  async #chooseContext(request, userText, config, signal, forced) {
+    const started = Date.now();
+    const earlier = this.messages.slice(0, -1);
+    let fresh = forced;
+    let why = "your choice";
+    if (typeof fresh !== "boolean") {
+      if (EXPLICIT_NEW_TASK.test(userText)) [fresh, why] = [true, "the request says so"];
+      else if (this.lastTaskEnd && started - this.lastTaskEnd > IDLE_NEW_TASK_MS) [fresh, why] = [true, "a long pause"];
+      else {
+        why = "the new-task check";
+        const start = Math.max(0, earlier.findLastIndex((m) => m.carryOver));
+        const reply = earlier.findLast((m) => m.role === "assistant" && m.content.some((b) => b.type === "text"));
+        fresh = await this.guard
+          .isNewTask({
+            config,
+            requests: requestsIn(earlier.slice(start)),
+            reply: reply ? reply.content.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "",
+            message: userText,
+            signal,
+          })
+          .catch(() => ((why = "the new-task check failed"), false));
+      }
+    }
+    request.fresh = fresh;
+    if (fresh) {
+      request.carryOver = await this.#carryOver(earlier);
+      // Site notes ride on tool output, which the fresh context leaves out.
+      this.guidesGiven = new Set();
+    }
+    this.emit({ type: "context", fresh, why });
+    if (config.debugMode) this.emit({ type: "debug", text: `New-task check: ${fresh ? "new task" : "same task"} (${why}), ${Date.now() - started} ms.` });
+  }
+
+  // At most ten lines on what came before a fresh start: the user's own requests, and sites
+  // and tabs by hostname. No replies, page titles or tool output, which pages can write.
+  async #carryOver(earlier) {
+    const requests = requestsIn(earlier).slice(-CARRY_OVER_REQUESTS);
+    const sites = new Set();
+    for (const m of earlier) {
+      for (const b of m.content) {
+        const url = b.type === "tool_call" && b.name === "navigate" ? String(b.input?.url ?? "") : b.type === "text" && m.role === "user" ? (/<current_tab [^>]*url="([^"]*)"/.exec(b.text)?.[1] ?? "") : "";
+        if (hostOf(url)) sites.add(hostOf(url));
+      }
+    }
+    const tabs = ((await this.browser.pages?.().catch(() => [])) ?? []).map((p) => `${p.id} ${hostOf(p.url) || "(blank)"}`);
+    return [
+      "[Note from the agent, not a request] This request starts a new task. Earlier steps and tool output in this conversation are not shown; run tools again if you need something from before.",
+      "Earlier requests, oldest first:",
+      ...requests.map((r) => `- ${oneLine(r, 160)}`),
+      sites.size && `Sites visited earlier: ${[...sites].slice(-CARRY_OVER_SITES).join(", ")}`,
+      tabs.length && `Open tabs (id site): ${tabs.slice(0, CARRY_OVER_SITES).join(", ")}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  // Takes back the latest request, when it went through the new-task check, and everything
+  // after it, so it can be sent again with the other choice. Returns its text, or null.
+  rewind() {
+    const i = this.messages.findLastIndex((m) => m.role === "user" && m.content.some((b) => b.type === "text"));
+    if (this.running || i < 0 || typeof this.messages[i].fresh !== "boolean") return null;
+    const [text] = requestsIn([this.messages[i]]);
+    this.messages.length = i;
+    this.onHistory();
+    return text;
   }
 
   // A failed request leaves a trailing user turn with no reply. Drop it, plus the
@@ -601,10 +711,9 @@ export class Agent {
     return `${page.id} ${origin}`;
   }
 
+  // Every request in the conversation, also before a fresh start, as without one.
   #userRequests() {
-    return this.messages
-      .filter((m) => m.role === "user")
-      .flatMap((m) => m.content.filter((b) => b.type === "text").map((b) => b.text.replace(CURRENT_TAB_TAG, "")));
+    return requestsIn(this.messages);
   }
 
   // Throws when the action must not run. Sensitive sites, password fields, sending mail and

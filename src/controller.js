@@ -74,6 +74,8 @@ export const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
+  // The running task's promise, so a re-send can wait for it to finish stopping.
+  let task = null;
   let permissionCount = 0;
   // Per client: { remote } from connect(); local UIs are not remote.
   const clientInfo = new WeakMap();
@@ -222,7 +224,28 @@ export function createController(host) {
         }
         try {
           await host.ensureBrowser(agent);
-          await agent.run(text, await host.loadConfig());
+          await (task = agent.run(text, await host.loadConfig()));
+        } catch (err) {
+          broadcast({ type: "error", text: err.message });
+        }
+        return;
+      }
+      case "rerun": {
+        // Sends the latest request again with the other new-task choice (Agent.rewind),
+        // stopping it first when it still runs.
+        if (typeof msg.fresh !== "boolean") return;
+        if (agent.running) {
+          agent.stop();
+          resolvePermission("deny");
+          await task?.catch(() => {});
+        }
+        const text = agent.rewind();
+        if (!text) return;
+        const shown = [...agent.shownMessages(), { role: "user", content: [{ type: "text", text }] }];
+        broadcast({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(shown) });
+        try {
+          await host.ensureBrowser(agent);
+          await (task = agent.run(text, await host.loadConfig(), { fresh: msg.fresh }));
         } catch (err) {
           broadcast({ type: "error", text: err.message });
         }
