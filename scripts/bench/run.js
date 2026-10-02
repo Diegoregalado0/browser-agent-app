@@ -111,6 +111,21 @@ async function freshProfile() {
 }
 
 async function main() {
+  // A long run with many CDP round trips has hit Node exiting early with "Detected
+  // unsettled top-level await" (exit code 13) partway through, with no rejection or
+  // exception logged - the event loop briefly saw nothing registered as pending between
+  // two awaits and decided the program was done, even though main()'s own promise was
+  // not settled yet. A trivial always-pending timer keeps the loop from ever looking
+  // empty; cleared in the finally block below once the run actually finishes.
+  const keepAlive = setInterval(() => {}, 1000);
+  try {
+    return await runBenchmark();
+  } finally {
+    clearInterval(keepAlive);
+  }
+}
+
+async function runBenchmark() {
   const home = await freshProfile();
   process.env.BROWSER_AGENT_HOME = home;
   console.log(`Profile: ${home}`);
