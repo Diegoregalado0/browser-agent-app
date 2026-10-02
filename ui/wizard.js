@@ -21,6 +21,44 @@ const PROVIDERS = [
   { id: "ollama", name: "Local", label: "Local models on this computer, with Ollama", glyph: "models" },
 ];
 
+// Shows where a screen sits in a setup flow: "Step 2 of 3" for screen readers, and a bar
+// of segments. index 0 (or no total) hides it.
+export function renderSteps(node, index, total) {
+  node.hidden = !index || !total;
+  node.replaceChildren();
+  if (node.hidden) return;
+  const label = document.createElement("span");
+  label.className = "onboard-step-text";
+  label.textContent = `Step ${index} of ${total}`;
+  const bar = document.createElement("span");
+  bar.className = "onboard-bar";
+  bar.setAttribute("aria-hidden", "true");
+  for (let i = 1; i <= total; i++) {
+    const seg = document.createElement("span");
+    if (i <= index) seg.className = i === index ? "current" : "done";
+    bar.append(seg);
+  }
+  node.append(label, bar);
+}
+
+// Keeps Tab inside a full-screen setup, and calls onEscape for Escape.
+export function trapFocus(root, onEscape) {
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onEscape();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const items = [...root.querySelectorAll("button, input, a[href]")].filter((n) => !n.disabled && n.offsetParent);
+    const edge = e.shiftKey ? items[0] : items.at(-1);
+    if (document.activeElement === edge) {
+      e.preventDefault();
+      (e.shiftKey ? items.at(-1) : items[0])?.focus();
+    }
+  });
+}
+
 // mcp: the MCP panel, whose Outlook connect flow the Outlook screen runs. openModels()
 // opens Settings > Models, for a provider that has no model chosen yet.
 export function createWizard({ $, el, icon, send, mcp, openModels }) {
@@ -54,8 +92,12 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   }
 
   // Shows one screen: its title, lead text, which parts are visible, and its buttons.
+  // The steps after the welcome: provider, key, and Outlook when this build can connect it.
+  const stepOf = (name) => ({ provider: 1, key: 2, outlook: 3 })[name] ?? 0;
+
   function show(name, { title, lead = "", parts = [], next, skip, back, focus, centered }) {
     screen = name;
+    renderSteps($("wizard-steps"), stepOf(name), mcp.outlookAvailable ? 3 : 2);
     testing = null;
     root.classList.toggle("welcome", name === "welcome");
     root.classList.toggle("center-title", Boolean(centered));
@@ -203,20 +245,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   }
 
   // Tab stays inside setup. Escape closes it only when it was reopened after setup.
-  root.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      if (closable) close();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const items = [...root.querySelectorAll("button, input, a[href]")].filter((n) => !n.disabled && n.offsetParent);
-    const edge = e.shiftKey ? items[0] : items.at(-1);
-    if (document.activeElement === edge) {
-      e.preventDefault();
-      (e.shiftKey ? items.at(-1) : items[0])?.focus();
-    }
-  });
+  trapFocus(root, () => closable && close());
 
   function open() {
     autoOpened = true;

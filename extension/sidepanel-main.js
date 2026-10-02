@@ -2,6 +2,7 @@ import { createController } from "../src/controller.js";
 import { Browser } from "../src/browser-tools.js";
 import { DebuggerTransport } from "./transport-debugger.js";
 import { DiscordBridge } from "../src/remote-discord.js";
+import { SessionDirectory, shareSession } from "../src/remote-sessions.js";
 import { OutlookGraph, OUTLOOK_CLIENT_ID } from "../src/outlook-graph.js";
 import { loadConfig, saveConfig, loadUsage, saveUsage, sessions } from "./storage.js";
 
@@ -51,15 +52,25 @@ const host = {
 };
 const controller = createController(host);
 
-// Discord remote control runs in one panel at a time, since two connections for one bot
-// would each take every task: the first panel opened holds the lock, and the next one
-// waiting takes over when it closes. Incognito panels never run it.
-const discordAway = (state) => ({ status: async () => ({ type: "discord_status", state }), configure() {}, unpair() {}, remove() {} });
+// Discord remote control. Every non-incognito panel is a session that Discord can send
+// tasks to; the bridge itself runs in one panel at a time, since two connections for one bot
+// would each take every event: the first panel opened holds the lock, and the next one
+// waiting takes over when it closes. Incognito panels are never sessions and never run it.
+// discord.com is an optional host permission, granted from setup; without it the bridge
+// stays off and says so.
+const DISCORD_ORIGINS = { origins: ["https://discord.com/*"] };
+const discordAllowed = () => chrome.permissions.contains(DISCORD_ORIGINS);
+const discordAway = (state) => ({ status: async () => ({ type: "discord_status", state }), configure: async () => ({ ok: false, checks: [] }), unpair() {}, remove() {} });
 host.discord = discordAway(win.incognito ? "incognito" : "elsewhere");
 if (!win.incognito) {
+  const unshare = shareSession({ controller, id: win.id });
+  addEventListener("pagehide", unshare);
   navigator.locks.request("discord-bridge", () => {
-    host.discord = new DiscordBridge({ controller, loadConfig, saveConfig, onChange: () => controller.discordChanged(), place: "the computer" });
-    host.discord.start().catch((err) => console.error(`Discord: ${err.message}`));
+    const bridge = new DiscordBridge({ directory: new SessionDirectory(), loadConfig, saveConfig, allowed: discordAllowed, onChange: () => controller.discordChanged(), place: "the computer" });
+    host.discord = bridge;
+    bridge.start().catch((err) => console.error(`Discord: ${err.message}`));
+    chrome.permissions.onRemoved.addListener(async () => !(await discordAllowed()) && bridge.revoke());
+    chrome.permissions.onAdded.addListener(async () => (await discordAllowed()) && bridge.state === "no-access" && bridge.start());
     // Held until this page closes.
     return new Promise(() => {});
   });

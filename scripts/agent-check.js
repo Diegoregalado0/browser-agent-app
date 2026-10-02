@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createController } from "../src/controller.js";
 import { DiscordBridge } from "../src/remote-discord.js";
+import { SessionDirectory, shareSession } from "../src/remote-sessions.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
 import { Guard } from "../src/guard.js";
@@ -503,19 +504,26 @@ for (const reply of [
   }
 }
 
-// Discord bridge against a local stand-in for Discord's gateway and API: pairing only with
-// the code, only the owner's messages and button presses count, a task started from
-// Discord reports its prompt and reply there, and the token never reaches the UI.
+// Discord bridge against a local stand-in for Discord's gateway and API: the token is
+// checked before it is saved, the /browsby command is registered, pairing works only with
+// the code, only the owner's commands and button presses count, two open windows are two
+// sessions, a task started from Discord edits one progress message and reports its prompt
+// and reply there, password prompts get no Allow button and refuse a forged one, and the
+// token never reaches the UI.
 const discordCalls = [];
 let messageIds = 0;
 const discordApi = createServer((req, res) => {
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
-    discordCalls.push({ method: req.method, path: req.url, body: body ? JSON.parse(body) : null, auth: req.headers.authorization });
+    const parsed = body ? JSON.parse(body) : null;
+    discordCalls.push({ method: req.method, path: req.url, body: parsed, auth: req.headers.authorization });
     const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+    if (req.headers.authorization !== "Bot bot-token") return res.writeHead(401).end('{"message": "401: Unauthorized"}');
+    if (req.url === "/applications/@me" && req.method === "GET") return json({ id: "app1", name: "Browsby", bot: { id: "b1", username: "browsby-bot" } });
+    if (req.url === "/applications/@me" && req.method === "PATCH") return json({ id: "app1", integration_types_config: parsed.integration_types_config });
     if (req.url === "/users/@me/channels") return json({ id: "dm1" });
-    if (req.url.startsWith("/channels/dm1/messages") && req.method === "POST") return json({ id: `m${++messageIds}` });
+    if (req.method === "POST" && (req.url.startsWith("/channels/dm1/messages") || req.url.startsWith("/webhooks/"))) return json({ id: `m${++messageIds}` });
     if (req.url.startsWith("/interactions/")) return res.writeHead(204).end();
     json({});
   });
@@ -529,37 +537,80 @@ gateway.on("connection", (socket) => {
   socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 45000 } }));
   socket.on("message", (data) => {
     const msg = JSON.parse(data);
-    if (msg.op === 2 && msg.d.token === "bot-token") socket.send(JSON.stringify({ op: 0, s: 1, t: "READY", d: { user: { id: "b1", username: "duomo-bot" } } }));
+    if (msg.op === 2 && msg.d.token === "bot-token") socket.send(JSON.stringify({ op: 0, s: 1, t: "READY", d: { user: { id: "b1", username: "browsby-bot" }, application: { id: "app1" } } }));
   });
 });
 const dispatch = (t, d) => gatewaySocket.send(JSON.stringify({ op: 0, s: 2, t, d }));
 const dm = (userId, content) => dispatch("MESSAGE_CREATE", { channel_id: "dm1", author: { id: userId, username: userId }, content });
-const press = (userId, customId) =>
-  dispatch("INTERACTION_CREATE", { type: 3, id: `i${Math.random()}`, token: "t", user: { id: userId }, data: { custom_id: customId }, message: { content: "prompt" } });
+let interactions = 0;
+// A slash command in the bot's DM; returns the interaction's token.
+const command = (userId, name, options = []) => {
+  const token = `tok${++interactions}`;
+  dispatch("INTERACTION_CREATE", { type: 2, id: `i${interactions}`, token, application_id: "app1", channel_id: "dm1", context: 1, user: { id: userId, username: userId }, data: { name: "browsby", options: [{ type: 1, name, options }] } });
+  return token;
+};
+const press = (userId, customId, content = "prompt") => {
+  const id = `b${++interactions}`;
+  dispatch("INTERACTION_CREATE", { type: 3, id, token: "t", user: { id: userId }, data: { custom_id: customId }, message: { content } });
+  return id;
+};
 const until = async (test, what) => {
-  for (let i = 0; i < 100 && !test(); i++) await new Promise((r) => setTimeout(r, 20));
+  for (let i = 0; i < 150 && !test(); i++) await new Promise((r) => setTimeout(r, 20));
   assert.ok(test(), what);
 };
-const sentTexts = () => discordCalls.filter((c) => c.path === "/channels/dm1/messages" && c.method === "POST").map((c) => c.body.content);
+const callback = (token) => discordCalls.find((c) => c.path.startsWith("/interactions/") && c.path.endsWith(`/${token}/callback`))?.body;
+const sentTexts = () => discordCalls.filter((c) => c.method === "POST" && (c.path === "/channels/dm1/messages" || c.path.startsWith("/webhooks/"))).map((c) => c.body.content);
 
+// A second window with its own controller; both share their sessions.
+const controller2 = createController({
+  loadConfig: async () => structuredClone(hostConfig),
+  saveConfig: async (c) => (hostConfig = structuredClone(c)),
+  loadUsage: async () => null,
+  saveUsage: async () => {},
+  sessions: { save: async () => {}, list: async () => [], load: async () => ({}), remove: async () => {}, removeAll: async () => {} },
+  ensureBrowser: async () => {},
+});
+const unshare1 = shareSession({ controller, id: 1 });
+const unshare2 = shareSession({ controller: controller2, id: 2 });
+const directory = new SessionDirectory();
 const bridge = new DiscordBridge({
-  controller,
+  directory,
   loadConfig: async () => structuredClone(hostConfig),
   saveConfig: async (c) => (hostConfig = structuredClone(c)),
   api: `http://127.0.0.1:${discordApi.address().port}`,
   gateway: `ws://127.0.0.1:${gateway.address().port}`,
 });
-await bridge.configure("bot-token");
+const badToken = await bridge.configure("wrong-token");
+assert.equal(badToken.ok, false);
+assert.match(badToken.checks[0].text, /did not accept/);
+assert.equal(hostConfig.discord.token, "", "a token Discord refused was saved");
+const setup = await bridge.configure("bot-token");
+assert.ok(setup.ok && setup.checks.every((c) => c.ok), `setup checks failed: ${JSON.stringify(setup.checks)}`);
+const registered = discordCalls.find((c) => c.method === "PUT" && c.path === "/applications/app1/commands").body;
+assert.equal(registered[0].name, "browsby");
+assert.deepEqual(registered[0].integration_types, [0, 1]);
+assert.ok(discordCalls.find((c) => c.method === "PATCH" && c.path === "/applications/@me").body.integration_types_config[1], "user install was not turned on");
 await until(() => bridge.state === "connected", "the bridge did not connect");
+await until(() => directory.list().length === 2, "the two windows did not show up as sessions");
 const code = hostConfig.discord.pairCode;
-assert.ok(!JSON.stringify(await bridge.status()).includes("bot-token"), "the bot token reached the UI status");
+const discordShown = await bridge.status();
+assert.ok(!JSON.stringify(discordShown).includes("bot-token"), "the bot token reached the UI status");
+assert.match(discordShown.installUrl, /integration_type=1&scope=applications\.commands/);
 
-dm("stranger", "WRONGCODE");
-dm("owner", code);
-await until(() => hostConfig.discord.userId === "owner", "the pairing code did not pair the owner");
-assert.match(sentTexts().at(-1), /Paired/);
+const early = command("owner", "run", [{ name: "task", value: "too early" }]);
+await until(() => callback(early), "a command before pairing got no answer");
+assert.match(callback(early).data.content, /Not paired/);
+const wrong = command("stranger", "pair", [{ name: "code", value: "WRONGCODE" }]);
+await until(() => callback(wrong), "a wrong pairing code got no answer");
+assert.match(callback(wrong).data.content, /does not match/);
+command("owner", "pair", [{ name: "code", value: code.toLowerCase() }]);
+await until(() => hostConfig.discord.userId === "owner", "the pairing command did not pair the owner");
+const takeover = command("stranger", "pair", [{ name: "code", value: code }]);
+await until(() => callback(takeover), "a second pairing got no answer");
+assert.equal(hostConfig.discord.userId, "owner", "a second account took over the pairing");
 
 controller.agent.browser = agent.browser;
+controller2.agent.browser = agent.browser;
 agent.browser.currentUrl = async () => "https://example.com/";
 agent.browser.run = async () => "clicked";
 providers.openai.classify = async () => ({ verdict: "ask", reason: "check with the user" });
@@ -568,18 +619,83 @@ replies = [
   { content: [{ type: "tool_call", id: "d1", name: "browser", input: { action: "left_click", coordinate: [1, 1] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
   { content: [{ type: "text", text: "all done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
 ];
-dm("stranger", "delete everything");
-dm("owner", "click the button");
-await until(() => discordCalls.some((c) => c.body?.components), "no prompt with buttons reached Discord");
-const promptCall = discordCalls.find((c) => c.body?.components);
+const strangerRun = command("stranger", "run", [{ name: "task", value: "delete everything" }]);
+await until(() => callback(strangerRun), "a stranger's command got no answer");
+assert.match(callback(strangerRun).data.content, /someone else/);
+assert.equal(callback(strangerRun).data.flags, 64, "the refusal was not private");
+
+// Sessions: pick the second window, and the task runs there.
+const list = command("owner", "sessions");
+await until(() => callback(list), "/browsby sessions got no answer");
+assert.match(callback(list).data.content, /Window 1 \(selected\)[\s\S]*Window 2/);
+const pick = press("owner", "use:2");
+await until(() => discordCalls.some((c) => c.path.startsWith(`/interactions/${pick}/`)), "picking a window got no answer");
+const runToken = command("owner", "run", [{ name: "task", value: "click the button" }]);
+await until(() => callback(runToken)?.type === 5, "the run command was not deferred");
+const promptCall = await (async () => {
+  await until(() => discordCalls.some((c) => c.path.startsWith(`/webhooks/app1/${runToken}`) && c.body?.components?.[0]?.components.some((b) => b.label === "Allow")), "no prompt with buttons reached Discord");
+  return discordCalls.find((c) => c.path.startsWith(`/webhooks/app1/${runToken}`) && c.body?.components?.[0]?.components.some((b) => b.label === "Allow"));
+})();
+assert.ok(controller2.agent.running && !controller.agent.running, "the task did not run in the selected window");
 const allow = promptCall.body.components[0].components.find((b) => b.label === "Allow").custom_id;
-press("stranger", allow);
-await until(() => discordCalls.some((c) => c.body?.data?.content === "Not for you."), "a stranger's button press was not refused");
+assert.match(allow, /^perm:2:/);
+const strangerPress = press("stranger", allow);
+await until(() => discordCalls.some((c) => c.path.startsWith(`/interactions/${strangerPress}/`) && /someone else/.test(c.body?.data?.content)), "a stranger's button press was not refused");
 press("owner", allow);
 await until(() => sentTexts().includes("all done"), "the final reply did not reach Discord");
+await until(() => discordCalls.some((c) => c.method === "PATCH" && c.path === `/webhooks/app1/${runToken}/messages/@original` && /^Done in Window 2 · 1 step/.test(c.body.content)), "the progress message did not end as done");
+const edits = discordCalls.filter((c) => c.path === `/webhooks/app1/${runToken}/messages/@original`);
+assert.ok(edits.length <= 3, `the progress message was edited ${edits.length} times for one step`);
+assert.ok(!discordCalls.some((c) => /example\.com/.test(JSON.stringify(c.body?.content ?? "")) && !/Approval needed/.test(c.body.content)), "a page address reached Discord outside a prompt");
 assert.ok(!sentTexts().some((t) => /delete everything/.test(t)), "a stranger's message was acted on");
-assert.ok(discordCalls.every((c) => c.auth === "Bot bot-token"), "a request went out without the bot token");
+
+// A password prompt offers only Deny in Discord, and a forged Allow does not approve it.
+let release;
+replies = [new Promise((r) => (release = r))];
+const pwToken = command("owner", "run", [{ name: "task", value: "sign in" }]);
+await until(() => controller2.agent.running, "the second task did not start");
+const password2 = controller2.agent.askPermission({ text: "Type into a password field?", allowAlways: false, kind: "password" });
+await until(() => discordCalls.some((c) => c.path.startsWith(`/webhooks/app1/${pwToken}?`) && /password field/.test(c.body?.content)), "the password prompt did not reach Discord");
+const pwPrompt = discordCalls.find((c) => c.path.startsWith(`/webhooks/app1/${pwToken}?`) && /password field/.test(c.body?.content));
+assert.deepEqual(pwPrompt.body.components[0].components.map((b) => b.label), ["Deny"]);
+const pwId = pwPrompt.body.components[0].components[0].custom_id.split(":")[2];
+const forged = press("owner", `perm:2:${pwId}:once`);
+await until(() => discordCalls.some((c) => c.path.startsWith(`/interactions/${forged}/`)), "a forged Allow got no answer");
+assert.match(discordCalls.find((c) => c.path.startsWith(`/interactions/${forged}/`)).body.data.content, /only be approved at the computer/);
+assert.equal(await settled(password2), "pending", "a password prompt was approved from Discord");
+const local2 = controller2.connect({ send: () => {} });
+await local2({ type: "permission", decision: "once", id: pwId });
+assert.equal(await password2, "once");
+// /browsby stop ends it, and the progress message says so.
+const stopToken = command("owner", "stop");
+await until(() => /Stopping/.test(callback(stopToken)?.data.content ?? ""), "/browsby stop did not stop the task");
+release({ content: [{ type: "text", text: "late reply" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+await until(() => !controller2.agent.running, "the stopped task kept running");
+await until(() => discordCalls.some((c) => c.method === "PATCH" && c.path === `/webhooks/app1/${pwToken}/messages/@original` && /^Stopped in Window 2/.test(c.body.content)), "the progress message did not end as stopped");
+
+// Plain DM text still runs a task, in the selected window.
+replies = [{ content: [{ type: "text", text: "dm done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+dm("stranger", "delete everything");
+dm("owner", "check the weather");
+await until(() => sentTexts().includes("dm done"), "a task sent as a DM did not report back");
+assert.ok(discordCalls.every((c) => !c.auth || c.auth === "Bot bot-token" || c.auth === "Bot wrong-token"), "a request went out with another token");
+
+// A task refused before it begins still closes its progress message.
+const startTask = agent.browser.startTask;
+agent.browser.startTask = async () => {
+  throw new Error("Chrome would not attach");
+};
+const failToken = command("owner", "run", [{ name: "task", value: "anything" }]);
+await until(() => discordCalls.some((c) => c.method === "PATCH" && c.path === `/webhooks/app1/${failToken}/messages/@original` && /^Ended with an error/.test(c.body.content)), "a task refused before it began left its progress open");
+agent.browser.startTask = startTask;
+
+// Chrome took back the permission: the bridge disconnects and says so.
+bridge.revoke();
+assert.equal((await bridge.status()).state, "no-access");
 bridge.stop();
+unshare1();
+unshare2();
+directory.close();
 gateway.close();
 discordApi.close();
 

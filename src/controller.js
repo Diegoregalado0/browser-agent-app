@@ -60,7 +60,7 @@ async function testConnection(id, apiKey, config) {
 // answer a permission prompt. Settings, keys and data change only at the computer.
 const REMOTE_MESSAGES = new Set(["run", "stop", "permission"]);
 // Prompts only the person at the computer can approve.
-const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
+export const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 
 
 // The conversation behind every UI: runs tasks, keeps the saved session in step, applies
@@ -255,8 +255,9 @@ export function createController(host) {
         const token = typeof msg.token === "string" ? msg.token.trim() : "";
         if (!host.discord || !token) return;
         const problem = keyProblem(token, "bot token");
-        if (problem) return reply({ type: "error", text: problem });
-        await host.discord.configure(token);
+        if (problem) return reply({ type: "discord_checks", ok: false, checks: [{ id: "token", ok: false, text: problem }] });
+        // The checks Discord ran on the token (accepted, install, commands), for setup.
+        reply({ type: "discord_checks", ...(await host.discord.configure(token)) });
         return;
       }
       case "discord_unpair":

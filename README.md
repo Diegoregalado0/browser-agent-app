@@ -39,11 +39,11 @@ It works in regular web pages, not in Chrome's own pages.
 
 ## First run
 
-A short setup opens the first time:
+A short setup opens the first time, one step per screen with a progress bar:
 
 1. **Provider.** Pick the provider you have a key for, or a local model.
 2. **Key.** Paste your key (there is a link to the provider's key page), and the setup tests the connection with one tiny request to the model you chose, or else to the first listed model that can chat and use tools (embedding, moderation, OCR and speech models are skipped). With a local model, no key is needed.
-3. **Try it.** Pick an example task to start, or type your own.
+3. **Outlook** (only in versions where it is set up). Connect it, or skip it for now.
 
 You can run setup again from Settings > General.
 
@@ -104,7 +104,26 @@ Connect Outlook in the Connections panel (the plug button) and sign in on Micros
 
 ### Remote control from Discord
 
-Settings > Remote (Discord) connects your own Discord bot, so you can give the agent tasks and answer its questions from your phone. It works only while Chrome is open with the agent's panel open, and runs in one panel at a time. Discord gets approval prompts and final answers, never screenshots or page contents. An approval prompt includes the page address and a short preview of any text the agent wants to type, except into a password field. Sensitive-site and password prompts can only be approved at the computer.
+Give Browsby tasks, stop them and answer its questions from Discord on your phone, with your own Discord bot. Settings > Remote (Discord) > **Set up remote control** walks you through it, one step per screen:
+
+1. Allow Browsby to reach discord.com (Chrome asks once; Browsby asks for it only here).
+2. Create a Discord app in the Developer Portal and copy its bot token.
+3. Paste the token. Browsby checks it with Discord, turns on installing the app to your account, and adds the `/browsby` command.
+4. Add the app to your Discord account (it then works in a direct message with the bot, no server needed), or to a server of yours.
+5. Pair: send `/browsby pair code: …` with the code shown, or just the code, to the bot.
+
+In Discord:
+
+| Command | What it does |
+| --- | --- |
+| `/browsby run task: …` | Starts a task. One message shows its progress (steps, time, the kind of step) and has a Stop button. The answer arrives as a new message. |
+| `/browsby stop` | Stops the task in the selected window. |
+| `/browsby status` | What each Browsby window is doing. |
+| `/browsby sessions` | Picks which Chrome window runs your tasks. Each window with an open Browsby panel is a session. |
+
+A plain direct message to the bot also runs a task, and `stop` stops it. Approval prompts arrive as messages with Allow and Deny. Only the paired Discord account can use the bot; anyone else gets "This bot belongs to someone else". Outside the bot's own DM, replies are visible only to you.
+
+It works only while Chrome is open with a Browsby panel open; the bot runs in one panel and takes tasks for every open window. Incognito windows are never used. Discord gets approval prompts, final answers, errors and progress lines that name only the kind of step (such as "Clicking"), never screenshots, page contents or addresses outside a prompt. An approval prompt includes the page address and a short preview of any text the agent wants to type, except into a password field. Sensitive-site and password prompts can only be approved at the computer. If you take back Chrome's discord.com permission, remote control stops until you allow it again.
 
 ## Privacy and security
 
@@ -142,7 +161,7 @@ npm run build:extension    # builds dist/extension and dist/browser-agent-extens
 
 Layout:
 
-- `src/` the agent, browser tools, safety checks (`guard.js`), limits, providers, Outlook and Discord, plus the sandbox's Chrome launcher (`chrome.js`, `chrome-keeper.js`)
+- `src/` the agent, browser tools, safety checks (`guard.js`), limits, providers, Outlook, and Discord (`remote-discord.js`, with `remote-sessions.js` sharing each window as a session), plus the sandbox's Chrome launcher (`chrome.js`, `chrome-keeper.js`)
 - `ui/` the panel, settings, and setup screens
 - `extension/` the extension's own parts: storage, the Chrome debugger transport, and its entry point
 - `bin/` the sandbox command

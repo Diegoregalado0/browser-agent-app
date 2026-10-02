@@ -63,13 +63,15 @@ Outlook works only in versions of Browsby where it has been set up. Only those v
 
 ### Discord remote control (optional)
 
-If you set up remote control in Settings > Remote (Discord), Browsby connects to your own Discord bot while its panel is open. Through Discord:
+If you set up remote control in Settings > Remote (Discord), Browsby asks Chrome for access to `discord.com` (only then), and connects to your own Discord bot while a Browsby panel is open. Through Discord:
 
-- Browsby receives the tasks and approval answers you send from your paired Discord account.
-- Browsby sends the pairing reply, approval prompts, the agent's final answers, error messages, and stop notices.
-- Screenshots and full page contents are not sent. Approval prompts include the page address and a short preview of any text the agent wants to type (never text typed into a password field); a prompt to send Outlook mail includes its subject and recipients, also for a saved draft; and final answers can contain information the agent found for you.
+- While you set it up, Browsby uses your bot token to read your Discord app's name and id, turn on installing the app to your account, and add the `/browsby` command to it.
+- Browsby receives the commands, tasks and button presses you send from your paired Discord account. Messages and commands from anyone else are answered with a refusal and not acted on.
+- Browsby sends the pairing reply, the list of your open Browsby windows (named "Window 1" and so on, with the first request of each window's current session, except in Ghost mode), one progress message per task (step count, elapsed time and the kind of step, such as "Clicking" or "Opening a page"), approval prompts, the agent's final answers, error messages, and stop notices.
+- Screenshots, full page contents and the addresses of pages the agent visits are not sent, except as follows: approval prompts include the page address and a short preview of any text the agent wants to type (never text typed into a password field); a prompt to send Outlook mail includes its subject and recipients, also for a saved draft; and final answers can contain information the agent found for you.
+- Incognito windows are never offered to Discord.
 
-Discord can read messages sent by bots. Discord's own privacy policy applies to these messages.
+Discord can read messages sent by bots. Discord's own privacy policy applies to these messages. You can take back Chrome's access to `discord.com` at any time in Chrome's extension settings; remote control then stops.
 
 ## 2. What Browsby never collects
 
@@ -101,7 +103,7 @@ Data stays on your computer until you delete it:
 - **Sessions:** delete one from the sessions menu, or all of them in Settings > Data and privacy > Delete all.
 - **API keys:** remove each key in Settings > Models.
 - **Outlook:** sign out in the Connections panel.
-- **Discord:** remove the bot in Settings > Remote (Discord).
+- **Discord:** remove the bot in Settings > Remote (Discord). You can also delete the app in Discord's Developer Portal.
 - **Everything:** uninstalling Browsby removes all of its local storage, including keys, tokens, settings, the usage counter, and sessions.
 
 Data already sent to an AI provider, Microsoft, or Discord is kept according to that service's policy. Delete it with that service.

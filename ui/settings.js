@@ -7,8 +7,8 @@ import { keyProblem } from "../src/config-core.js";
 const WIDE = window.matchMedia("(min-width: 640px)");
 
 // getDebugLines(): the chat's recent debug lines, for Copy diagnostics. onPage(name): a
-// page was shown.
-export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [], onPage = () => {} }) {
+// page was shown. openRemoteSetup(): opens the remote control setup flow.
+export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [], onPage = () => {}, openRemoteSetup = () => {} }) {
   const sheet = $("settings");
   // Where focus goes back to when the sheet closes.
   let opener = null;
@@ -233,23 +233,11 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
     }
   }
 
-  // Remote (Discord) page.
-  $("discord-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const token = $("discord-token").value.trim();
-    const problem = keyProblem(token, "bot token");
-    if (problem) {
-      $("discord-status").textContent = problem;
-      return $("discord-token").focus();
-    }
-    $("discord-token").value = "";
-    $("discord-status").textContent = "Connecting…";
-    send({ type: "discord_save", token });
-  });
+  // Remote (Discord) page: a status card; setup runs in its own full-screen flow.
+  $("discord-setup").onclick = () => openRemoteSetup();
   $("discord-unpair").onclick = () => send({ type: "discord_unpair" });
   $("discord-remove").onclick = (e) =>
-    confirmInline(e.currentTarget, { question: "Remove the Discord bot from the agent?", confirmLabel: "Remove", onConfirm: () => send({ type: "discord_remove" }) });
-  $("discord-code-copy").onclick = () => navigator.clipboard?.writeText($("discord-code").textContent).then(() => toast("Code copied"));
+    confirmInline(e.currentTarget, { question: "Remove the Discord bot from Browsby?", confirmLabel: "Remove", onConfirm: () => send({ type: "discord_remove" }) });
 
   // Debug page.
   $("run-checks").onclick = () => {
@@ -307,20 +295,27 @@ export function createSettings({ $, el, icon, send, setInertBehind, getDebugLine
         toast("Settings reset to defaults");
       },
       discord_status(msg) {
+        const away = msg.state === "elsewhere" || msg.state === "incognito";
         const set = !["off", "elsewhere", "incognito"].includes(msg.state);
-        $("discord-form").hidden = msg.state === "elsewhere" || msg.state === "incognito";
-        $("discord-status").textContent =
-          msg.state === "off" ? "Not set up."
-          : msg.state === "elsewhere" ? "Discord runs in the agent panel of another Chrome window. Manage it there, or close that panel to move it here."
-          : msg.state === "incognito" ? "Discord does not run in incognito windows."
-          : msg.state === "connecting" ? "Connecting to Discord…"
-          : msg.state === "error" ? msg.error
-          : msg.paired ? `Connected as ${msg.botName}, paired with ${msg.userName}. Message the bot to give it a task.`
-          : `Connected as ${msg.botName}. Not paired yet.`;
-        $("discord-pair").hidden = !(set && msg.pairCode);
-        $("discord-code").textContent = msg.pairCode ?? "";
-        $("discord-invite").hidden = !msg.inviteUrl || msg.paired;
-        if (msg.inviteUrl) $("discord-invite").href = msg.inviteUrl;
+        const ready = msg.state === "connected" && msg.paired;
+        const [headline, text] =
+          msg.state === "off" ? ["Not set up", "Use your own Discord bot. Setup takes about five minutes."]
+          : msg.state === "elsewhere" ? ["Runs in another window", "Remote control runs in the Browsby panel of another Chrome window. Manage it there, or close that panel to move it here."]
+          : msg.state === "incognito" ? ["Not in incognito", "Remote control does not run in incognito windows."]
+          : msg.state === "no-access" ? ["Needs access to Discord", "Chrome no longer lets Browsby reach discord.com. Allow it again to reconnect."]
+          : msg.state === "connecting" ? ["Connecting…", "Connecting to Discord."]
+          : msg.state === "error" ? ["Could not connect", msg.error]
+          : msg.paired ? ["On", `${msg.botName} takes tasks from ${msg.userName} in Discord.`]
+          : ["Almost done", `${msg.botName} is connected. Pair your Discord account to finish.`];
+        $("discord-headline").textContent = headline;
+        $("discord-status").textContent = text;
+        $("discord-dot").className = `dot ${ready ? "idle" : msg.state === "error" || msg.state === "no-access" ? "no-key" : ""}`;
+        const sessions = msg.sessions ?? [];
+        $("discord-sessions").hidden = !ready || !sessions.length;
+        $("discord-sessions").textContent = `Open windows Discord can use: ${sessions.map((s) => `${s.name}${s.running ? " (running)" : ""}`).join(", ")}.`;
+        $("discord-setup").hidden = away;
+        $("discord-setup").textContent = msg.state === "off" ? "Set up remote control" : msg.state === "no-access" ? "Allow access" : ready ? "Run setup again" : "Continue setup";
+        $("discord-setup").className = ready ? "" : "primary";
         $("discord-unpair").hidden = !msg.paired;
         $("discord-remove").hidden = !set;
       },
