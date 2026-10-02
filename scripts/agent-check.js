@@ -1742,11 +1742,14 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
     describeError: () => null,
     turn: async ({ messages }) => (sentHistories.push(structuredClone(messages)), freshReplies.shift()),
     classify: async (args) => {
-      if (args.schema.properties.new_task) return (taskChecks.push(args.text), taskAnswer());
+      if (args.schema.properties.new_task) return (taskChecks.push(args.text), (taskTemperature = args.temperature), taskAnswer());
       actionChecks.push(args.text);
+      actionTemperature = args.temperature;
       return { verdict: "allow", reason: "ok" };
     },
   };
+  let taskTemperature;
+  let actionTemperature = "unset";
   const shot = { type: "tool_call", id: "s1", name: "navigate", input: { url: "https://shop.example/cart" } };
   const said = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
   const session = () => [
@@ -1806,14 +1809,21 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   assert.equal(taskChecks.length, 2, "the first request was checked, or a later one was not");
   assert.deepEqual(on.events.filter((e) => e.type === "context").map((e) => e.fresh), [true, false]);
   const [freshStart, followUp] = [on.sizes[1], on.sizes[2]];
-  assert.equal(freshStart.length, 1, "the fresh context kept earlier messages");
+  // The note, then the previous task's outcome as the agent's own words, then the request.
+  assert.deepEqual(freshStart.map((m) => m.role), ["user", "assistant", "user"], "the fresh context kept earlier messages");
   const note = freshStart[0].content[0].text;
   assert.ok(note.split("\n").length <= 10, "the carry-over note is longer than ten lines");
   assert.match(note, /- what is in my cart\?/);
   assert.match(note, /shop\.example/);
-  assert.ok(!/IGNORE|Cart <b>|SHOT/.test(JSON.stringify(freshStart)), "the fresh context carried a reply, a page title or a screenshot");
-  assert.match(freshStart[0].content[1].text, /^what is the weather in Lisbon today\?/);
-  assert.equal(followUp.length, 3, "the follow-up did not continue from the fresh start");
+  const userSide = JSON.stringify(freshStart.filter((m) => m.role === "user").map((m) => m.content));
+  assert.ok(!/IGNORE|Cart has|Cart <b>|SHOT/.test(userSide), "a reply, a page title or a screenshot spoke as the user");
+  assert.ok(!/SHOT|"page"/.test(JSON.stringify(freshStart.map((m) => m.content))), "the fresh context carried tool output");
+  assert.match(freshStart[1].content[0].text, /^\(Outcome of the earlier task\) Your cart has 3 items\./);
+  assert.ok(freshStart[1].content[0].text.length <= 240);
+  assert.equal(freshStart[1].raw, null);
+  assert.match(freshStart[2].content[0].text, /^what is the weather in Lisbon today\?/);
+  assert.equal(followUp.length, 5, "the follow-up did not continue from the fresh start");
+  assert.equal(taskTemperature, 0, "the new-task check was not asked for temperature 0");
   assert.match(followUp[0].content[0].text, /^\[Note from the agent/);
   // The panel and the saved session keep the whole history.
   assert.equal(on.a.shownMessages().length, off.a.messages.length);
@@ -1836,6 +1846,10 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   assert.ok(!/Note from the agent/.test(actionChecks[0]), "the carry-over note counted as a user request");
   assert.match(actionChecks[0], /planted text/, "injection flags were reset");
   assert.ok(guarded.sessionOrigins.has("https://shop.example"));
+  assert.equal(actionTemperature, undefined, "the safety check's sampling changed");
+  // The request already acted (navigate), so it cannot be taken back and sent again.
+  assert.equal(guarded.canRewind(), false);
+  assert.equal(guarded.rewind(), null);
 
   // Fail safe: a check that throws, or answers anything but true, continues the task.
   for (const failing of [async () => { throw new Error("offline"); }, async () => ({}), async () => ({ new_task: "yes" })]) {
@@ -1898,9 +1912,35 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   assert.equal(quick.messages.length, 4);
   await quick.run("something else", { ...config, freshContext: true }, { fresh: false });
   assert.equal(taskChecks.length, 0);
-  assert.equal(sentHistories[0].length, 3, "continuing did not keep the task that started fresh before it");
+  assert.equal(sentHistories[0].length, 5, "continuing did not keep the task that started fresh before it");
   assert.equal(quick.messages.at(-2).fresh, false);
   providers.openai = openaiBefore;
+}
+
+// The new-task check's temperature reaches the request where the model takes it, and is
+// left out where the API would reject it; other checks send none.
+{
+  const bodies = [];
+  const fetchBefore = globalThis.fetch;
+  // A 400, which the SDKs do not retry, so each call sends one body.
+  globalThis.fetch = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "stub" } }), { status: 400, headers: { "content-type": "application/json" } });
+  };
+  const anthropicModule = await import("../src/providers/anthropic.js");
+  const openaiModule = await import("../src/providers/openai.js");
+  const ask = { apiKey: "test", system: "s", text: "t", schema: { type: "object" }, config };
+  for (const [module, model, temperature] of [
+    [anthropicModule, "claude-haiku-4-5", 0],
+    [anthropicModule, "claude-opus-5", 0],
+    [anthropicModule, "claude-haiku-4-5", undefined],
+    [openaiModule, "gpt-4.1-mini", 0],
+    [openaiModule, "gpt-6-luna", 0],
+  ]) {
+    await module.classify({ ...ask, model, temperature }).catch(() => {});
+  }
+  globalThis.fetch = fetchBefore;
+  assert.deepEqual(bodies.map((b) => b.temperature), [0, undefined, undefined, 0, undefined]);
 }
 
 console.log("agent checks passed");

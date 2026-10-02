@@ -58,6 +58,8 @@ const IDLE_NEW_TASK_MS = 30 * 60 * 1000;
 const EXPLICIT_NEW_TASK = /^\s*(new task|new topic|start over|start fresh|unrelated)\b/i;
 const FOLLOW_UP_MAX_WORDS = 3;
 const CARRY_OVER_REQUESTS = 5;
+// The previous task's outcome: the start of the agent's own last reply.
+const CARRY_OVER_OUTCOME_CHARS = 200;
 const CARRY_OVER_SITES = 8;
 
 // The user's requests in these messages, without the current-tab notes.
@@ -67,6 +69,9 @@ const oneLine = (text, max) => {
   const line = text.replace(/\s+/g, " ").trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
+// The agent's last reply in these messages, its text only.
+const lastReply = (messages) =>
+  messages.findLast((m) => m.role === "assistant" && m.content.some((b) => b.type === "text"))?.content.filter((b) => b.type === "text").map((b) => b.text).join("\n") ?? "";
 const hostOf = (url) => {
   try {
     return new URL(/^[a-z][\w+.-]*:/i.test(url) ? url : `https://${url}`).hostname;
@@ -477,13 +482,22 @@ export class Agent {
     }
   }
 
-  // The history the model is sent (see the note above IDLE_NEW_TASK_MS): all of it, or from the latest
-  // request that started fresh, with its carry-over note in front.
+  // The history the model is sent (see the note above IDLE_NEW_TASK_MS): all of it, or from
+  // the latest request that started fresh, with its carry-over note in front. The previous
+  // task's outcome follows the note as the agent's own message, so its words, which can
+  // repeat a page's, never speak as the user.
   #context(config) {
     const start = config.freshContext ? this.messages.findLastIndex((m) => m.carryOver) : -1;
     if (start < 0) return this.messages;
     const [first, ...rest] = this.messages.slice(start);
-    return [{ ...first, content: [{ type: "text", text: first.carryOver }, ...first.content] }, ...rest];
+    const note = { type: "text", text: first.carryOver };
+    if (!first.carryOverOutcome) return [{ ...first, content: [note, ...first.content] }, ...rest];
+    return [
+      { role: "user", content: [note] },
+      { role: "assistant", content: [{ type: "text", text: first.carryOverOutcome }], raw: null },
+      first,
+      ...rest,
+    ];
   }
 
   // Decides whether `request` starts a new task: forced (the user's choice), an explicit
@@ -501,12 +515,11 @@ export class Agent {
       else {
         why = "the new-task check";
         const start = Math.max(0, earlier.findLastIndex((m) => m.carryOver));
-        const reply = earlier.findLast((m) => m.role === "assistant" && m.content.some((b) => b.type === "text"));
         fresh = await this.guard
           .isNewTask({
             config,
             requests: requestsIn(earlier.slice(start)),
-            reply: reply ? reply.content.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "",
+            reply: lastReply(earlier),
             message: userText,
             signal: AbortSignal.any([signal, AbortSignal.timeout(this.newTaskCheckMs)]),
           })
@@ -516,6 +529,8 @@ export class Agent {
     request.fresh = fresh;
     if (fresh) {
       request.carryOver = await this.#carryOver(earlier);
+      const outcome = oneLine(lastReply(earlier), CARRY_OVER_OUTCOME_CHARS);
+      if (outcome) request.carryOverOutcome = `(Outcome of the earlier task) ${outcome}`;
       // Site notes ride on tool output, which the fresh context leaves out.
       this.guidesGiven = new Set();
     }
@@ -546,11 +561,19 @@ export class Agent {
       .join("\n");
   }
 
-  // Takes back the latest request, when it went through the new-task check, and everything
-  // after it, so it can be sent again with the other choice. Returns its text, or null.
-  rewind() {
+  // Whether the latest request went through the new-task check and has not acted yet: once
+  // the model asks for a tool call, it may have changed something rewind cannot undo.
+  canRewind() {
     const i = this.messages.findLastIndex((m) => m.role === "user" && m.content.some((b) => b.type === "text"));
-    if (this.running || i < 0 || typeof this.messages[i].fresh !== "boolean") return null;
+    if (i < 0 || typeof this.messages[i].fresh !== "boolean") return false;
+    return !this.messages.slice(i).some((m) => m.content.some((b) => b.type === "tool_call"));
+  }
+
+  // Takes back the latest request (see canRewind) and everything after it, so it can be
+  // sent again with the other choice. Returns its text, or null.
+  rewind() {
+    if (this.running || !this.canRewind()) return null;
+    const i = this.messages.findLastIndex((m) => m.role === "user" && m.content.some((b) => b.type === "text"));
     const [text] = requestsIn([this.messages[i]]);
     this.messages.length = i;
     this.onHistory();

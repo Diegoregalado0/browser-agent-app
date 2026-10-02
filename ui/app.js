@@ -517,6 +517,8 @@ const handlers = {
     activity.set("Thinking…");
   },
   tool_call(msg) {
+    // An action cannot be taken back, so the request can no longer be sent again.
+    log.querySelector(".context-choice")?.remove();
     const g = ensureGroup();
     g.actions++;
     renderGroupSummary(g);

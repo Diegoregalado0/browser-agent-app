@@ -234,13 +234,15 @@ export function createController(host) {
         // Sends the latest request again with the other new-task choice (Agent.rewind),
         // stopping it first when it still runs.
         if (typeof msg.fresh !== "boolean") return;
+        const acted = { type: "error", text: "The agent has already acted on this request, so it cannot be sent again." };
+        if (!agent.canRewind()) return reply(acted);
         if (agent.running) {
           agent.stop();
           resolvePermission("deny");
           await task?.catch(() => {});
         }
         const text = agent.rewind();
-        if (!text) return;
+        if (!text) return reply(acted);
         const shown = [...agent.shownMessages(), { role: "user", content: [{ type: "text", text }] }];
         broadcast({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(shown) });
         try {
