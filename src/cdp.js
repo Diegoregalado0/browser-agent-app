@@ -20,6 +20,10 @@ export class CDP extends EventEmitter {
     super();
     this.#ws = ws;
     ws.on("message", (data) => this.#onMessage(JSON.parse(data.toString())));
+    // Without this, a socket error after the initial connect (a dropped network, a
+    // malformed frame) has no listener and crashes the process instead of just failing
+    // the pending requests, same as a close does.
+    ws.on("error", (err) => this.emit("error", err));
     ws.on("close", () => {
       for (const { reject } of this.#pending.values()) reject(new Error("Browser connection closed"));
       this.#pending.clear();
