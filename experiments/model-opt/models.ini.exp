@@ -1,0 +1,55 @@
+; Experiment sections for Browsby model optimization. Append to ~/browsby/models.ini.
+; Router CLI args win over presets (verified with a throwaway router on :18099): -c, -np, -fa,
+; -ctk, -ctv on the llama-browsby unit cannot be overridden per section. Sections e1a to e3
+; and e2 use only keys the router leaves alone. e1np2 needs the one-time unit change in PLAN.md.
+
+; Option 1a: smaller physical batch.
+[qwen3.6-35b-a3b-ub512]
+model = /home/dreg3/models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 32
+ubatch-size = 512
+
+; Option 1b: threads 6.
+[qwen3.6-35b-a3b-t6]
+model = /home/dreg3/models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 32
+threads = 6
+threads-batch = 12
+
+; Option 1c: larger host-RAM prompt cache so evicted agent prefixes are restored, not recomputed.
+[qwen3.6-35b-a3b-cacheram]
+model = /home/dreg3/models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 32
+cache-ram = 8192
+
+; Option 1d: two slots, agent and guard (needs ctx-size 65536 and parallel 2 from [*] after the unit change).
+[qwen3.6-35b-a3b-np2]
+model = /home/dreg3/models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 32
+ctx-size = 65536
+parallel = 2
+
+; Option 3: n-gram lookup speculation (no draft model).
+[qwen3.6-35b-a3b-ngram]
+model = /home/dreg3/models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 32
+spec-type = ngram-mod
+
+; Option 2: MTP speculative decoding with the MTP-enabled quant.
+[qwen3.6-35b-a3b-mtp]
+model = /home/dreg3/models/Qwen3.6-35B-A3B-MTP/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B-MTP/mmproj-F16.gguf
+n-cpu-moe = 32
+spec-type = draft-mtp
+spec-draft-n-max = 3
+
+; Option 6: REAP-pruned 35B (48 percent of experts kept), reusing the stock mmproj. Fewer experts on CPU.
+[qwen3.6-35b-a3b-reap48]
+model = /home/dreg3/models/Qwen3.6-35B-A3B-REAP48/Qwen3.6-35B-A3B-REAP-48-v2.gguf
+mmproj = /home/dreg3/models/Qwen3.6-35B-A3B/mmproj-F16.gguf
+n-cpu-moe = 12
