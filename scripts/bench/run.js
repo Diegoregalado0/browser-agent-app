@@ -171,15 +171,16 @@ async function runBenchmark() {
   // A transient socket error (the tunnel or the test browser blipping) must not crash the
   // whole run; the current task's checks below will see a dead connection and fail it.
   cdp.on("error", (err) => console.error(`CDP socket error: ${err.message}`));
-  // A fresh launch opens the panel itself, but that race occasionally loses (no tab yet
-  // when the keeper tries); ask the keeper to open it explicitly, same as `browser-agent
-  // open` falls back to.
+  // A fresh launch opens the panel itself, but that race occasionally loses: the action
+  // can fire before the service worker has set the panel to open on click, and then
+  // nothing opens. Keep asking the keeper to open it, same as `browser-agent open` does.
   let sidepanelTarget = await waitForSidepanel(cdp, 3000).catch(() => null);
-  if (!sidepanelTarget) {
+  for (let attempt = 0; !sidepanelTarget && attempt < 12; attempt++) {
     const { keeper } = browserProcesses();
     if (keeper) process.kill(keeper, "SIGUSR2");
-    sidepanelTarget = await waitForSidepanel(cdp, 10000);
+    sidepanelTarget = await waitForSidepanel(cdp, 5000).catch(() => null);
   }
+  if (!sidepanelTarget) throw new Error("The extension's side panel never opened.");
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: sidepanelTarget.targetId, flatten: true });
 
   await installBridge(cdp, sessionId);
@@ -476,4 +477,9 @@ function writeReport({ runId, provider, model, thinking, rows }) {
   console.log(`\nWrote ${jsonPath}\nWrote ${mdPath}`);
 }
 
-await main();
+// The keep-alive timer in main() would otherwise hold a failed run open forever, and
+// with it the shared GPU lock.
+await main().catch((err) => {
+  console.error("FATAL:", err);
+  process.exit(1);
+});
