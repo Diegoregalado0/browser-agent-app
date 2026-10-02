@@ -1,15 +1,22 @@
 #!/usr/bin/env node
-// Offline checks of Stop, with a scripted provider and browser: Stop ends a task whose
-// model request, browser action or safety check never returns, and nothing of that task
-// reaches the user or the history afterwards; and a safety scan cut short by Stop is not
-// remembered as clean.
+// Offline checks of Stop and of the extension build, with a scripted provider and browser:
+// Stop ends a task whose model request, browser action or safety check never returns, and
+// nothing of that task reaches the user or the history afterwards; a safety scan cut short
+// by Stop is not remembered as clean; and an interrupted build never leaves a build that
+// looks current without its key.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Agent } from "../src/agent.js";
 import { Guard } from "../src/guard.js";
 import { providers } from "../src/providers/index.js";
 import { DEFAULTS } from "../src/config-core.js";
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 const click = (id) => ({ type: "tool_call", id, name: "browser", input: { action: "left_click", coordinate: [5, 5] } });
@@ -164,5 +171,69 @@ classify = async () => {
   throw new Error("a remembered page was scanned again");
 };
 assert.equal(await guard.scanContent({ config, name: "navigate", output: [], url: "https://evil.example/", pageText: async () => page }), warning);
+
+// The build, killed between any two of its steps in a copy of the project, leaves either
+// the previous complete build or none; a manifest without its key counts as outdated.
+const copy = mkdtempSync(join(tmpdir(), "browser-agent-build-"));
+const home = mkdtempSync(join(tmpdir(), "browser-agent-check-"));
+try {
+  for (const path of ["bin", "extension", "src", "ui", "package.json", "package-lock.json"]) cpSync(join(ROOT, path), join(copy, path), { recursive: true });
+  mkdirSync(join(copy, "scripts"));
+  for (const file of ["build-extension.js", "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"]) cpSync(join(ROOT, "scripts", file), join(copy, "scripts", file));
+  symlinkSync(join(ROOT, "node_modules"), join(copy, "node_modules"));
+  const builder = join(copy, "scripts", "build-extension.js");
+  const original = readFileSync(builder, "utf8");
+  const manifestPath = join(copy, "dist", "extension", "manifest.json");
+  const runBuild = () => spawnSync(process.execPath, [builder], { encoding: "utf8" });
+  const outdated = () => {
+    const res = spawnSync(process.execPath, ["--input-type=module", "-e", `const m = await import(${JSON.stringify(join(copy, "src", "chrome.js"))}); console.log(m.buildOutdated());`], {
+      env: { ...process.env, BROWSER_AGENT_HOME: home },
+      encoding: "utf8",
+    });
+    assert.equal(res.status, 0, res.stderr);
+    return res.stdout.trim() === "true";
+  };
+
+  assert.equal(outdated(), true, "no build counted as current");
+  const full = runBuild();
+  assert.equal(full.status, 0, full.stderr);
+  const built = readFileSync(manifestPath, "utf8");
+  assert.ok(JSON.parse(built).key, "the build has no key");
+  assert.ok(existsSync(join(copy, "dist", "browser-agent-extension.zip")));
+  assert.equal(outdated(), false, "a fresh build counted as outdated");
+
+  // What the old build left when interrupted after packing: the store manifest, no key.
+  writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(built), key: undefined }));
+  assert.equal(outdated(), true, "a build without its key counted as current");
+  writeFileSync(manifestPath, built);
+
+  const steps = [
+    "const result = await build(",
+    "const packageDirs = new Set();",
+    'writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));',
+    "rmSync(ZIP, { force: true });",
+    'writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));',
+    "rmSync(DEST, { recursive: true, force: true });",
+    "renameSync(OUT, DEST);",
+    "renameSync(ZIP, ZIP_DEST);",
+  ];
+  for (const step of steps) {
+    assert.ok(original.includes(step), `the build no longer has the step ${step}`);
+    writeFileSync(builder, original.replace(step, `process.kill(process.pid, "SIGKILL");\n${step}`));
+    const killed = runBuild();
+    assert.equal(killed.signal, "SIGKILL", `the build was not interrupted before ${step}`);
+    if (existsSync(manifestPath)) {
+      assert.equal(readFileSync(manifestPath, "utf8"), built, `interrupted before ${step}, the build left a changed manifest`);
+    } else {
+      assert.equal(outdated(), true, `interrupted before ${step}, the missing build counted as current`);
+    }
+    // Restored for the next step, as the next complete build would.
+    writeFileSync(builder, original);
+    if (!existsSync(manifestPath)) assert.equal(runBuild().status, 0);
+  }
+} finally {
+  rmSync(copy, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
+}
 
 console.log("stop checks passed");
