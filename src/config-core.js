@@ -11,6 +11,12 @@ export const DEFAULT_GUARD_MODELS = {
   ollama: "",
 };
 
+// The safety-check model when none is set. A custom OpenAI-compatible server (OpenRouter,
+// llama.cpp, vLLM, ...) does not serve OpenAI's small model, so it uses the main model.
+export function defaultGuardModel(config, provider) {
+  return provider === "openai" && config.openaiBaseUrl ? "" : DEFAULT_GUARD_MODELS[provider];
+}
+
 export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
@@ -191,7 +197,8 @@ export function publicConfig(config) {
     keyInfo[p] = { source: key ? "saved" : "none", mask: key ? maskKey(key) : "" };
   }
   const { keys, discord: _discord, ...rest } = config;
-  return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
+  const defaultGuardModels = Object.fromEntries(Object.keys(DEFAULT_GUARD_MODELS).map((p) => [p, defaultGuardModel(config, p)]));
+  return { ...rest, keyInfo, defaultGuardModels };
 }
 
 // Stored settings over the defaults, with nested objects merged. A stored value that fails

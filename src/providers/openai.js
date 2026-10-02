@@ -112,6 +112,10 @@ async function paceFor(model, estimate, signal, onWait) {
   await sleep(ms, signal);
 }
 
+// Thinking switch for Qwen-style chat templates, which llama.cpp, vLLM and LM Studio read
+// from chat_template_kwargs. Mistral's API rejects unknown fields, so its adapter opts out.
+const thinkingKwargs = (config, on) => (config.chatTemplateKwargs === false ? {} : { chat_template_kwargs: { enable_thinking: on } });
+
 // dangerouslyAllowBrowser: in the extension edition the user's own key calls the API
 // from their browser, which the SDK allows only with this opt-in.
 function client({ apiKey, config }) {
@@ -142,6 +146,7 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
       model,
       stream: true,
       stream_options: { include_usage: true },
+      ...thinkingKwargs(config, Boolean(config.thinking)),
       messages: toMessages(system, limitImages(messages, config.chatMaxImages)),
       tools: tools.map(({ name, description, input_schema }) => ({
         type: "function",
@@ -340,6 +345,7 @@ export async function classify({ apiKey, model, config, system, text, images = [
           { role: "user", content: [{ type: "text", text }, ...imageParts(images)] },
         ],
         response_format: { type: "json_schema", json_schema: { name: "result", schema, strict: true } },
+        ...thinkingKwargs(config, false),
       },
       { signal },
     );
