@@ -113,9 +113,9 @@ export const TASKS = [
   {
     id: "github-issue",
     name: "GitHub issue lookup",
-    prompt: "Go to github.com/facebook/react/issues/1 and tell me the issue's title and whether it is open or closed.",
+    prompt: "Go to github.com/react/react/issues/1000 and tell me the issue's title and whether it is open or closed.",
     check: ({ finalUrl, reply }) => {
-      const onIssue = /github\.com\/facebook\/react\/issues\/1\b/.test(finalUrl);
+      const onIssue = /github\.com\/(react|facebook)\/react\/issues\/1000\b/.test(finalUrl);
       const stated = /\bopen\b|\bclosed\b/i.test(reply);
       const ok = onIssue && stated;
       return { ok, reason: ok ? "reported the issue's state" : `url=${finalUrl} statedState=${stated}` };
