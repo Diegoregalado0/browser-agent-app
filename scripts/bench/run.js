@@ -42,6 +42,10 @@ function parseArgs(argv) {
   return args;
 }
 
+process.on("unhandledRejection", (err) => console.error("UNHANDLED REJECTION:", err));
+process.on("uncaughtException", (err) => console.error("UNCAUGHT EXCEPTION:", err));
+process.on("exit", (code) => console.error(`process exiting with code ${code}`));
+
 const args = parseArgs(process.argv.slice(2));
 if (!args.provider || !args.model) {
   console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--thinking on|off]");
