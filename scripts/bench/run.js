@@ -219,7 +219,8 @@ async function runBenchmark() {
     while (browserProcesses().chrome && Date.now() < end) await sleep(200);
   }
 
-  writeReport({ provider: args.provider, model: args.model, thinking: thinkingArg, rows });
+  // Already written after the last task in the loop above (including when rows is empty,
+  // nothing was ever written, which is fine - an all-resumed/empty run has nothing to report).
   rmSync(home, { recursive: true, force: true });
   console.log(`\nCleaned up temp profile ${home}.`);
 }
@@ -305,25 +306,30 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
 
   const started = Date.now();
   await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
-  // The controller rejects "run" with an error reply, not a thrown exception, when the
-  // previous task's agent is still finishing (see the stop-grace wait below); catch that
-  // here and retry once it actually stops, rather than silently recording an empty task.
-  let rejected = (await drainEvents(cdp, sessionId)).find((e) => e.type === "error" && /already running/i.test(e.text));
-  if (rejected) {
-    console.error(`  -> previous task's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
-    const waitDeadline = Date.now() + STOP_GRACE_MS;
-    while (Date.now() < waitDeadline) {
-      await sleep(500);
-      const batch = await drainEvents(cdp, sessionId);
-      if (batch.some((e) => e.type === "status" && e.running === false)) break;
-    }
-    await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
-  }
 
   const events = [];
   let finished = false;
   let timedOut = false;
   const end = started + timeoutMs;
+  // The controller rejects "run" with an error reply, not a thrown exception, when the
+  // previous task's agent is still finishing (see the stop-grace wait below); catch that
+  // here and retry once it actually stops, rather than silently recording an empty task.
+  // Earlier this discarded whatever else was in the same batch (a real task's first events,
+  // on a fast reply) instead of keeping them - every event drained anywhere is now kept.
+  const firstBatch = await drainEvents(cdp, sessionId);
+  events.push(...firstBatch);
+  if (firstBatch.some((e) => e.type === "status" && e.running === false)) finished = true;
+  if (!finished && firstBatch.some((e) => e.type === "error" && /already running/i.test(e.text))) {
+    console.error(`  -> previous task's agent was still finishing; waiting up to ${STOP_GRACE_MS / 1000}s before retrying`);
+    const waitDeadline = Date.now() + STOP_GRACE_MS;
+    while (Date.now() < waitDeadline) {
+      await sleep(500);
+      const batch = await drainEvents(cdp, sessionId);
+      events.push(...batch);
+      if (batch.some((e) => e.type === "status" && e.running === false)) break;
+    }
+    await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: task.prompt })})`, returnByValue: true }, sessionId);
+  }
   // A deadline checked only between iterations does not bound an iteration already in
   // flight: if a single drainEvents/cdp.send round trip itself stalls (the renderer busy
   // with a slow model call, a CDP pipe hiccup), the loop can overrun --timeout by however
