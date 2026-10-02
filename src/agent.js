@@ -52,9 +52,11 @@ const PAGE_TOOLS = new Set(["browser", "navigate", "form_input", "tabs"]);
 // The full history stays for the panel, the saved session and the safety checks. Such a
 // request holds its note (carryOver); the model sees the history from the latest one on.
 // Every request checked holds the choice (fresh), which the user can reverse (see rewind).
-// A gap this long since the last task, or a request that says so, starts fresh without a check.
+// A gap this long since the last task, or a request that says so, starts fresh without a
+// check; a request this short ("thanks", "and Porto?") continues without one.
 const IDLE_NEW_TASK_MS = 30 * 60 * 1000;
 const EXPLICIT_NEW_TASK = /^\s*(new task|new topic|start over|start fresh|unrelated)\b/i;
+const FOLLOW_UP_MAX_WORDS = 3;
 const CARRY_OVER_REQUESTS = 5;
 const CARRY_OVER_SITES = 8;
 
@@ -495,6 +497,7 @@ export class Agent {
     if (typeof fresh !== "boolean") {
       if (EXPLICIT_NEW_TASK.test(userText)) [fresh, why] = [true, "the request says so"];
       else if (this.lastTaskEnd && started - this.lastTaskEnd > IDLE_NEW_TASK_MS) [fresh, why] = [true, "a long pause"];
+      else if (userText.trim().split(/\s+/).length <= FOLLOW_UP_MAX_WORDS) [fresh, why] = [false, "a short follow-up"];
       else {
         why = "the new-task check";
         const start = Math.max(0, earlier.findLastIndex((m) => m.carryOver));

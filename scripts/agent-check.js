@@ -1770,7 +1770,7 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
     actionChecks = [];
     freshReplies = session();
     const sizes = [];
-    for (const text of ["what is in my cart?", "weather in Lisbon?", "and tomorrow?"]) {
+    for (const text of ["what is in my cart?", "what is the weather in Lisbon today?", "and what about tomorrow there?"]) {
       await a.run(text, cfg);
       sizes.push(sentHistories.at(-1));
     }
@@ -1812,7 +1812,7 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   assert.match(note, /- what is in my cart\?/);
   assert.match(note, /shop\.example/);
   assert.ok(!/IGNORE|Cart <b>|SHOT/.test(JSON.stringify(freshStart)), "the fresh context carried a reply, a page title or a screenshot");
-  assert.match(freshStart[0].content[1].text, /^weather in Lisbon\?/);
+  assert.match(freshStart[0].content[1].text, /^what is the weather in Lisbon today\?/);
   assert.equal(followUp.length, 3, "the follow-up did not continue from the fresh start");
   assert.match(followUp[0].content[0].text, /^\[Note from the agent/);
   // The panel and the saved session keep the whole history.
@@ -1846,7 +1846,7 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
     sentHistories = [];
     freshReplies = [said("one"), said("two")];
     await a.run("first", { ...config, freshContext: true });
-    await a.run("second", { ...config, freshContext: true });
+    await a.run("find me a pasta recipe please", { ...config, freshContext: true });
     assert.equal(sentHistories[1].length, 3, "a failed new-task check started fresh");
     assert.equal(events.find((e) => e.type === "context").fresh, false);
   }
@@ -1863,7 +1863,7 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   await slow.run("first", { ...config, freshContext: true });
   // AbortSignal.timeout does not hold the process open; the app's server or panel does.
   const keepAlive = setInterval(() => {}, 1000);
-  await slow.run("second", { ...config, freshContext: true });
+  await slow.run("find me a pasta recipe please", { ...config, freshContext: true });
   clearInterval(keepAlive);
   assert.equal(sentHistories[1].length, 3, "a check that timed out started fresh");
   providers.openai.classify = async (args) => {
@@ -1883,6 +1883,12 @@ assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${pref
   quick.lastTaskEnd = Date.now() - 2 * 60 * 60 * 1000;
   await quick.run("something else", { ...config, freshContext: true });
   assert.equal(taskChecks.length, 0, "a cheap signal still asked the model");
+  taskAnswer = async () => ({ new_task: true });
+  freshReplies = [said("you're welcome")];
+  await quick.run("Thanks!", { ...config, freshContext: true });
+  assert.equal(taskChecks.length, 0, "a short follow-up asked the model");
+  assert.equal(quick.messages.at(-2).fresh, false);
+  assert.equal(quick.rewind(), "Thanks!");
   assert.ok(quick.messages.filter((m) => m.carryOver).length === 2);
 
   // The user's choice: the latest request is taken back and sent again the other way.
