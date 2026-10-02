@@ -129,7 +129,7 @@ export function describeError(err) {
 }
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
-export async function classify({ apiKey, model, system, text, images = [], schema, signal, onUsage }) {
+export async function classify({ apiKey, model, system, text, images = [], schema, temperature, signal, onUsage }) {
   const ai = new GoogleGenAI({ apiKey });
   const res = await ai.models.generateContent({
     model,
@@ -138,6 +138,7 @@ export async function classify({ apiKey, model, system, text, images = [], schem
       systemInstruction: system,
       responseMimeType: "application/json",
       responseJsonSchema: schema,
+      ...(temperature !== undefined && { temperature }),
       abortSignal: signal,
     },
   });

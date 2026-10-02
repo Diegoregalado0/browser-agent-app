@@ -193,7 +193,7 @@ export function describeError(err) {
 }
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
-export async function classify({ model, config, system, text, images = [], schema, signal, onUsage }) {
+export async function classify({ model, config, system, text, images = [], schema, temperature, signal, onUsage }) {
   const res = await client(config, signal).chat({
     model,
     stream: false,
@@ -203,7 +203,7 @@ export async function classify({ model, config, system, text, images = [], schem
       { role: "user", content: text, ...(images.length && { images: images.map((b) => b.data) }) },
     ],
     // Thinking is off, so the short JSON verdict is all there is to generate.
-    options: { num_ctx: config.ollamaContext, num_predict: 128 },
+    options: { num_ctx: config.ollamaContext, num_predict: 128, ...(temperature !== undefined && { temperature }) },
     ...((await canThink(config, model)) && { think: false }),
   });
   onUsage?.((res.prompt_eval_count ?? 0) + (res.eval_count ?? 0));

@@ -161,7 +161,8 @@ export class Guard {
       "",
       `New message: ${message.slice(0, 1000)}`,
     ].join("\n");
-    const res = await this.#classify(config, { system: TASK_SYSTEM, text, schema: TASK_SCHEMA }, signal);
+    // Temperature 0, so the same request gets the same answer where the model allows it.
+    const res = await this.#classify(config, { system: TASK_SYSTEM, text, schema: TASK_SCHEMA, temperature: 0 }, signal);
     return res?.new_task === true;
   }
 

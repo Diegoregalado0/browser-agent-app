@@ -340,7 +340,8 @@ export function describeError(err) {
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
 // onUsage(tokens) reports what the call used, so safety checks count toward usage limits.
-export async function classify({ apiKey, model, config, system, text, images = [], schema, signal, onUsage }) {
+// temperature: sent when given, except to reasoning models on the Responses API, which reject it.
+export async function classify({ apiKey, model, config, system, text, images = [], schema, temperature, signal, onUsage }) {
   const openai = client({ apiKey, config });
   await paceFor(model, Math.round(text.length / 4) + images.length * 1000 + 500, signal);
   if (config.openaiBaseUrl) {
@@ -356,6 +357,7 @@ export async function classify({ apiKey, model, config, system, text, images = [
         // Set for endpoints whose models do not think (Mistral); a thinking model on another
         // endpoint would spend the budget before the verdict.
         ...(config.classifyMaxTokens && { max_tokens: config.classifyMaxTokens }),
+        ...(temperature !== undefined && { temperature }),
       },
       { signal },
     );
@@ -376,7 +378,7 @@ export async function classify({ apiKey, model, config, system, text, images = [
         },
       ],
       text: { format: { type: "json_schema", name: "result", schema, strict: true } },
-      ...(REASONING_MODEL.test(model) && { reasoning: { effort: "low" } }),
+      ...(REASONING_MODEL.test(model) ? { reasoning: { effort: "low" } } : temperature !== undefined && { temperature }),
       store: false,
     },
     { signal },
