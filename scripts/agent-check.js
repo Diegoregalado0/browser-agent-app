@@ -1686,6 +1686,23 @@ assert.equal(viewShots.length, 0, "a screenshot was taken without a reason");
 viewBody.children = [buy, control("CANVAS", "", 100, { w: 2000, h: 1200, interactive: false })];
 const canvasRead = await viewBrowser.run("read_page", {});
 assert.ok(Array.isArray(canvasRead) && canvasRead.some((b) => b.type === "image"), "a large canvas in view came without a screenshot");
+// A control a script made clickable (a link with no address, shown with a pointer cursor)
+// gets a ref; an anchor without an address or a pointer does not.
+const pointerDoc = { defaultView: { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1", cursor: "pointer" }) } };
+const scripted = (name, top, doc) => ({ ...control("A", name, top), ownerDocument: doc, matches: (sel) => sel === "a:not([href]), .btn" });
+viewBody.children = [scripted("Proceed To Checkout", 100, pointerDoc), scripted("Back to top", 200, viewDoc)];
+const scriptedRead = await viewBrowser.run("read_page", {});
+assert.match(scriptedRead, /link "Proceed To Checkout" \[ref_\d+\]/, "a script-driven button got no ref");
+assert.doesNotMatch(scriptedRead, /"Back to top" \[ref/, "an anchor without an address or a pointer got a ref");
+// Scrolling goes the way scroll_direction says, whatever the sign of scroll_amount.
+const wheels = [];
+const sendBefore = viewTransport.send;
+viewTransport.send = async (id, method, params) => (method === "Input.dispatchMouseEvent" && params.type === "mouseWheel" && wheels.push(params.deltaY), sendBefore(id, method, params));
+await viewBrowser.run("browser", { action: "scroll", scroll_direction: "up", scroll_amount: -5 });
+await viewBrowser.run("browser", { action: "scroll", scroll_direction: "up", scroll_amount: 5 });
+await viewBrowser.run("browser", { action: "scroll", scroll_direction: "down", scroll_amount: -2 });
+viewTransport.send = sendBefore;
+assert.deepEqual(wheels, [-500, -500, 200], "a negative scroll_amount reversed the direction");
 for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "devicePixelRatio", "visualViewport", "location", "document"]) delete globalThis[name];
 
 // The agent attaches a screenshot when the page moves to another site or an action fails,
