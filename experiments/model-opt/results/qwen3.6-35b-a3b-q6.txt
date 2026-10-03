@@ -1,0 +1,13 @@
+== qwen3.6-35b-a3b-q6: 9/10 passed; window {'requests': 190, 'prompt_tokens_evaluated': 101447, 'prompt_s': 1066.5, 'prompt_tok_s': 95.1, 'gen_tokens': 10175, 'gen_s': 648.8, 'gen_tok_s': 15.68, 'lru_or_low_sim': 155}
+task                   ok   steps    secs s/step  reqs prompt_tok  gen_tok evict
+hn-page2               PASS     5   188.8   37.8    12      16217      685     7
+book-product-page      PASS     9   179.9   20.0    18      12579     1108    10
+lasagna-recipe         PASS     8   285.1   35.6    20      13852     1125    13
+httpbin-form           PASS     7   111.8   16.0    15       5046      700    10
+youtube-play           PASS    11   234.4   21.3    31      10532     1694    29
+wikipedia-compare      PASS     5   158.9   31.8    14      12373      867    12
+checkout-stop-at-payment FAIL    20   360.5   18.0    41      18489     2133    32
+github-issue           PASS     1    45.3   45.3     8       3776      408     5
+osm-directions         PASS    21   357.6   17.0    48      16483     2529    44
+dismiss-popup          PASS     2    91.5   45.8     8       2973      586     7
+run dir: /home/dreg3/bench-results/runs/20261002-182618
