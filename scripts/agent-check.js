@@ -324,6 +324,69 @@ await looping.run("open the product", loopConfig);
 const goes = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "navigate");
 assert.equal(goes.at(-1).content.at(-1).text.startsWith("[Loop check]"), true, "a repeated identical navigation gets a loop note");
 
+// Safety scans see a screenshot only when the page has no usable text: a screenshot of a
+// page with text, alone or attached to other output, is scanned by the page's text, while
+// a page without text (a canvas), read_page's own screenshot of what its outline cannot
+// show, and images from tool servers are scanned by image. The action check is unchanged.
+{
+  const scans = [];
+  const actionChecks = [];
+  const classifyBefore = providers.openai.classify;
+  providers.openai.classify = async ({ system, text, images = [] }) => {
+    if (/safety monitor/.test(system)) return (actionChecks.push({ text, images: images.length }), { verdict: "allow", reason: "ok" });
+    scans.push({ text, images: images.length });
+    return { injection: false, reason: "ok" };
+  };
+  let shotN = 0;
+  const shot = () => [{ type: "image", mediaType: "image/jpeg", data: `pixels${shotN++}` }, { type: "text", text: "Browser screenshot 10x10" }];
+  const wordy = "Blue Top, Rs. 500. Add to cart. Proceed To Checkout. Item Description Price Quantity Total";
+  const scanAgent = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  const runScanTask = async (pageText) => {
+    scans.length = 0;
+    actionChecks.length = 0;
+    scanAgent.reset();
+    let page = 0;
+    scanAgent.browser = {
+      ...agent.browser,
+      // Each step on a new address, so every screenshot reaches the scan.
+      currentUrl: async () => `https://shop.example/${page}`,
+      currentPage: async () => ({ id: "t1", title: "Shop", url: `https://shop.example/${page}` }),
+      callInPage: async (fn) => (fn.name === "pageTextScript" ? { text: pageText } : false),
+      run: async (name, input) => {
+        if (name === "find") throw new Error("Cannot find context with specified id 12");
+        if (input.action === "screenshot") return shot();
+        page++;
+        return "clicked";
+      },
+    };
+    const find = (n) => ({ type: "tool_call", id: `call_scanfind${n}`, name: "find", input: { query: "checkout" } });
+    const shotCall = { type: "tool_call", id: "call_shot", name: "browser", input: { action: "screenshot" } };
+    replies = [[shotCall], [click], [find(1)], [find(2)]].map((content) => ({ content, raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+    replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+    await scanAgent.run("buy a top", config);
+    return scans;
+  };
+  // The screenshot, the click's report and the loop check's screenshot attached to find.
+  const withText = await runScanTask(wordy);
+  assert.ok(withText.some((s) => /Loop check/.test(s.text)), "the loop check's screenshot was not scanned");
+  assert.deepEqual(withText.map((s) => s.images), withText.map(() => 0), "a screenshot of a page with text reached the safety scan");
+  assert.ok(withText.every((s) => s.text.includes(wordy)), "a scan of a page with text did not get the page's text");
+  assert.equal(actionChecks.length, 1, "the click got no action check");
+  assert.match(actionChecks[0].text, /Proposed action: browser \{"action":"left_click"/);
+  assert.match(actionChecks[0].text, /Current page: Shop \| https:\/\/shop\.example\/0/);
+  const noText = await runScanTask("");
+  assert.ok(noText.filter((s) => s.images === 1).length >= 2, "a screenshot of a page without text was not scanned by image");
+  assert.ok(noText.some((s) => s.images === 1 && /Loop check/.test(s.text)), "the loop check's screenshot of a page without text was not scanned by image");
+  // read_page's own screenshot shows what its outline cannot (a canvas, a cross-origin frame).
+  scans.length = 0;
+  const scanGuard = new Guard();
+  const canvasOutline = { type: "text", text: "URL: https://shop.example/\ncanvas \"Game\" @0,0 500x500\n[The view has a canvas; a screenshot is attached.]" };
+  await scanGuard.scanContent({ config, name: "read_page", output: [canvasOutline, ...shot()], pageText: async () => wordy });
+  await scanGuard.scanContent({ config, name: "mcp__outlook__read_message", output: shot(), pageText: async () => wordy });
+  assert.deepEqual(scans.map((s) => s.images), [1, 1], "read_page's screenshot or a tool server's image was not scanned by image");
+  providers.openai.classify = classifyBefore;
+}
+
 // Tool servers (Outlook's interface): their tools reach the model under mcp__ names,
 // read-only tools skip the safety check while the others get it, and tool errors come
 // back as errors.

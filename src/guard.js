@@ -54,6 +54,11 @@ export function isStateChanging(name, input) {
   return ["navigate", "form_input"].includes(name);
 }
 
+// The current page's text from pageText() (a promise of it), or "" when it cannot be read.
+async function pageTextOf(pageText) {
+  return String((await pageText?.().catch(() => "")) ?? "").trim();
+}
+
 async function sha256(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -143,14 +148,27 @@ export class Guard {
   // screenshot, the controls an action or navigation reports). Such output is scanned once
   // per address, with the page's text (pageText(), a promise of it) in place of pixels
   // when the page has text; a page without text (a canvas) is scanned by its screenshot.
-  async scanContent({ config, name, output, signal, url = null, pageText = null }) {
+  // pageShots: screenshots of the current page attached to other output (after a failure
+  // or a loop check). The output is scanned as usual, with the page's text in place of
+  // those screenshots when the page has text.
+  async scanContent({ config, name, output, signal, url = null, pageText = null, pageShots = [] }) {
     // MCP results (emails, calendar entries) are outside content too.
     if (!SCANNED_TOOLS.has(name) && !name.startsWith("mcp__")) return null;
     let text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
     let images = output.filter((b) => b.type === "image");
-    if (!url) return (await this.#scan(config, name, text, images, signal)).warning;
+    if (!url) {
+      const shots = images.filter((b) => pageShots.includes(b));
+      if (shots.length) {
+        const page = await pageTextOf(pageText);
+        if (page.length >= 40) {
+          text = `${text}\n\nText of the page:\n${page.slice(0, SCAN_MAX_CHARS / 2)}`;
+          images = images.filter((b) => !shots.includes(b));
+        }
+      }
+      return (await this.#scan(config, name, text, images, signal)).warning;
+    }
     if (this.scannedPages.has(url)) return this.scannedPages.get(url);
-    const page = String((await pageText?.().catch(() => "")) ?? "").trim();
+    const page = await pageTextOf(pageText);
     if (page.length >= 40) {
       text = `Text of the page:\n${page.slice(0, SCAN_MAX_CHARS / 2)}\n\n${text}`;
       images = [];
