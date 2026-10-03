@@ -62,3 +62,38 @@ The sandbox command (`browser-agent`) decides whether to rebuild with `buildOutd
 
 - Symptom to watch for: the sandbox rebuilding on every start, which would mean the build is writing a manifest without its key.
 - Where: `buildOutdated` in `src/chrome.js:33`, with the list of build sources at `src/chrome.js:16`. Commit `a38297f`.
+
+## 2026-10-03
+
+### 9. Stop closes the connection of the request in flight
+
+With one llama.cpp slot, a request the agent had given up on could keep the server busy for half an hour and block every later request. On the client, Stop already aborts the model request and any safety check through the task's signal, and the OpenAI provider passes that signal to the request, which closes the socket. llama-server cancels a task when it notices the client has gone. A new check proves the socket closes on Stop, both for a streamed turn that has begun answering and for a safety check (not streamed), so a change that drops the signal fails `npm run check`.
+
+No slot cancel call was added: llama-server has no endpoint that cancels a running request (`/slots/{id}?action=erase` clears a slot's cache; it does not stop the work). The server notices a disconnect only between batches of work, so a slow prompt or image encode under memory pressure can still run on after Stop. A proxy between the extension and llama.cpp (the gate) must also close its upstream connection when the client goes, or llama.cpp never sees the disconnect.
+
+- Symptom to watch for: the server still busy long after a Stop, with no client connected. Check whether the proxy passes the disconnect upstream before suspecting the extension.
+- Where: the check at `scripts/stop-check.js:218`; the signal is passed in `chatTurn` and `classify` in `src/providers/openai.js`. Commit `1ca30e5`.
+- Revert: `git revert 1ca30e5` removes only the check.
+
+### 10. Screenshots attached to other output are scanned by the page's text
+
+Page tools (screenshots, clicks, navigation) were already scanned by the page's text when it has some. A screenshot that the agent attaches to other output (after a failed step or a loop check on read_page, find or get_page_text) still reached the safety model as an image, so a local vision model encoded the same screenshot twice in one step. Those screenshots are now replaced by the page's text when the page has at least 40 characters of it. The tool's own output is scanned as before.
+
+Still scanned by image: a page without text (a canvas, an image-only page), read_page's own screenshot of what its outline cannot show (a large canvas or cross-origin frame), and images from tool servers (Outlook). The action check is unchanged; it never took images.
+
+- Symptom to watch for: a prompt injection written only inside an image on a page that also has text, seen in a screenshot after a failed step, no longer flagged. This is the same trade-off page tools already made.
+- Where: `scanContent` in `src/guard.js:154`, and `#autoScreenshot` marking its screenshots in `src/agent.js:629`. Commit `cbf4fda`.
+- Revert: `git revert cbf4fda`.
+
+### 11. Scrolling follows scroll_direction, and script-driven buttons get refs
+
+Every Qwen 3.6 35B run of "Checkout stops before payment" timed out (20 to 47 steps). The event logs show two tool problems behind most of the wasted steps:
+
+- Six of eight runs passed a negative `scroll_amount` with direction `up` (11 times in the ub512 run). That scrolled down while the result said "Scrolled up", so the model kept scrolling "up", got "No change among the controls in view" at the bottom, and took screenshots to understand why. The sign of the amount is now ignored; the direction decides.
+- On the cart page, "Proceed To Checkout" is a link with no address and a click handler. The outline showed it as plain text with no ref, so runs that reached the cart spent their remaining steps scrolling, screenshotting and clicking guessed coordinates (one hit the newsletter box and was blocked). Links without an address and `.btn` elements that show a pointer cursor now count as controls and get refs.
+
+The benchmark task and its timeout are unchanged. This needs a GPU run to confirm. Note that without an account, Proceed To Checkout on that site opens a "Register / Login" dialog rather than the checkout page.
+
+- Symptom to watch for: read_page or action reports listing extra controls (decorative `.btn` elements or anchors with a pointer cursor), or a scroll that a model meant as the opposite direction.
+- Where: `src/browser-tools.js:731` (scroll) and `SCRIPTED_SELECTOR` in `src/page-scripts.js:35`. Commit `1d70fcd`.
+- Revert or tune: `git revert 1d70fcd`, or narrow `SCRIPTED_SELECTOR`.
