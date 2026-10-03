@@ -3,7 +3,9 @@
 // Stop ends a task whose model request, browser action or safety check never returns, and
 // nothing of that task reaches the user or the history afterwards; a browser call that
 // never answers fails its step; a safety scan cut short by Stop or failed is not remembered
-// as clean; and an interrupted build never leaves a build that looks current without its key.
+// as clean; Stop closes the connection of a model request or safety check in flight, so a
+// local server (llama.cpp) sees the disconnect and frees its slot; and an interrupted build
+// never leaves a build that looks current without its key.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -16,6 +18,8 @@ import { Guard } from "../src/guard.js";
 import { Browser } from "../src/browser-tools.js";
 import { providers } from "../src/providers/index.js";
 import { DEFAULTS } from "../src/config-core.js";
+import * as realOpenai from "../src/providers/openai.js";
+import { createServer } from "node:http";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } };
@@ -210,6 +214,62 @@ const frozenResult = timed.messages[2].content[0];
 assert.equal(frozenResult.isError, true, "a frozen call did not fail its step");
 assert.match(frozenResult.content[0].text, /did not answer Runtime\.evaluate within \d+s/);
 assert.equal(timed.messages.at(-1).content[0].text, "done", "the task did not go on after the frozen call");
+
+// Stop closes the connection of the request in flight, so a local OpenAI-compatible server
+// (llama.cpp) sees the client go and cancels the work. Checked against a server that never
+// finishes: a streamed turn that has started answering, and a safety check (not streamed).
+{
+  const requests = [];
+  const server = createServer((req, res) => {
+    const entry = { url: req.url, closed: false };
+    requests.push(entry);
+    req.socket.on("close", () => (entry.closed = true));
+    let data = "";
+    req.on("data", (c) => (data += c));
+    req.on("end", () => {
+      const body = JSON.parse(data);
+      entry.stream = Boolean(body.stream);
+      if (!body.stream) return;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      // The first turn proposes a click and finishes; the next one starts answering and hangs.
+      if (requests.filter((r) => r.stream).length === 1) {
+        const call = { index: 0, id: "c_live", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "left_click", coordinate: [5, 5] }) } };
+        res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [call] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+      } else res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Looking" } }] })}\n\n`);
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const stubProvider = providers.openai;
+  providers.openai = realOpenai;
+  const live = { ...config, openaiBaseUrl: `http://127.0.0.1:${server.address().port}/v1`, models: { ...config.models, openai: "local" } };
+  const until = async (test, what) => {
+    for (let i = 0; i < 100 && !test(); i++) await tick();
+    assert.ok(test(), what);
+  };
+  try {
+    // A safety check in flight (the first turn's click is checked before it runs).
+    agent.reset();
+    const checking = agent.run("click it", live);
+    await until(() => requests.some((r) => !r.stream), "the safety check did not reach the server");
+    agent.stop();
+    await until(() => requests.find((r) => !r.stream).closed, "Stop left the safety check's connection open");
+    await checking;
+    // A streamed turn that has begun to answer.
+    agent.reset();
+    requests.length = 0;
+    const answering = agent.run("click it", { ...live, permissionMode: "auto" });
+    await until(() => requests.filter((r) => r.stream).length === 2, "the second turn did not reach the server");
+    await tick(50);
+    assert.equal(requests[1].closed, false, "the turn's connection closed before Stop");
+    agent.stop();
+    await until(() => requests[1].closed, "Stop left the streamed turn's connection open");
+    await answering;
+  } finally {
+    providers.openai = stubProvider;
+    server.closeAllConnections();
+    server.close();
+  }
+}
 
 // The build, killed between any two of its steps in a copy of the project, leaves either
 // the previous complete build or none; a manifest without its key counts as outdated.
