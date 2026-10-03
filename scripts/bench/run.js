@@ -2,7 +2,8 @@
 // Runs the Browsby benchmark: one command drives the real built extension in a throwaway
 // Chrome profile over DevTools, same as `browser-agent` does, and runs each task by
 // talking to the panel's in-page controller (globalThis.agentHost) the way the UI does.
-// Writes bench-results/<run-id>.json and .md.
+// Writes bench-results/<run-id>.json and .md, and every agent event per task to
+// bench-results/<run-id>/<task>.events.jsonl.
 //
 // Usage:
 //   node scripts/bench/run.js --provider openai --model qwen3.6-35b-a3b \
@@ -19,7 +20,7 @@
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -170,23 +171,7 @@ async function runBenchmark() {
     if (res.status !== 0) throw new Error("Extension build failed.");
   }
 
-  const cdp = await connectChrome({ devtoolsPort: Number(args.port) || 0 });
-  // A transient socket error (the tunnel or the test browser blipping) must not crash the
-  // whole run; the current task's checks below will see a dead connection and fail it.
-  cdp.on("error", (err) => console.error(`CDP socket error: ${err.message}`));
-  // A fresh launch opens the panel itself, but that race occasionally loses: the action
-  // can fire before the service worker has set the panel to open on click, and then
-  // nothing opens. Keep asking the keeper to open it, same as `browser-agent open` does.
-  let sidepanelTarget = await waitForSidepanel(cdp, 3000).catch(() => null);
-  for (let attempt = 0; !sidepanelTarget && attempt < 12; attempt++) {
-    const { keeper } = browserProcesses();
-    if (keeper) process.kill(keeper, "SIGUSR2");
-    sidepanelTarget = await waitForSidepanel(cdp, 5000).catch(() => null);
-  }
-  if (!sidepanelTarget) throw new Error("The extension's side panel never opened.");
-  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: sidepanelTarget.targetId, flatten: true });
-
-  await installBridge(cdp, sessionId);
+  const { cdp, sessionId } = await startBrowser(connectChrome, browserProcesses);
 
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
@@ -210,6 +195,7 @@ async function runBenchmark() {
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
       try {
+        openEventLog(task, run);
         result = await runTask(cdp, sessionId, task, Number(args.timeout));
       } catch (err) {
         // A dropped connection (tunnel or test browser blip) fails this task instead of
@@ -252,15 +238,58 @@ async function runBenchmark() {
   console.log(`\nCleaned up temp profile ${home}.`);
 }
 
-async function waitForSidepanel(cdp, timeoutMs = 15000) {
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    const { targetInfos } = await cdp.send("Target.getTargets");
-    const panel = targetInfos.find((t) => t.type === "page" && t.url.endsWith("/sidepanel.html"));
-    if (panel) return panel;
-    await sleep(200);
+// Opens the test browser and returns a CDP client plus a session on the side panel whose
+// controller answers. Real Chrome on a virtual display sometimes dies or leaves a
+// panel that never answers right after launch (opening the panel twice closes it, and Chrome
+// has crashed outright), so each attempt is bounded and a failed one starts a fresh browser.
+async function startBrowser(connectChrome, browserProcesses) {
+  const bounded = (promise, ms) => Promise.race([promise, sleep(ms).then(() => null)]);
+  const alive = () => browserProcesses().chrome != null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    let cdp = null;
+    try {
+      cdp = await connectChrome({ devtoolsPort: Number(args.port) || 0 });
+      // A transient socket error (the tunnel or the test browser blipping) must not crash the
+      // whole run; the current task's checks below will see a dead connection and fail it.
+      cdp.on("error", (err) => console.error(`CDP socket error: ${err.message}`));
+      let nudged = Date.now() - 9000;
+      const end = Date.now() + 60000;
+      while (Date.now() < end && alive()) {
+        const targets = await bounded(cdp.send("Target.getTargets"), 5000);
+        const panel = targets?.targetInfos.find((t) => t.type === "page" && t.url.endsWith("/sidepanel.html"));
+        if (!panel) {
+          if (Date.now() - nudged > 12000) {
+            nudged = Date.now();
+            const { keeper } = browserProcesses();
+            if (keeper) process.kill(keeper, "SIGUSR2");
+          }
+          await sleep(500);
+          continue;
+        }
+        const attached = await bounded(cdp.send("Target.attachToTarget", { targetId: panel.targetId, flatten: true }), 5000);
+        if (!attached) break;
+        const { sessionId } = attached;
+        if (!(await bounded(installBridge(cdp, sessionId), 5000))) break;
+        const reset = await bounded(cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId), 5000);
+        if (reset) return { cdp, sessionId };
+        break;
+      }
+    } catch (err) {
+      console.error(`  -> browser start failed: ${err.message}`);
+    }
+    console.error(`  -> browser start attempt ${attempt} did not reach a working side panel${alive() ? "" : " (Chrome exited)"}; starting a fresh browser`);
+    try {
+      cdp?.close();
+    } catch {}
+    const { chrome } = browserProcesses();
+    if (chrome) {
+      process.kill(chrome, "SIGTERM");
+      const gone = Date.now() + 10000;
+      while (browserProcesses().chrome && Date.now() < gone) await sleep(200);
+    }
+    await sleep(2000);
   }
-  throw new Error("The extension's side panel never opened.");
+  throw new Error("The extension's side panel never answered.");
 }
 
 // Injects a small bridge: a client connected to the in-page controller, whose events are
@@ -275,7 +304,7 @@ async function installBridge(cdp, sessionId) {
       return true;
     })()
   `;
-  await cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);
+  return cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);
 }
 
 async function setConfig(cdp, sessionId, config) {
@@ -283,9 +312,38 @@ async function setConfig(cdp, sessionId, config) {
   await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, sessionId);
 }
 
+// Every agent event of a task goes to bench-results/<run-id>/<task>.events.jsonl, one JSON
+// line each with the time it was drained, so a stalled task shows where it hung. Values under
+// credential-looking keys are replaced before anything is written.
+let eventLogPath = null;
+const SECRET_KEY = /key|token|secret|password|authorization|credential/i;
+
+function redact(value) {
+  if (Array.isArray(value)) return value.map(redact);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, SECRET_KEY.test(k) ? "[redacted]" : redact(v)]));
+  }
+  return value;
+}
+
+function logEvent(entry) {
+  if (!eventLogPath) return;
+  try {
+    appendFileSync(eventLogPath, JSON.stringify(redact({ t: Date.now(), ...entry })) + "\n");
+  } catch {}
+}
+
+function openEventLog(task, run) {
+  const dir = join(RESULTS_DIR, runId);
+  mkdirSync(dir, { recursive: true });
+  eventLogPath = join(dir, `${task.id}${Number(args.runs) > 1 ? `.run${run}` : ""}.events.jsonl`);
+}
+
 async function drainEvents(cdp, sessionId) {
   const { result } = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify(window.__bench.events.splice(0))", returnByValue: true }, sessionId);
-  return JSON.parse(result.value);
+  const events = JSON.parse(result.value);
+  for (const e of events) logEvent({ event: e });
+  return events;
 }
 
 // Fixed permission policy: allow ordinary prompts (safety checks, new-site approvals),
@@ -400,6 +458,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     }
     if (!finished) {
       timedOut = true;
+      logEvent({ marker: "timeout" });
+      logEvent({ marker: "stop_sent" });
       await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
       // Stop ends the task at once; the wait is bounded for an agent that does not answer,
       // since the next "run" would be rejected as "already running" if we moved on early.
@@ -415,6 +475,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     }
   }
   const wallMs = Date.now() - started;
+  logEvent({ marker: "task_end", timedOut });
 
   const steps = events.filter((e) => e.type === "tool_call").length;
   const usage = [...events].reverse().find((e) => e.type === "usage");
