@@ -20,6 +20,7 @@
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +32,7 @@ const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
 
 function parseArgs(argv) {
-  const args = { runs: 1, timeout: 240000, port: 0 };
+  const args = { runs: 1, timeout: 240000, port: 0, "stall-ms": 120000, gate: "http://127.0.0.1:8090" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) continue;
@@ -51,7 +52,7 @@ const args = parseArgs(process.argv.slice(2));
 const taskFilePath = args.taskfile ? join(PROJECT_DIR, "scripts", "bench", args.taskfile) : join(PROJECT_DIR, "scripts", "bench", "tasks.js");
 const { TASKS } = await import(`file://${taskFilePath}`);
 if (!args.provider || !args.model) {
-  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--thinking on|off]");
+  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--stall-ms ms] [--gate url] [--thinking on|off]");
   process.exit(1);
 }
 
@@ -192,6 +193,7 @@ async function runBenchmark() {
         console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
         process.exit(1);
       }
+      await waitServerIdle();
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
       try {
@@ -231,11 +233,34 @@ async function runBenchmark() {
     const end = Date.now() + 10000;
     while (browserProcesses().chrome && Date.now() < end) await sleep(200);
   }
+  await removeProfile(home);
+}
 
-  // Already written after the last task in the loop above (including when rows is empty,
-  // nothing was ever written, which is fine - an all-resumed/empty run has nothing to report).
-  rmSync(home, { recursive: true, force: true });
-  console.log(`\nCleaned up temp profile ${home}.`);
+// Pids of every process (Chrome main, helpers, crashpad) still holding the profile dir.
+function profileHolders(home) {
+  try {
+    return execFileSync("ps", ["-ax", "-o", "pid=,command="], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
+      .split("\n")
+      .filter((row) => row.includes(home))
+      .map((row) => Number(row.trim().split(/\s+/)[0]))
+      .filter((pid) => pid && pid !== process.pid);
+  } catch {
+    return [];
+  }
+}
+
+// Results are already on disk when this runs, so nothing here may fail the run. Chrome
+// helpers keep writing into the profile for a moment after the main process exits: wait for
+// them to go, then retry the removal, and only warn if the directory still will not go.
+async function removeProfile(home) {
+  const gone = Date.now() + 15000;
+  while (profileHolders(home).length && Date.now() < gone) await sleep(200);
+  try {
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    console.log(`\nCleaned up temp profile ${home}.`);
+  } catch (err) {
+    console.warn(`\nWarning: could not remove temp profile ${home}: ${err.message}`);
+  }
 }
 
 // Opens the test browser and returns a CDP client plus a session on the side panel whose
@@ -381,6 +406,48 @@ async function readActiveTab(cdp, sessionId) {
   return { url, title, pageText };
 }
 
+// After a stalled request is stopped, the model server may still be generating for it.
+// Starting the next task on a busy slot would queue behind (or be starved by) the wedged
+// request, so wait until the server reports idle. llama-server's /slots says so directly
+// when it is reachable without a model name; otherwise the gate's /gaming/status `active`
+// count stands in. Both reads are bounded, and a server that never settles is logged, not fatal.
+const IDLE_WAIT_MS = 180000;
+let serverMayBeBusy = false;
+
+async function serverBusy() {
+  const base = (args.baseUrl || args["base-url"] || "").replace(/\/v1\/?$/, "").replace(/\/$/, "");
+  for (const root of [args.gate, base].filter(Boolean)) {
+    try {
+      const res = await fetch(`${root.replace(/\/$/, "")}/slots`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const slots = await res.json();
+        if (Array.isArray(slots)) return slots.some((s) => s.is_processing);
+      }
+    } catch {}
+  }
+  try {
+    const res = await fetch(`${args.gate.replace(/\/$/, "")}/gaming/status`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) return Number((await res.json()).active) > 0;
+  } catch {}
+  return false;
+}
+
+async function waitServerIdle() {
+  if (!serverMayBeBusy) return;
+  const deadline = Date.now() + IDLE_WAIT_MS;
+  let waited = false;
+  while (await serverBusy()) {
+    if (Date.now() >= deadline) {
+      console.error(`  -> server still busy after ${IDLE_WAIT_MS / 1000}s; starting the next task anyway`);
+      break;
+    }
+    if (!waited) console.error("  -> waiting for the model server to finish the stalled request");
+    waited = true;
+    await sleep(2000);
+  }
+  serverMayBeBusy = false;
+}
+
 // How long to wait for the agent to report stopped after a timed-out task.
 const STOP_GRACE_MS = 120000;
 
@@ -396,7 +463,10 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   const end = started + timeoutMs;
   const events = [];
   let timedOut = false;
+  let stalled = false;
   let agentError = null;
+  const stallMs = Number(args["stall-ms"]);
+  let lastActivity = Date.now();
 
   for (let i = 0; i < prompts.length && !timedOut && !agentError; i++) {
     const prompt = prompts[i];
@@ -430,6 +500,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     // turn, and an error the agent ended it with (a run it rejected or that threw before
     // the task began sends no status at all, so waiting out the timeout would hide why).
     const take = async (batch) => {
+      if (batch.length) lastActivity = Date.now();
       for (const e of batch) {
         events.push(e);
         if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
@@ -447,7 +518,12 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     // An iteration that loses the race still records what it drains when it lands: Stop,
     // sent right after, ends the task at once, and its events would otherwise be drained
     // by that iteration and lost, leaving the stop-grace wait below to time out.
+    lastActivity = Date.now();
     while (!finished && Date.now() < end) {
+      if (stallMs > 0 && Date.now() - lastActivity >= stallMs) {
+        stalled = true;
+        break;
+      }
       const remaining = end - Date.now();
       const iteration = sleep(300).then(() => drainEvents(cdp, sessionId)).then(take);
       const inTime = await Promise.race([iteration.then(() => true), sleep(remaining).then(() => false)]);
@@ -458,7 +534,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     }
     if (!finished) {
       timedOut = true;
-      logEvent({ marker: "timeout" });
+      serverMayBeBusy = true;
+      logEvent({ marker: stalled ? "stalled" : "timeout", ...(stalled ? { idleMs: Date.now() - lastActivity } : {}) });
       logEvent({ marker: "stop_sent" });
       await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"stop"})', returnByValue: true }, sessionId);
       // Stop ends the task at once; the wait is bounded for an agent that does not answer,
@@ -487,7 +564,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   if (agentError) {
     verdict = { ok: false, reason: `agent error: ${agentError}` };
   } else if (timedOut) {
-    verdict = { ok: false, reason: `timed out after ${timeoutMs / 1000}s` };
+    verdict = { ok: false, reason: stalled ? `stalled: no events for ${stallMs / 1000}s, stopped` : `timed out after ${timeoutMs / 1000}s` };
   } else {
     try {
       verdict = task.check({ finalUrl, pageText, reply, events });
