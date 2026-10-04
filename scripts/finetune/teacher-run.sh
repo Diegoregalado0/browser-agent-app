@@ -12,7 +12,7 @@
 # from the VM's attached service account and the bench lock is not used.
 #
 # Usage: teacher-run.sh [passes]   (default 5)
-# Env:   MODEL (gemini-3.8-flash), MAX_USD (15), TIMEOUT_MS (300000), POLL_S (300),
+# Env:   MODEL (gemini-3.8-flash), MAX_USD (15), TIMEOUT_MS (300000), POLL_S (300), EXCLUDE,
 #        BUCKET (gs://YOUR_GCS_BUCKET), GCLOUD_PROJECT (YOUR_GCP_PROJECT)
 # Auth:  short-lived access tokens for the teacher service account, which run.js gets from
 #        gcloud by impersonation as GCLOUD_ACCOUNT; no key or token is stored.
@@ -24,6 +24,9 @@ MODEL="${MODEL:-gemini-3.8-flash}"
 MAX_USD="${MAX_USD:-15}"
 TIMEOUT_MS="${TIMEOUT_MS:-300000}"
 POLL_S="${POLL_S:-300}"
+# heroku-js-alert leaves a JavaScript dialog open that stalls the agent until the timeout,
+# so it costs a full timeout per pass for no trajectory.
+EXCLUDE="${EXCLUDE:-heroku-js-alert}"
 BUCKET="${BUCKET:-gs://YOUR_GCS_BUCKET}"
 GCLOUD_PROJECT="${GCLOUD_PROJECT:-YOUR_GCP_PROJECT}"
 GCLOUD_ACCOUNT="YOUR_GCP_ACCOUNT"
@@ -76,7 +79,7 @@ for pass in $(seq 1 "$PASSES"); do
   touch "$OUT/.start"
   say "pass $pass: $MODEL on the train split, ceiling \$$MAX_USD"
   xvfb-run -a -s "-screen 0 1920x1080x24" node scripts/bench/run.js --provider gemini --model "$MODEL" \
-    --taskfile tasks-extended.js --split train --runs 1 --timeout "$TIMEOUT_MS" \
+    --taskfile tasks-extended.js --split train --exclude "$EXCLUDE" --runs 1 --timeout "$TIMEOUT_MS" \
     --max-usd "$MAX_USD" --ledger "$LEDGER" --vertex-project "$GCLOUD_PROJECT" \
     "${auth[@]}" >>"$LOG" 2>&1
   code=$?

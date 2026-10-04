@@ -16,7 +16,7 @@
 //
 // Flags: --provider --model --runs N --tasks a,b --split train|heldout --host --base-url
 //        --timeout(ms) --port (DevTools port; 0 = any free one) --thinking on|off
-//        --max-usd --ledger --task-reserve-usd
+//        --exclude a,b --max-usd --ledger --task-reserve-usd
 //        --vertex-project ID [--vertex-sa EMAIL] [--gcloud-account EMAIL] (gemini only)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged. The gemini
@@ -79,8 +79,10 @@ if (!["on", "off"].includes(thinkingArg)) throw new Error('--thinking must be "o
 const thinking = thinkingArg === "on";
 
 const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
-// --split keeps only the tasks of one split (tasks-extended.js marks each train or heldout).
-const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id) && (!args.split || t.split === args.split));
+// --split keeps only the tasks of one split (tasks-extended.js marks each train or heldout);
+// --exclude a,b drops tasks by id.
+const excluded = args.exclude ? args.exclude.split(",").map((s) => s.trim()) : [];
+const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id) && (!args.split || t.split === args.split) && !excluded.includes(t.id));
 if (!selectedTasks.length) {
   console.error(`No matching tasks for --tasks ${args.tasks}. Known ids: ${TASKS.map((t) => t.id).join(", ")}`);
   process.exit(1);
@@ -533,7 +535,13 @@ async function readActiveTab(cdp, sessionId) {
     const tabTarget = targetInfos.find((t) => t.type === "page" && t.url === url);
     if (tabTarget) {
       const { sessionId: tabSession } = await cdp.send("Target.attachToTarget", { targetId: tabTarget.targetId, flatten: true });
-      const textEval = await cdp.send("Runtime.evaluate", { expression: "document.body ? document.body.innerText.slice(0, 8000) : ''", returnByValue: true }, tabSession);
+      // A page left showing a JavaScript dialog never answers Runtime.evaluate, which would
+      // hang the whole run: the dialog is accepted first, and the read is bounded.
+      await cdp.send("Page.handleJavaScriptDialog", { accept: true }, tabSession).catch(() => {});
+      const textEval = await Promise.race([
+        cdp.send("Runtime.evaluate", { expression: "document.body ? document.body.innerText.slice(0, 8000) : ''", returnByValue: true }, tabSession),
+        sleep(10000).then(() => ({ result: { value: "" } })),
+      ]);
       pageText = textEval.result.value || "";
       await cdp.send("Target.detachFromTarget", { sessionId: tabSession });
     }
