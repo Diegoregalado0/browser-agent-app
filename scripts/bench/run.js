@@ -632,6 +632,13 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   );
   const turnToolCalls = turnStarts.map((start, i) => events.slice(start, turnStarts[i + 1] ?? events.length).filter((e) => e.type === "tool_call").length);
 
+  const context = { finalUrl, pageText, reply, events, formValues, tabCount, turnReplies, turnToolCalls };
+  // The share of expected values right, read even off a task that ended in an error or a
+  // timeout: how far it got before it broke.
+  let score;
+  try {
+    score = task.check(context).score;
+  } catch {}
   let verdict;
   if (agentError) {
     verdict = { ok: false, reason: `agent error: ${agentError}` };
@@ -639,7 +646,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     verdict = { ok: false, reason: stalled ? `stalled: no events for ${stallMs / 1000}s, stopped` : `timed out after ${timeoutMs / 1000}s` };
   } else {
     try {
-      verdict = task.check({ finalUrl, pageText, reply, events, formValues, tabCount, turnReplies, turnToolCalls });
+      verdict = task.check(context);
     } catch (err) {
       verdict = { ok: false, reason: `checker threw: ${err.message}` };
     }
@@ -653,7 +660,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     tokensOut: usage?.usage?.output ?? 0,
     wallMs,
     startedAt: new Date(started).toISOString(),
-    metrics: { ...taskMetrics(events, { agentError, timedOut, stalled }), score: verdict.score },
+    metrics: { ...taskMetrics(events, { agentError, timedOut, stalled }), score },
   };
 }
 
