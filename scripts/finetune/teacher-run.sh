@@ -14,7 +14,7 @@
 # Auth:  short-lived access tokens for the teacher service account, which run.js gets from
 #        gcloud by impersonation as GCLOUD_ACCOUNT; no key or token is stored.
 set -u
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/google-cloud-sdk/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PASSES="${1:-5}"
 MODEL="${MODEL:-gemini-3.8-flash}"
