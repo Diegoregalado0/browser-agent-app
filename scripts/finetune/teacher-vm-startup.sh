@@ -46,7 +46,7 @@ trap finish EXIT
 
 say "setup: packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q >/dev/null && apt-get install -yq xvfb xauth git curl ca-certificates fonts-liberation >/dev/null || { say "apt failed"; exit 1; }
+apt-get update -q >/dev/null && apt-get install -yq xvfb xauth git curl zip ca-certificates fonts-liberation >/dev/null || { say "apt failed"; exit 1; }
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null && apt-get install -yq nodejs >/dev/null || { say "node install failed"; exit 1; }
 curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
   && apt-get install -yq /tmp/chrome.deb >/dev/null || { say "chrome install failed"; exit 1; }
