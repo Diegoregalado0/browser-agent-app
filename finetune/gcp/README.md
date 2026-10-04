@@ -3,9 +3,11 @@
 Trains a LoRA adapter for a Browsby base model on one rented GPU, then brings it back as a GGUF
 adapter for `llama-server --lora`. Method and background: `experiments/finetune/RESEARCH.md`.
 
-Project `YOUR_GCP_PROJECT` ("Browsby fine-tune"), billing account `XXXXXX-XXXXXX-XXXXXX`,
-budget "Browsby fine-tune 300" ($300, alerts at 50, 90 and 100 percent of spend before credits,
-mailed to the billing admins). Every setting lives in `config.sh` and can be overridden from the
+Project `YOUR_GCP_PROJECT` (owned by YOUR_GCP_ACCOUNT, where the GPU
+quota was granted), billing account `XXXXXX-XXXXXX-XXXXXX`, budget "browsby-ft YOUR_GCP_PROJECT
+300" ($300, alerts at 50, 90 and 100 percent, mailed to the billing admins). The training VM runs
+as its own service account `browsby-trainer-vm`, which `launch.sh` creates with instance admin on the
+project and object admin on the bucket. Every setting lives in `config.sh` and can be overridden from the
 environment.
 
 ## One command
@@ -23,7 +25,7 @@ runs `teardown.sh` on exit whatever happens.
 | Script | What it does |
 |---|---|
 | `prepare-data.mjs` | Runs the trajectory exporter over `~/bench-results`, drops held-out benchmark sites, splits the rest into train and eval by site, writes one example per assistant turn with the agent's tool definitions to `data/`. Exits 2 below `MIN_TRAJECTORIES` (300) unless `--force`. |
-| `launch.sh` | Creates the bucket if needed, uploads data and `train.py`, creates the VM (Spot by default) with `--max-run-duration`, termination action DELETE and `startup.sh`. Prints the run id. |
+| `launch.sh` | Creates the bucket if needed, uploads data and `train.py`, creates the VM service account if missing, creates the VM (Spot by default) with `--max-run-duration`, termination action DELETE and `startup.sh`. Prints the run id. |
 | `startup.sh` | On the VM: installs Unsloth, trains with a deadline, converts the adapter to GGUF, uploads adapter, GGUF, metrics and logs to `gs://BUCKET/runs/RUN_ID/`, then deletes its own VM. A watchdog powers it off at `MAX_RUN_HOURS`. |
 | `train.py` | Unsloth LoRA, text only, loss on the last assistant turn of each example, router and vision frozen. |
 | `fetch.sh RUN_ID` | Downloads the run into `out/RUN_ID/`; converts to GGUF locally with `~/llama.cpp/convert_lora_to_gguf.py` if the VM did not. |

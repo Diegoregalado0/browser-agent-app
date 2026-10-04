@@ -4,7 +4,16 @@
 
 PROJECT="${PROJECT:-YOUR_GCP_PROJECT}"
 REGION="${REGION:-us-central1}"
-BUCKET="${BUCKET:-gs://${PROJECT}-data}"
+BUCKET="${BUCKET:-gs://YOUR_GCS_BUCKET}"
+
+# The project belongs to this account; every gcloud call in the pipeline runs as it, billed to PROJECT.
+GCP_ACCOUNT="${GCP_ACCOUNT:-YOUR_GCP_ACCOUNT}"
+export CLOUDSDK_CORE_ACCOUNT="$GCP_ACCOUNT" CLOUDSDK_CORE_PROJECT="$PROJECT" CLOUDSDK_BILLING_QUOTA_PROJECT="$PROJECT"
+
+# Identity of the training VM: writes to BUCKET and deletes its own VM. launch.sh creates it and
+# grants those two roles when it is missing, so the project's default compute account stays as it is.
+VM_SA_NAME="${VM_SA_NAME:-browsby-trainer-vm}"
+VM_SERVICE_ACCOUNT="${VM_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 # Base model key, see model_profile below.
 BASE_MODEL="${BASE_MODEL:-qwen3.5-9b}"
@@ -23,6 +32,8 @@ IMAGE_FAMILY="${IMAGE_FAMILY:-common-cu129-ubuntu-2204-nvidia-580}"
 LORA_RANK="${LORA_RANK:-16}"
 LEARNING_RATE="${LEARNING_RATE:-1e-4}"
 EPOCHS="${EPOCHS:-2}"
+# Stops training after this many optimizer steps when above 0 (smoke runs); 0 trains all epochs.
+MAX_STEPS="${MAX_STEPS:-0}"
 MAX_SEQ_LEN="${MAX_SEQ_LEN:-16384}"
 UNSLOTH_SPEC="${UNSLOTH_SPEC:-unsloth unsloth_zoo}"
 

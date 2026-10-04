@@ -7,7 +7,7 @@ The router of MoE models stays frozen and the vision tower is not touched (text-
 
 Usage:
   python train.py --model Qwen/Qwen3.5-9B --loader dense --train train.jsonl --eval eval.jsonl \
-      --out adapter [--load-4bit] [--rank 16] [--lr 1e-4] [--epochs 2] [--max-seq-len 16384]
+      --out adapter [--load-4bit] [--rank 16] [--lr 1e-4] [--epochs 2] [--max-seq-len 16384] [--max-steps N]
 """
 
 import argparse
@@ -29,6 +29,7 @@ def parse_args():
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--epochs", type=float, default=2)
     p.add_argument("--max-seq-len", type=int, default=16384)
+    p.add_argument("--max-steps", type=int, default=0, help="stop after this many steps when above 0")
     p.add_argument("--batch", type=int, default=1)
     p.add_argument("--grad-accum", type=int, default=8)
     p.add_argument("--deadline", type=float, default=0, help="unix time to stop training and save")
@@ -135,6 +136,7 @@ def main():
             per_device_eval_batch_size=1,
             gradient_accumulation_steps=args.grad_accum,
             num_train_epochs=args.epochs,
+            max_steps=args.max_steps if args.max_steps > 0 else -1,
             learning_rate=args.lr,
             lr_scheduler_type="cosine",
             warmup_steps=max(1, steps_per_epoch // 10),

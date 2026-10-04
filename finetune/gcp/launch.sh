@@ -46,10 +46,19 @@ if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud storage buckets describe "$BUCKET" --pr
   run gcloud storage buckets create "$BUCKET" --project "$PROJECT" --location "$REGION" \
     --uniform-bucket-level-access --public-access-prevention
 fi
+if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud iam service-accounts describe "$VM_SERVICE_ACCOUNT" --project "$PROJECT" >/dev/null 2>&1; then
+  run gcloud iam service-accounts create "$VM_SA_NAME" --project "$PROJECT" --display-name "Browsby fine-tune VM"
+  run gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
+    --role roles/compute.instanceAdmin.v1 --condition None --quiet --format none
+fi
+if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud storage buckets get-iam-policy "$BUCKET" --format json | grep -q "serviceAccount:$VM_SERVICE_ACCOUNT"; then
+  run gcloud storage buckets add-iam-policy-binding "$BUCKET" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
+    --role roles/storage.objectAdmin --format none
+fi
 run gcloud storage cp "$DATA_DIR/train.jsonl" "$DATA_DIR/eval.jsonl" "$DATA_DIR/manifest.json" "$DEST/data/"
 run gcloud storage cp "$HERE/train.py" "$DEST/train.py"
 
-TRAIN_ARGS="--rank $LORA_RANK --lr $LEARNING_RATE --epochs $EPOCHS --max-seq-len $MAX_SEQ_LEN"
+TRAIN_ARGS="--rank $LORA_RANK --lr $LEARNING_RATE --epochs $EPOCHS --max-seq-len $MAX_SEQ_LEN --max-steps $MAX_STEPS"
 run gcloud compute instances create "$VM" \
   --project "$PROJECT" --zone "$ZONE" \
   --machine-type "$MACHINE_TYPE" \
@@ -59,7 +68,7 @@ run gcloud compute instances create "$VM" \
   --max-run-duration="${MAX_RUN_HOURS}h" \
   --image-project "$IMAGE_PROJECT" --image-family "$IMAGE_FAMILY" \
   --boot-disk-size "${DISK_GB}GB" --boot-disk-type pd-balanced --boot-disk-auto-delete \
-  --scopes cloud-platform \
+  --service-account "$VM_SERVICE_ACCOUNT" --scopes cloud-platform \
   --labels "$LABEL_KEY=$LABEL_VALUE,run=${RUN_ID:0:63}" \
   --metadata "install-nvidia-driver=True,bucket=$BUCKET,run_id=$RUN_ID,hf_model=$HF_MODEL,loader=$LOADER,load_4bit=$LOAD_4BIT,max_hours=$MAX_RUN_HOURS,unsloth_spec=$UNSLOTH_SPEC,train_args=$TRAIN_ARGS" \
   --metadata-from-file startup-script="$HERE/startup.sh"
