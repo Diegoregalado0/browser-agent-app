@@ -2,13 +2,51 @@
 # Settings for the Google Cloud LoRA pipeline, sourced by every script in this directory.
 # Any variable can be overridden from the environment, for example BASE_MODEL=qwen3.5-4b.
 
-PROJECT="${PROJECT:-YOUR_GCP_PROJECT}"
+# The only account, project and billing account the pipeline may ever use. These are constants, not
+# environment overridable; guard_gcp refuses to run anything else.
+readonly ALLOWED_ACCOUNT="YOUR_GCP_ACCOUNT"
+readonly ALLOWED_PROJECT="YOUR_GCP_PROJECT"
+readonly ALLOWED_BILLING="billingAccounts/XXXXXX-XXXXXX-XXXXXX"
+
+PROJECT="${PROJECT:-$ALLOWED_PROJECT}"
 REGION="${REGION:-us-central1}"
 BUCKET="${BUCKET:-gs://YOUR_GCS_BUCKET}"
+GCP_ACCOUNT="${GCP_ACCOUNT:-$ALLOWED_ACCOUNT}"
+export CLOUDSDK_CORE_ACCOUNT="$GCP_ACCOUNT" CLOUDSDK_CORE_PROJECT="$PROJECT"
 
-# The project belongs to this account; every gcloud call in the pipeline runs as it, billed to PROJECT.
-GCP_ACCOUNT="${GCP_ACCOUNT:-YOUR_GCP_ACCOUNT}"
-export CLOUDSDK_CORE_ACCOUNT="$GCP_ACCOUNT" CLOUDSDK_CORE_PROJECT="$PROJECT" CLOUDSDK_BILLING_QUOTA_PROJECT="$PROJECT"
+# Every gcloud call in the pipeline goes through this, so the account and project are explicit and a
+# changed gcloud default cannot redirect it.
+gcp() {
+  command gcloud --account "$GCP_ACCOUNT" --project "$PROJECT" "$@"
+}
+
+# Fails unless the active account, the target project and its billing account are the allowed ones
+# and billing is enabled. Runs read-only gcloud calls only. GUARD_SIMULATE=account|billing corrupts
+# the observed value to prove the refusal; it can only make the guard stricter.
+guard_gcp() {
+  local active billing enabled
+  active=$(env -u CLOUDSDK_CORE_ACCOUNT gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -n 1)
+  [ "${GUARD_SIMULATE:-}" = "account" ] && active="${active}.simulated"
+  if [ "$active" != "$ALLOWED_ACCOUNT" ] || [ "$GCP_ACCOUNT" != "$ALLOWED_ACCOUNT" ]; then
+    echo "guard: refusing to run. Active gcloud account '${active}' and pipeline account '${GCP_ACCOUNT}' must both be exactly ${ALLOWED_ACCOUNT}." >&2
+    exit 1
+  fi
+  if [ "$PROJECT" != "$ALLOWED_PROJECT" ]; then
+    echo "guard: refusing to run. Project '${PROJECT}' is not ${ALLOWED_PROJECT}." >&2
+    exit 1
+  fi
+  billing=$(gcp billing projects describe "$PROJECT" --format='value(billingAccountName)' 2>/dev/null || true)
+  enabled=$(gcp billing projects describe "$PROJECT" --format='value(billingEnabled)' 2>/dev/null || true)
+  [ "${GUARD_SIMULATE:-}" = "billing" ] && billing="${billing}-simulated"
+  if [ "$billing" != "$ALLOWED_BILLING" ]; then
+    echo "guard: refusing to run. Billing account of ${PROJECT} is '${billing}', must be exactly ${ALLOWED_BILLING}." >&2
+    exit 1
+  fi
+  if [ "$enabled" != "True" ]; then
+    echo "guard: refusing to run. Billing is not enabled on ${PROJECT}." >&2
+    exit 1
+  fi
+}
 
 # Identity of the training VM: writes to BUCKET and deletes its own VM. launch.sh creates it and
 # grants those two roles when it is missing, so the project's default compute account stays as it is.

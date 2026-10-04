@@ -3,9 +3,10 @@
 Trains a LoRA adapter for a Browsby base model on one rented GPU, then brings it back as a GGUF
 adapter for `llama-server --lora`. Method and background: `experiments/finetune/RESEARCH.md`.
 
-Project `YOUR_GCP_PROJECT` (owned by YOUR_GCP_ACCOUNT, where the GPU
-quota was granted), billing account `XXXXXX-XXXXXX-XXXXXX`, budget "browsby-ft YOUR_GCP_PROJECT
-300" ($300, alerts at 50, 90 and 100 percent, mailed to the billing admins). The training VM runs
+Project `YOUR_GCP_PROJECT` (account YOUR_GCP_ACCOUNT), billing account
+`XXXXXX-XXXXXX-XXXXXX` (the $300 credit). Every script starts with `guard_gcp` from `config.sh`, which
+refuses to run unless the active gcloud account, the project and its billing account are exactly those
+and billing is enabled; all gcloud calls pass `--account` and `--project` explicitly. The training VM runs
 as its own service account `browsby-trainer-vm`, which `launch.sh` creates with instance admin on the
 project and object admin on the bucket. Every setting lives in `config.sh` and can be overridden from the
 environment.

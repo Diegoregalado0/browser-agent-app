@@ -10,6 +10,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=finetune/gcp/config.sh
 . "$HERE/config.sh"
+guard_gcp
 
 DATA_DIR="$HERE/data"
 RUN_ID=""
@@ -36,28 +37,28 @@ done
 
 echo "run $RUN_ID: $BASE_MODEL ($HF_MODEL) on $MACHINE_TYPE, $GPU_DESC, $ZONE, spot=$SPOT, disk ${DISK_GB}GB, max ${MAX_RUN_HOURS}h, 4bit=$LOAD_4BIT, seq $MAX_SEQ_LEN, rank $LORA_RANK, epochs $EPOCHS"
 
-if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud storage buckets describe "$BUCKET" --project "$PROJECT" >/dev/null 2>&1; then
-  run gcloud storage buckets create "$BUCKET" --project "$PROJECT" --location "$REGION" \
+if [ "${DRY_RUN:-0}" = "1" ] || ! gcp storage buckets describe "$BUCKET" >/dev/null 2>&1; then
+  run gcp storage buckets create "$BUCKET" --location "$REGION" \
     --uniform-bucket-level-access --public-access-prevention
 fi
-if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud iam service-accounts describe "$VM_SERVICE_ACCOUNT" --project "$PROJECT" >/dev/null 2>&1; then
-  run gcloud iam service-accounts create "$VM_SA_NAME" --project "$PROJECT" --display-name "Browsby fine-tune VM"
-  run gcloud projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
+if [ "${DRY_RUN:-0}" = "1" ] || ! gcp iam service-accounts describe "$VM_SERVICE_ACCOUNT" >/dev/null 2>&1; then
+  run gcp iam service-accounts create "$VM_SA_NAME" --display-name "Browsby fine-tune VM"
+  run gcp projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
     --role roles/compute.instanceAdmin.v1 --condition None --quiet --format none
 fi
-if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud storage buckets get-iam-policy "$BUCKET" --format json | grep -q "serviceAccount:$VM_SERVICE_ACCOUNT"; then
-  run gcloud storage buckets add-iam-policy-binding "$BUCKET" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
+if [ "${DRY_RUN:-0}" = "1" ] || ! gcp storage buckets get-iam-policy "$BUCKET" --format json | grep -q "serviceAccount:$VM_SERVICE_ACCOUNT"; then
+  run gcp storage buckets add-iam-policy-binding "$BUCKET" --member "serviceAccount:$VM_SERVICE_ACCOUNT" \
     --role roles/storage.objectAdmin --format none
 fi
-run gcloud storage cp "$DATA_DIR/train.jsonl" "$DATA_DIR/eval.jsonl" "$DATA_DIR/manifest.json" "$DEST/data/"
-run gcloud storage cp "$HERE/train.py" "$DEST/train.py"
+run gcp storage cp "$DATA_DIR/train.jsonl" "$DATA_DIR/eval.jsonl" "$DATA_DIR/manifest.json" "$DEST/data/"
+run gcp storage cp "$HERE/train.py" "$DEST/train.py"
 
 TRAIN_ARGS="--rank $LORA_RANK --alpha $LORA_ALPHA --targets $LORA_TARGETS --lr $LEARNING_RATE --epochs $EPOCHS --max-seq-len $MAX_SEQ_LEN --grad-accum $GRAD_ACCUM --eval-steps $EVAL_STEPS --max-eval $MAX_EVAL --max-steps $MAX_STEPS"
 [ "$MERGE_16BIT" = "1" ] && TRAIN_ARGS="$TRAIN_ARGS --merge-16bit"
 create_vm() {
   local provisioning=$1
-  run gcloud compute instances create "$VM" \
-    --project "$PROJECT" --zone "$ZONE" \
+  run gcp compute instances create "$VM" \
+    --zone "$ZONE" \
     --machine-type "$MACHINE_TYPE" \
     "$provisioning" \
     --maintenance-policy=TERMINATE \

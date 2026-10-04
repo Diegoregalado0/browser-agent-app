@@ -12,6 +12,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=finetune/gcp/config.sh
 . "$HERE/config.sh"
+guard_gcp
 
 RUN_ID=""
 while [ $# -gt 0 ]; do
@@ -31,7 +32,7 @@ OUT="$HERE/out/$RUN_ID"
 SRC="$BUCKET/runs/$RUN_ID"
 
 run mkdir -p "$OUT"
-run gcloud storage cp -r "$SRC/*" "$OUT/"
+run gcp storage cp -r "$SRC/*" "$OUT/"
 if [ "${DRY_RUN:-0}" != "1" ]; then
   status=$(cat "$OUT/STATUS" 2>/dev/null || echo missing)
   echo "run status: $status"
