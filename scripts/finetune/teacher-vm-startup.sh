@@ -17,6 +17,8 @@ PASSES=$(md instance/attributes/passes)
 export PATH="/snap/bin:/usr/local/bin:/usr/bin:/bin"
 U=teacher
 H=/home/$U
+# sudo -u keeps the working directory, and the teacher user cannot read root's.
+cd /tmp
 PROGRESS=/var/log/teacher-progress.txt
 
 say() {
@@ -53,8 +55,8 @@ say "setup: node $(node -v), $(google-chrome --version)"
 id $U >/dev/null 2>&1 || useradd -m -s /bin/bash $U
 gcloud storage cp -q "$BUCKET/vm/teacher-data.bundle" /tmp/teacher-data.bundle || { say "bundle download failed"; exit 1; }
 chmod 644 /tmp/teacher-data.bundle
-sudo -u $U git clone -q -b teacher-data /tmp/teacher-data.bundle "$H/app" || { say "clone failed"; exit 1; }
-sudo -u $U bash -c "cd $H/app && npm ci --no-audit --no-fund >/dev/null 2>&1" || { say "npm ci failed"; exit 1; }
+sudo -u $U git clone -q -b teacher-data /tmp/teacher-data.bundle "$H/app" 2>/tmp/clone.err || { say "clone failed: $(tail -1 /tmp/clone.err)"; exit 1; }
+sudo -u $U bash -c "cd $H/app && npm ci --no-audit --no-fund >/tmp/npm.log 2>&1" || { say "npm ci failed: $(tail -1 /tmp/npm.log)"; exit 1; }
 say "setup done at $(sudo -u $U git -C "$H/app" rev-parse --short HEAD); starting $PASSES pass(es), ceiling \$$MAX_USD"
 
 ( while sleep 300; do sync_up; done ) &
