@@ -14,6 +14,12 @@
 //
 // Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
 //        --port (DevTools port; 0 = any free one) --thinking on|off
+// Stress flags (scripts/bench/tasks-limits.js and the soak): --max-steps N (default 60),
+//        --no-usage-limits (no per-task or daily token cap, no request pacing), --debug
+//        (debug events: per-request tokens and timing, context compactions),
+//        --max-hours H (start no new task after H hours), --sample-ms N (resource samples
+//        every N ms while a task runs, see stress-sampler.js), --recover-browser (start a
+//        fresh browser when the test browser dies mid-run instead of failing every task left).
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
@@ -27,6 +33,8 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { mergeConfig } from "../../src/config-core.js";
+import { taskMetrics } from "./stress-metrics.js";
+import { ResourceSampler } from "./stress-sampler.js";
 
 const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
@@ -37,7 +45,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith("--")) continue;
     const [k, inlineVal] = a.slice(2).split("=");
-    const val = inlineVal ?? argv[++i];
+    const flag = ["no-usage-limits", "debug", "recover-browser"].includes(k);
+    const val = flag ? (inlineVal ?? "1") : (inlineVal ?? argv[++i]);
     args[k] = val;
   }
   return args;
@@ -49,7 +58,11 @@ process.on("exit", (code) => console.error(`process exiting with code ${code}`))
 
 const args = parseArgs(process.argv.slice(2));
 // --taskfile picks an alternate task module (e.g. tasks-stress.js), same TASKS shape.
-const taskFilePath = args.taskfile ? join(PROJECT_DIR, "scripts", "bench", args.taskfile) : join(PROJECT_DIR, "scripts", "bench", "tasks.js");
+const taskFilePath = args.taskfile
+  ? args.taskfile.startsWith("/")
+    ? args.taskfile
+    : join(PROJECT_DIR, "scripts", "bench", args.taskfile)
+  : join(PROJECT_DIR, "scripts", "bench", "tasks.js");
 const { TASKS } = await import(`file://${taskFilePath}`);
 if (!args.provider || !args.model) {
   console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--stall-ms ms] [--gate url] [--thinking on|off]");
@@ -85,7 +98,9 @@ const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
 // Build the config the panel will read for this run. Reuses the app's own merge/validation
 // instead of hand-rolling a config shape.
 function buildConfig() {
-  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking };
+  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: Number(args["max-steps"]) || 60, thinking };
+  if (args["no-usage-limits"]) overrides.limits = { requestsPerMinute: 0, actionsPerMinute: 0, taskTokens: 0, dailyTokens: 0 };
+  if (args.debug) overrides.debugMode = true;
   overrides.models[args.provider] = args.model;
   if (args.provider === "ollama") {
     overrides.ollamaHost = args.host || "http://localhost:11436";
@@ -172,10 +187,13 @@ async function runBenchmark() {
     if (res.status !== 0) throw new Error("Extension build failed.");
   }
 
-  const { cdp, sessionId } = await startBrowser(connectChrome, browserProcesses);
+  let { cdp, sessionId } = await startBrowser(connectChrome, browserProcesses);
 
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
+  const runStarted = Date.now();
+  const maxMs = Number(args["max-hours"]) > 0 ? Number(args["max-hours"]) * 3600000 : Infinity;
+  let browserRestarts = 0;
 
   const rows = [...resumedRows];
   for (let run = 1; run <= Number(args.runs); run++) {
@@ -193,11 +211,17 @@ async function runBenchmark() {
         console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
         process.exit(1);
       }
+      if (Date.now() - runStarted >= maxMs) {
+        console.log(`\nStopping: --max-hours ${args["max-hours"]} reached.`);
+        break;
+      }
       await waitServerIdle();
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
+      const sampler = Number(args["sample-ms"]) > 0 ? new ResourceSampler(Number(args["sample-ms"])) : null;
       try {
         openEventLog(task, run);
+        sampler?.start(eventLogPath.replace(/\.events\.jsonl$/, ".resources.jsonl"));
         result = await runTask(cdp, sessionId, task, Number(args.timeout));
       } catch (err) {
         // A dropped connection (tunnel or test browser blip) fails this task instead of
@@ -205,7 +229,24 @@ async function runBenchmark() {
         // task flagged this way once the underlying disruption is resolved.
         console.error(`  -> harness error: ${err.message}`);
         result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
+        if (args["recover-browser"]) {
+          console.error("  -> starting a fresh browser for the remaining tasks");
+          try {
+            cdp.close();
+          } catch {}
+          const { chrome } = browserProcesses();
+          if (chrome) {
+            process.kill(chrome, "SIGTERM");
+            const gone = Date.now() + 10000;
+            while (browserProcesses().chrome && Date.now() < gone) await sleep(200);
+          }
+          ({ cdp, sessionId } = await startBrowser(connectChrome, browserProcesses));
+          await setConfig(cdp, sessionId, config);
+          browserRestarts++;
+          result.browserRestarted = true;
+        }
       }
+      const resources = sampler ? await sampler.stop() : null;
       const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
       rows.push({
         run,
@@ -218,6 +259,11 @@ async function runBenchmark() {
         tokensOut: result.tokensOut,
         wallMs: result.wallMs,
         costUsd: cost,
+        ...(task.dim ? { dim: task.dim, rung: task.rung } : {}),
+        startedAt: result.startedAt,
+        metrics: result.metrics,
+        ...(resources ? { resources } : {}),
+        ...(result.browserRestarted ? { browserRestarted: true, browserRestarts } : {}),
       });
       console.log(`  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s`);
       // Written after every task, not just at the end, so a crash mid-run only costs the
@@ -367,7 +413,11 @@ function openEventLog(task, run) {
 async function drainEvents(cdp, sessionId) {
   const { result } = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify(window.__bench.events.splice(0))", returnByValue: true }, sessionId);
   const events = JSON.parse(result.value);
-  for (const e of events) logEvent({ event: e });
+  const now = Date.now();
+  for (const e of events) {
+    logEvent({ event: e });
+    Object.defineProperty(e, "at", { value: now, enumerable: false });
+  }
   return events;
 }
 
@@ -387,12 +437,14 @@ async function readActiveTab(cdp, sessionId) {
   const expr = `
     (async () => {
       const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      return JSON.stringify({ url: tab?.url || "", title: tab?.title || "" });
+      const all = await chrome.tabs.query({});
+      return JSON.stringify({ url: tab?.url || "", title: tab?.title || "", tabCount: all.length });
     })()
   `;
   const { result } = await cdp.send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }, sessionId);
-  const { url, title } = JSON.parse(result.value);
+  const { url, title, tabCount } = JSON.parse(result.value);
   let pageText = "";
+  let formValues = [];
   try {
     const { targetInfos } = await cdp.send("Target.getTargets");
     const tabTarget = targetInfos.find((t) => t.type === "page" && t.url === url);
@@ -400,11 +452,20 @@ async function readActiveTab(cdp, sessionId) {
       const { sessionId: tabSession } = await cdp.send("Target.attachToTarget", { targetId: tabTarget.targetId, flatten: true });
       const textEval = await cdp.send("Runtime.evaluate", { expression: "document.body ? document.body.innerText.slice(0, 8000) : ''", returnByValue: true }, tabSession);
       pageText = textEval.result.value || "";
+      const formEval = await cdp.send("Runtime.evaluate", { expression: FORM_VALUES_EXPR, returnByValue: true }, tabSession);
+      formValues = JSON.parse(formEval.result.value || "[]");
       await cdp.send("Target.detachFromTarget", { sessionId: tabSession });
     }
   } catch {}
-  return { url, title, pageText };
+  return { url, title, pageText, formValues, tabCount };
 }
+
+// Every form control on the page, as task.check sees it: what a precision task filled in.
+const FORM_VALUES_EXPR = `JSON.stringify([...document.querySelectorAll("input, select, textarea")].map((el) => ({
+  name: el.name || "", id: el.id || "", type: (el.type || el.tagName).toLowerCase(),
+  value: el.tagName === "SELECT" ? (el.selectedOptions[0]?.text || "").trim() : el.value,
+  checked: Boolean(el.checked),
+})))`;
 
 // After a stalled request is stopped, the model server may still be generating for it.
 // Starting the next task on a busy slot would queue behind (or be starved by) the wedged
@@ -460,6 +521,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   // common case and behaves exactly as before.
   const prompts = task.prompts || [task.prompt];
   const started = Date.now();
+  // Index into events where each user turn starts, for task.check's turnReplies.
+  const turnStarts = [];
   const end = started + timeoutMs;
   const events = [];
   let timedOut = false;
@@ -470,6 +533,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
 
   for (let i = 0; i < prompts.length && !timedOut && !agentError; i++) {
     const prompt = prompts[i];
+    turnStarts.push(events.length);
     await cdp.send("Runtime.evaluate", { expression: `window.__bench.send(${JSON.stringify({ type: "run", text: prompt })})`, returnByValue: true }, sessionId);
     let finished = false;
     // The controller rejects "run" with an error reply, not a thrown exception, when the
@@ -558,7 +622,15 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   const usage = [...events].reverse().find((e) => e.type === "usage");
   const reply = events.filter((e) => e.type === "reply").map((e) => e.text).join("\n");
 
-  const { url: finalUrl, pageText } = await readActiveTab(cdp, sessionId);
+  const { url: finalUrl, pageText, formValues, tabCount } = await readActiveTab(cdp, sessionId);
+  const turnReplies = turnStarts.map((start, i) =>
+    events
+      .slice(start, turnStarts[i + 1] ?? events.length)
+      .filter((e) => e.type === "reply")
+      .map((e) => e.text)
+      .join("\n"),
+  );
+  const turnToolCalls = turnStarts.map((start, i) => events.slice(start, turnStarts[i + 1] ?? events.length).filter((e) => e.type === "tool_call").length);
 
   let verdict;
   if (agentError) {
@@ -567,7 +639,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     verdict = { ok: false, reason: stalled ? `stalled: no events for ${stallMs / 1000}s, stopped` : `timed out after ${timeoutMs / 1000}s` };
   } else {
     try {
-      verdict = task.check({ finalUrl, pageText, reply, events });
+      verdict = task.check({ finalUrl, pageText, reply, events, formValues, tabCount, turnReplies, turnToolCalls });
     } catch (err) {
       verdict = { ok: false, reason: `checker threw: ${err.message}` };
     }
@@ -580,6 +652,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     tokensIn: usage?.usage?.input ?? 0,
     tokensOut: usage?.usage?.output ?? 0,
     wallMs,
+    startedAt: new Date(started).toISOString(),
+    metrics: { ...taskMetrics(events, { agentError, timedOut, stalled }), score: verdict.score },
   };
 }
 

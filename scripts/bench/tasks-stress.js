@@ -54,9 +54,10 @@ export const TASKS = [
     timeoutMs: 2400000,
     prompt:
       "Go to quotes.toscrape.com and page through the quote listings using the \"Next\" link until you reach the last page. Tell me the total number of pages and the author of the very last quote listed.",
+    // The last quote on page 10 is George R.R. Martin's (read off the site on 2026-10-04).
     check: ({ reply }) => {
       const gotPageCount = /\b10\b/.test(reply);
-      const gotAuthor = /steve martin/i.test(reply);
+      const gotAuthor = /george r\.? ?r\.? martin/i.test(reply);
       const ok = gotPageCount && gotAuthor;
       return { ok, reason: ok ? "reported 10 pages and the last quote's author" : `gotPageCount=${gotPageCount} gotAuthor=${gotAuthor}` };
     },
