@@ -29,7 +29,9 @@
 // Spend cap (billed providers): every task's estimated cost is added to a ledger file
 // (--ledger, default ~/bench-results/cloud-spend.json) shared by all runs, and a task only
 // starts while the ledger total plus --task-reserve-usd (the most one task can cost under
-// its token limit) stays within --max-usd (default 15); a run stopped that way exits 3. The estimate prices every input
+// its token limit) stays within --max-usd (default 15); a run stopped that way exits 3. A
+// billed run also stops (exit 4) after 5 tasks in a row end in a provider error, so a
+// request the provider always rejects does not spend a whole pass. The estimate prices every input
 // token at the uncached rate and counts safety-check tokens too, so it errs high.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
@@ -275,6 +277,7 @@ async function runBenchmark() {
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
   let tokenRejected = false;
+  let providerErrors = 0;
 
   const rows = [...resumedRows];
   runs: for (let run = 1; run <= Number(args.runs); run++) {
@@ -320,6 +323,7 @@ async function runBenchmark() {
         result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
       }
       if (/\b401\b/.test(result.reason || "")) tokenRejected = true;
+      providerErrors = /^agent error: \w+ error \d{3}/.test(result.reason || "") ? providerErrors + 1 : 0;
       let otherTokens = 0;
       if (billed) {
         // The day's count resets at midnight; a task spanning it is charged its whole
@@ -349,6 +353,11 @@ async function runBenchmark() {
       // Written after every task, not just at the end, so a crash mid-run only costs the
       // task in flight: --resume picks up from here, same two files, overwritten in place.
       writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, rows });
+      if (billed && providerErrors >= 5) {
+        console.error(`\nStopping: 5 tasks in a row ended in a provider error (last: ${result.reason.slice(0, 200)}).`);
+        process.exitCode = 4;
+        break runs;
+      }
     }
   }
 

@@ -2,7 +2,9 @@
 // Offline check of Gemini through Vertex AI with an OAuth access token: with a project set,
 // a turn and a safety check go to that project's global Vertex endpoint with the token as a
 // bearer token and an empty API-key header, under both the Node and the browser (extension)
-// builds of the SDK; without one they still go to the Gemini API with the key.
+// builds of the SDK; without one they still go to the Gemini API with the key. A tool
+// result's screenshot rides inside its function response on Vertex AI, which rejects a turn
+// that mixes function responses with loose images, and stays a loose image otherwise.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -15,13 +17,17 @@ const probe = `
   const seen = [];
   globalThis.fetch = async (url, init) => {
     const h = new Headers(init.headers);
-    seen.push({ url: String(url), auth: h.get("authorization"), key: h.get("x-goog-api-key") });
+    const last = JSON.parse(init.body).contents.at(-1);
+    seen.push({ url: String(url), auth: h.get("authorization"), key: h.get("x-goog-api-key"), last: last.parts.map((p) => Object.keys(p).join("+") + (p.functionResponse?.parts ? ">" + p.functionResponse.parts.map((q) => Object.keys(q).join("+")).join(",") : "")).join(",") });
     throw new Error("stub");
   };
   const tools = [{ name: "noop", description: "Does nothing.", input_schema: { type: "object", properties: {} } }];
   const messages = [{ role: "user", content: [{ type: "text", text: "hi" }] }];
+  const shot = { type: "image", mediaType: "image/png", data: "AAAA" };
+  const call = { type: "tool_call", id: "c1", nativeId: "c1", name: "noop", input: {} };
+  const withShot = [...messages, { role: "assistant", content: [call], raw: null }, { role: "user", content: [{ type: "tool_result", id: "c1", nativeId: "c1", name: "noop", content: [{ type: "text", text: "ok" }, shot] }] }];
   for (const config of [{ thinking: false, geminiVertexProject: "demo-project-1" }, { thinking: false }]) {
-    await turn({ apiKey: "TOKEN", model: "gemini-3.8-flash", config, system: "s", tools, messages }).catch(() => {});
+    await turn({ apiKey: "TOKEN", model: "gemini-3.8-flash", config, system: "s", tools, messages: withShot }).catch(() => {});
     await classify({ apiKey: "TOKEN", model: "gemini-3.5-flash-lite", config, system: "s", text: "t", schema: { type: "object" } }).catch(() => {});
   }
   console.log(JSON.stringify(seen));
@@ -40,6 +46,8 @@ for (const conditions of [[], ["--conditions=browser"]]) {
     assert.equal(r.key, "", build);
   }
   assert.match(vTurn.url, /gemini-3\.8-flash:streamGenerateContent/, build);
+  assert.equal(vTurn.last, "functionResponse>inlineData", `${build}: Vertex turn ${vTurn.last}`);
+  assert.equal(gTurn.last, "functionResponse,inlineData", `${build}: Gemini API turn ${gTurn.last}`);
   for (const r of [gTurn, gCheck]) {
     assert.match(r.url, /^https:\/\/generativelanguage\.googleapis\.com\//, `${build}: ${r.url}`);
     assert.equal(r.auth, null, build);

@@ -19,7 +19,9 @@ function inline(b) {
   return { inlineData: { mimeType: b.mediaType, data: b.data } };
 }
 
-function toContents(messages, model) {
+// Vertex AI rejects a turn that mixes function responses with loose images, so there each
+// tool result's images go inside its function response.
+function toContents(messages, model, vertex = false) {
   const contents = [];
   for (const m of messages) {
     if (m.role === "assistant") {
@@ -42,8 +44,9 @@ function toContents(messages, model) {
       if (b.type === "tool_result") {
         const text = b.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
         const response = b.isError ? { error: text } : { output: text || "(see image)" };
-        parts.push({ functionResponse: { name: b.name, ...(b.nativeId && { id: b.nativeId }), response } });
-        images.push(...b.content.filter((c) => c.type === "image").map(inline));
+        const shots = b.content.filter((c) => c.type === "image").map(inline);
+        parts.push({ functionResponse: { name: b.name, ...(b.nativeId && { id: b.nativeId }), response, ...(vertex && shots.length && { parts: shots }) } });
+        if (!vertex) images.push(...shots);
       } else if (b.type === "text") parts.push({ text: b.text });
       else parts.push(inline(b));
     }
@@ -65,7 +68,7 @@ export async function turn({ apiKey, model, config, system, tools, messages, sig
   const ai = client(apiKey, config);
   const stream = await ai.models.generateContentStream({
     model,
-    contents: toContents(messages, model),
+    contents: toContents(messages, model, !!config.geminiVertexProject),
     config: {
       systemInstruction: system,
       tools: [
