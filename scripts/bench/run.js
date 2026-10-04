@@ -16,10 +16,15 @@
 //
 // Flags: --provider --model --runs N --tasks a,b --split train|heldout --host --base-url
 //        --timeout(ms) --port (DevTools port; 0 = any free one) --thinking on|off
-//        --vertex on|off (gemini only, default on) --max-usd --ledger --task-reserve-usd
+//        --max-usd --ledger --task-reserve-usd
+//        --vertex-project ID [--vertex-sa EMAIL] [--gcloud-account EMAIL] (gemini only)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged. The gemini
-// provider reads GEMINI_VERTEX_KEY (a Google Cloud API key for Vertex AI), or BENCH_KEY.
+// provider goes through Vertex AI in --vertex-project with a short-lived OAuth access token
+// from gcloud (impersonating --vertex-sa when given, else --gcloud-account's own), fetched
+// at the start and again before any task once it is 45 minutes old or after a 401; the
+// token lives only in memory and the test profile. Without --vertex-project it uses the
+// Gemini API key in BENCH_KEY.
 //
 // Spend cap (billed providers): every task's estimated cost is added to a ledger file
 // (--ledger, default ~/bench-results/cloud-spend.json) shared by all runs, and a task only
@@ -30,7 +35,7 @@
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, renameSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -115,16 +120,34 @@ function buildConfig() {
     if (!process.env.BENCH_KEY) throw new Error("Mistral needs its API key in the BENCH_KEY environment variable.");
     overrides.keys.mistral = process.env.BENCH_KEY;
   } else if (args.provider === "gemini") {
-    const key = process.env.GEMINI_VERTEX_KEY || process.env.BENCH_KEY;
-    if (!key) throw new Error("Gemini needs its API key in the GEMINI_VERTEX_KEY (or BENCH_KEY) environment variable.");
-    overrides.keys.gemini = key;
-    overrides.geminiVertex = args.vertex !== "off";
+    if (args["vertex-project"]) {
+      overrides.geminiVertexProject = args["vertex-project"];
+      overrides.keys.gemini = vertexToken();
+    } else {
+      if (!process.env.BENCH_KEY) throw new Error("Gemini needs --vertex-project, or its API key in the BENCH_KEY environment variable.");
+      overrides.keys.gemini = process.env.BENCH_KEY;
+    }
     // Bounds what one task can cost; TASK_TOKEN_LIMIT is what --task-reserve-usd covers.
     overrides.limits = { taskTokens: TASK_TOKEN_LIMIT };
   } else {
     throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, mistral, or gemini.`);
   }
   return mergeConfig(overrides);
+}
+
+// A Vertex AI access token from gcloud. gcloud's own output is never echoed: its stderr
+// names accounts, not tokens, and is passed on only when the call fails.
+const TOKEN_MAX_AGE_MS = 45 * 60 * 1000;
+let tokenFetchedAt = 0;
+function vertexToken() {
+  const cmd = ["auth", "print-access-token"];
+  if (args["vertex-sa"]) cmd.push(`--impersonate-service-account=${args["vertex-sa"]}`);
+  if (args["gcloud-account"]) cmd.push(`--account=${args["gcloud-account"]}`);
+  const res = spawnSync("gcloud", cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const token = res.stdout?.trim();
+  if (res.status !== 0 || !token) throw new Error(`gcloud could not issue a Vertex AI access token: ${(res.stderr || "").split("\n").find((l) => /ERROR/.test(l)) || `exit ${res.status}`}`);
+  tokenFetchedAt = Date.now();
+  return token;
 }
 
 // A cheap, fast reachability check before each task - not a real model call, just whether
@@ -251,6 +274,7 @@ async function runBenchmark() {
 
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
+  let tokenRejected = false;
 
   const rows = [...resumedRows];
   runs: for (let run = 1; run <= Number(args.runs); run++) {
@@ -263,6 +287,11 @@ async function runBenchmark() {
       // every remaining task recording a fake 0-step, full-timeout "fail" against a model
       // that was never actually reached. Check first and abort the whole run instead -
       // what is already in rows/on disk stands, and nothing misleading gets added to it.
+      if (config.geminiVertexProject && (tokenRejected || Date.now() - tokenFetchedAt > TOKEN_MAX_AGE_MS)) {
+        config.keys.gemini = vertexToken();
+        await setConfig(cdp, sessionId, config);
+        tokenRejected = false;
+      }
       const reachable = await endpointReachable();
       if (!reachable.ok) {
         console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
@@ -290,6 +319,7 @@ async function runBenchmark() {
         console.error(`  -> harness error: ${err.message}`);
         result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
       }
+      if (/\b401\b/.test(result.reason || "")) tokenRejected = true;
       let otherTokens = 0;
       if (billed) {
         // The day's count resets at midnight; a task spanning it is charged its whole

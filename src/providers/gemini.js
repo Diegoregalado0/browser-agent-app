@@ -1,8 +1,18 @@
 import { GoogleGenAI, ApiError } from "@google/genai";
 
-// The Gemini API, or Vertex AI when config.geminiVertex is set; both take the same key slot.
-function client(apiKey, config) {
-  return new GoogleGenAI(config?.geminiVertex ? { vertexai: true, apiKey } : { apiKey });
+// The Gemini API, or Vertex AI in config.geminiVertexProject with apiKey holding an OAuth
+// access token. The browser SDK accepts only API-key auth, so the token goes in an
+// Authorization header, the path names the project, and the empty API-key header stops the
+// SDK from sending the token as a key.
+export function client(apiKey, config) {
+  const project = config?.geminiVertexProject;
+  if (!project) return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({
+    vertexai: true,
+    apiKey: "oauth",
+    apiVersion: `v1/projects/${project}/locations/global`,
+    httpOptions: { headers: { Authorization: `Bearer ${apiKey}`, "x-goog-api-key": "" } },
+  });
 }
 
 function inline(b) {

@@ -25,9 +25,9 @@ export const DEFAULTS = {
   // The models picked so far, newest first, for quick switching: [{ provider, model }].
   modelHistory: [],
   openaiBaseUrl: "",
-  // Gemini through Vertex AI (a Google Cloud API key, billed to its Cloud project) instead
-  // of the Gemini API.
-  geminiVertex: false,
+  // A Google Cloud project id: Gemini then goes through Vertex AI in that project, billed
+  // to it, and the Gemini key slot holds a short-lived OAuth access token instead of a key.
+  geminiVertexProject: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
   effort: "high",
@@ -167,6 +167,7 @@ export function cleanSetting(key, value) {
   }
   if (key === "openaiBaseUrl") return value === "" ? value : httpUrl(value, "The base URL");
   if (key === "ollamaHost") return httpUrl(value, "The Ollama host");
+  if (key === "geminiVertexProject") return typeof value === "string" && /^([a-z][a-z0-9-]{4,28}[a-z0-9])?$/.test(value) ? value : fail("A Google Cloud project id has 6 to 30 lowercase letters, digits and hyphens.");
   if (key === "customInstructions") {
     if (typeof value !== "string") fail("Custom instructions must be text.");
     return value.length <= CUSTOM_INSTRUCTIONS_MAX ? value : fail(`Custom instructions can be up to ${CUSTOM_INSTRUCTIONS_MAX.toLocaleString("en-US")} characters.`);
