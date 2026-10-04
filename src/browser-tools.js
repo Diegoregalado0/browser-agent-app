@@ -58,7 +58,7 @@ export const BROWSER_TOOL_DEFS = [
         },
         modifiers: { type: "string", description: "Modifier chord held during a click, e.g. 'cmd' or 'shift'" },
         scroll_direction: { type: "string", enum: ["up", "down", "left", "right"] },
-        scroll_amount: { type: "number", description: "Scroll ticks (default 3, about 100px each)" },
+        scroll_amount: { type: "number", description: "Scroll ticks, a positive number; scroll_direction sets the way (default 3, about 100px each)" },
         duration: { type: "number", description: "Seconds to wait (wait action, max 10)" },
       },
       required: ["action"],
@@ -726,7 +726,9 @@ export class Browser {
       case "scroll": {
         const vp = await this.#viewport();
         const p = input.coordinate || input.ref ? await this.#point(input) : { x: vp.w / 2, y: vp.h / 2 };
-        const delta = (input.scroll_amount ?? 3) * 100;
+        // The direction gives the sign: models often pass a negative amount with "up", which
+        // would otherwise scroll down while the result says up.
+        const delta = Math.abs(input.scroll_amount ?? 3) * 100;
         const dir = input.scroll_direction || "down";
         if (this.showActions) await this.#glide(p.x, p.y);
         await this.#mouse("mouseWheel", p.x, p.y, {

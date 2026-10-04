@@ -131,6 +131,8 @@ export class Agent {
     this.askPermission = askPermission;
     // Tool servers with mcp__ names (Outlook in the extension), connected by the host.
     this.mcp = null;
+    // Screenshots of the current page attached to tool output (see #autoScreenshot).
+    this.pageShots = new WeakSet();
     // Called whenever the history changes, so the conversation can be saved.
     this.onHistory = onHistory;
     this.messages = [];
@@ -623,7 +625,9 @@ export class Agent {
   async #autoScreenshot(output, why, signal) {
     if (signal.aborted || output.some((b) => b.type === "image")) return [];
     try {
-      return [{ type: "text", text: `[Screenshot attached because ${why}.]` }, ...toBlocks(await this.browser.run("browser", { action: "screenshot" }))];
+      const shot = toBlocks(await this.browser.run("browser", { action: "screenshot" }));
+      for (const b of shot) if (b.type === "image") this.pageShots.add(b);
+      return [{ type: "text", text: `[Screenshot attached because ${why}.]` }, ...shot];
     } catch {
       return [];
     }
@@ -641,6 +645,7 @@ export class Agent {
       signal,
       url: PAGE_TOOLS.has(call.name) ? await this.browser.currentUrl().catch(() => null) : null,
       pageText: async () => (await this.browser.callInPage(pageTextScript, SCAN_MAX_CHARS)).text,
+      pageShots: output.filter((b) => this.pageShots.has(b)),
     });
     // A scan this short made no model call (a tool that is not scanned, or output already scanned).
     const scanMs = Date.now() - scanStarted;

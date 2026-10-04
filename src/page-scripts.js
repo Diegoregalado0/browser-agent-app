@@ -29,6 +29,12 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
     "[role=searchbox]", "[role=slider]", "[contenteditable='']", "[contenteditable=true]",
     "[onclick]", "[tabindex]:not([tabindex='-1'])",
   ].join(",");
+  // Controls a script makes clickable without marking them: a link with no address or an
+  // element styled as a button (Bootstrap's .btn), shown with a pointer cursor. Shops use
+  // these for buttons such as "Proceed To Checkout".
+  const SCRIPTED_SELECTOR = "a:not([href]), .btn";
+  const isInteractive = (el) =>
+    el.matches(INTERACTIVE_SELECTOR) || (el.matches(SCRIPTED_SELECTOR) && el.ownerDocument.defaultView.getComputedStyle(el).cursor === "pointer");
   const STRUCTURAL = {
     H1: "heading", H2: "heading", H3: "heading", H4: "heading", H5: "heading", H6: "heading",
     NAV: "navigation", MAIN: "main", HEADER: "banner", FOOTER: "contentinfo", ASIDE: "complementary",
@@ -157,7 +163,7 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
         continue;
       }
 
-      const interactive = el.matches(INTERACTIVE_SELECTOR);
+      const interactive = isInteractive(el);
       const structural = !interactiveOnly && STRUCTURAL[el.tagName] !== undefined;
       const leafText =
         !interactiveOnly &&
