@@ -97,3 +97,18 @@ The benchmark task and its timeout are unchanged. This needs a GPU run to confir
 - Symptom to watch for: read_page or action reports listing extra controls (decorative `.btn` elements or anchors with a pointer cursor), or a scroll that a model meant as the opposite direction.
 - Where: `src/browser-tools.js:731` (scroll) and `SCRIPTED_SELECTOR` in `src/page-scripts.js:35`. Commit `1d70fcd`.
 - Revert or tune: `git revert 1d70fcd`, or narrow `SCRIPTED_SELECTOR`.
+
+## 2026-10-04
+
+### 12. A task that repeats the same action, or the same blocked call, stops
+
+The loop guard only counted failures and repeated page reads. Small local models looped on calls that neither failed nor read: Qwen 3.5 4B sent the same left_click 44 times in one run (the safety check blocked 41 of them, about 3 s each), and Qwen 3.5 9B scrolled the same way 19 times. Now:
+
+- An action (not a read or navigation) that returns the same result as before gets a note the third time and stops the task the sixth time, within the last 20 calls. Screenshots and waits are not counted, since their text says nothing about the page. Reads and navigations keep the note only: going back to a list page between items repeats them legitimately.
+- A call the safety check blocked is refused if it comes again on the same page address in the same task, without a new check. The second time it gets a note, the fourth time the task stops. A single block is still the check's decision, not a loop.
+
+The safety check itself is unchanged; the stored block only refuses, it never allows.
+
+- Symptom to watch for: a task stopped with "the same browser call returned the same result 6 times" while it was making progress (an action whose report does not change although the page does), or a call refused as "blocked earlier in this task" after the page changed without its address changing.
+- Where: `STOP_SAME_RESULT`, `STOP_SAME_BLOCK` and `recordBlock` in `src/loop-guard.js:24`, and `blockedCalls` in `#authorize` in `src/agent.js:731`. Commit `fb0aa42`, checks in `scripts/agent-check.js` (commit `48934ad`).
+- Revert or tune: `git revert 48934ad fb0aa42`, or raise `STOP_SAME_RESULT` and `STOP_SAME_BLOCK`.
