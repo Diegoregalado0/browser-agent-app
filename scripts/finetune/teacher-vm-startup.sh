@@ -14,7 +14,7 @@ ZONE=$(md instance/zone | sed 's|.*/||')
 BUCKET=$(md instance/attributes/bucket)
 MAX_USD=$(md instance/attributes/max-usd)
 PASSES=$(md instance/attributes/passes)
-export PATH="/snap/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 U=teacher
 H=/home/$U
 # runuser keeps the working directory, and the teacher user cannot read root's.
@@ -52,7 +52,7 @@ curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-sta
   && apt-get install -yq /tmp/chrome.deb >/dev/null || { say "chrome install failed"; exit 1; }
 say "setup: node $(node -v), $(google-chrome --version)"
 
-id $U >/dev/null 2>&1 || useradd -m -s /bin/bash $U
+id $U >/dev/null 2>&1 || useradd -m -s /bin/bash $U || { say "useradd failed"; exit 1; }
 gcloud storage cp -q "$BUCKET/vm/teacher-data.bundle" /tmp/teacher-data.bundle || { say "bundle download failed"; exit 1; }
 chmod 644 /tmp/teacher-data.bundle
 runuser -u $U -- git clone -q -b teacher-data /tmp/teacher-data.bundle "$H/app" 2>/tmp/clone.err || { say "clone failed: $(tail -1 /tmp/clone.err)"; exit 1; }
