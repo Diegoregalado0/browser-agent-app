@@ -72,15 +72,16 @@ python train.py --model "$HF_MODEL" --loader "$LOADER" $FOURBIT --train train.js
   --out out --deadline "$DEADLINE" $TRAIN_ARGS || finish train-failed
 gcloud storage cp -r out/adapter out/metrics.json pip-freeze.txt "$DEST/" || finish upload-failed
 
-# GGUF adapter for llama-server --lora, converted against the base model already in the HF cache.
-BASE_DIR=$(python - "$HF_MODEL" <<'EOF'
-import sys
-from huggingface_hub import snapshot_download
-print(snapshot_download(sys.argv[1], local_files_only=True))
-EOF
-)
+# The 16-bit merge (MERGE_16BIT=1) is the fallback when the GGUF adapter cannot be used.
+if [ -d out/merged ]; then
+  gcloud storage cp -r out/merged "$DEST/" || echo "merged model upload failed"
+fi
+
+# GGUF adapter for llama-server --lora. The converter reads only the adapter tensors and the base
+# model's config (fetched from Hugging Face, no weights), so an adapter trained on a 4-bit base
+# converts the same way as one trained on a bf16 base.
 if git clone --depth 1 https://github.com/ggml-org/llama.cpp && pip install -q gguf sentencepiece \
-  && python llama.cpp/convert_lora_to_gguf.py --base "$BASE_DIR" --outtype f16 --outfile out/adapter.gguf out/adapter; then
+  && python llama.cpp/convert_lora_to_gguf.py --base-model-id "$HF_MODEL" --outtype f16 --outfile out/adapter.gguf out/adapter; then
   gcloud storage cp out/adapter.gguf "$DEST/" || true
 else
   echo "GGUF conversion failed; fetch.sh can convert locally"

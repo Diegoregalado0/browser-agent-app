@@ -34,13 +34,7 @@ for f in train.jsonl eval.jsonl manifest.json; do
   [ -f "$DATA_DIR/$f" ] || { echo "missing $DATA_DIR/$f; run prepare-data.mjs first" >&2; exit 1; }
 done
 
-if [ "$SPOT" = "1" ]; then
-  PROVISIONING=(--provisioning-model=SPOT)
-else
-  PROVISIONING=(--provisioning-model=STANDARD)
-fi
-
-echo "run $RUN_ID: $BASE_MODEL ($HF_MODEL) on $MACHINE_TYPE, $GPU_DESC, $ZONE, spot=$SPOT, disk ${DISK_GB}GB, max ${MAX_RUN_HOURS}h"
+echo "run $RUN_ID: $BASE_MODEL ($HF_MODEL) on $MACHINE_TYPE, $GPU_DESC, $ZONE, spot=$SPOT, disk ${DISK_GB}GB, max ${MAX_RUN_HOURS}h, 4bit=$LOAD_4BIT, seq $MAX_SEQ_LEN, rank $LORA_RANK, epochs $EPOCHS"
 
 if [ "${DRY_RUN:-0}" = "1" ] || ! gcloud storage buckets describe "$BUCKET" --project "$PROJECT" >/dev/null 2>&1; then
   run gcloud storage buckets create "$BUCKET" --project "$PROJECT" --location "$REGION" \
@@ -58,19 +52,32 @@ fi
 run gcloud storage cp "$DATA_DIR/train.jsonl" "$DATA_DIR/eval.jsonl" "$DATA_DIR/manifest.json" "$DEST/data/"
 run gcloud storage cp "$HERE/train.py" "$DEST/train.py"
 
-TRAIN_ARGS="--rank $LORA_RANK --lr $LEARNING_RATE --epochs $EPOCHS --max-seq-len $MAX_SEQ_LEN --max-steps $MAX_STEPS"
-run gcloud compute instances create "$VM" \
-  --project "$PROJECT" --zone "$ZONE" \
-  --machine-type "$MACHINE_TYPE" \
-  "${PROVISIONING[@]}" \
-  --maintenance-policy=TERMINATE \
-  --instance-termination-action=DELETE \
-  --max-run-duration="${MAX_RUN_HOURS}h" \
-  --image-project "$IMAGE_PROJECT" --image-family "$IMAGE_FAMILY" \
-  --boot-disk-size "${DISK_GB}GB" --boot-disk-type pd-balanced --boot-disk-auto-delete \
-  --service-account "$VM_SERVICE_ACCOUNT" --scopes cloud-platform \
-  --labels "$LABEL_KEY=$LABEL_VALUE,run=${RUN_ID:0:63}" \
-  --metadata "install-nvidia-driver=True,bucket=$BUCKET,run_id=$RUN_ID,hf_model=$HF_MODEL,loader=$LOADER,load_4bit=$LOAD_4BIT,max_hours=$MAX_RUN_HOURS,unsloth_spec=$UNSLOTH_SPEC,train_args=$TRAIN_ARGS" \
-  --metadata-from-file startup-script="$HERE/startup.sh"
+TRAIN_ARGS="--rank $LORA_RANK --alpha $LORA_ALPHA --targets $LORA_TARGETS --lr $LEARNING_RATE --epochs $EPOCHS --max-seq-len $MAX_SEQ_LEN --grad-accum $GRAD_ACCUM --eval-steps $EVAL_STEPS --max-eval $MAX_EVAL --max-steps $MAX_STEPS"
+[ "$MERGE_16BIT" = "1" ] && TRAIN_ARGS="$TRAIN_ARGS --merge-16bit"
+create_vm() {
+  local provisioning=$1
+  run gcloud compute instances create "$VM" \
+    --project "$PROJECT" --zone "$ZONE" \
+    --machine-type "$MACHINE_TYPE" \
+    "$provisioning" \
+    --maintenance-policy=TERMINATE \
+    --instance-termination-action=DELETE \
+    --max-run-duration="${MAX_RUN_HOURS}h" \
+    --image-project "$IMAGE_PROJECT" --image-family "$IMAGE_FAMILY" \
+    --boot-disk-size "${DISK_GB}GB" --boot-disk-type pd-balanced --boot-disk-auto-delete \
+    --service-account "$VM_SERVICE_ACCOUNT" --scopes cloud-platform \
+    --labels "$LABEL_KEY=$LABEL_VALUE,run=${RUN_ID:0:63}" \
+    --metadata "install-nvidia-driver=True,bucket=$BUCKET,run_id=$RUN_ID,hf_model=$HF_MODEL,loader=$LOADER,load_4bit=$LOAD_4BIT,max_hours=$MAX_RUN_HOURS,unsloth_spec=$UNSLOTH_SPEC,train_args=$TRAIN_ARGS" \
+    --metadata-from-file startup-script="$HERE/startup.sh"
+}
+if [ "$SPOT" = "1" ]; then
+  create_vm --provisioning-model=SPOT || {
+    [ "$SPOT_FALLBACK" = "1" ] || exit 1
+    echo "Spot create failed; retrying as on-demand" >&2
+    create_vm --provisioning-model=STANDARD
+  }
+else
+  create_vm --provisioning-model=STANDARD
+fi
 
 echo "$RUN_ID"

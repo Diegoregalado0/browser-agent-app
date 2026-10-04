@@ -7,7 +7,11 @@ The router of MoE models stays frozen and the vision tower is not touched (text-
 
 Usage:
   python train.py --model Qwen/Qwen3.5-9B --loader dense --train train.jsonl --eval eval.jsonl \
-      --out adapter [--load-4bit] [--rank 16] [--lr 1e-4] [--epochs 2] [--max-seq-len 16384] [--max-steps N]
+      --out adapter [--load-4bit] [--rank 32] [--alpha 32] [--lr 1e-4] [--epochs 2] [--max-seq-len 12288]
+      [--grad-accum 16] [--eval-steps 25] [--max-eval 40] [--targets q_proj+k_proj+...] [--merge-16bit] [--max-steps N]
+
+Examples longer than --max-seq-len are dropped (the assistant turn sits at the end, so truncating
+would cut the part that is trained); the counts and the token length percentiles are printed.
 """
 
 import argparse
@@ -26,12 +30,17 @@ def parse_args():
     p.add_argument("--out", required=True)
     p.add_argument("--load-4bit", action="store_true")
     p.add_argument("--rank", type=int, default=16)
+    p.add_argument("--alpha", type=int, default=0, help="LoRA alpha, defaults to the rank")
+    p.add_argument("--targets", default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--epochs", type=float, default=2)
     p.add_argument("--max-seq-len", type=int, default=16384)
     p.add_argument("--max-steps", type=int, default=0, help="stop after this many steps when above 0")
     p.add_argument("--batch", type=int, default=1)
     p.add_argument("--grad-accum", type=int, default=8)
+    p.add_argument("--eval-steps", type=int, default=0, help="evaluate every N optimizer steps; 0 evaluates per epoch")
+    p.add_argument("--max-eval", type=int, default=0, help="evaluate on at most this many examples (evenly spread)")
+    p.add_argument("--merge-16bit", action="store_true", help="also save the adapter merged into a 16-bit model")
     p.add_argument("--deadline", type=float, default=0, help="unix time to stop training and save")
     return p.parse_args()
 
@@ -58,7 +67,9 @@ def encode(tokenizer, example, max_len):
         return None
     prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
     full_ids = tokenizer(full, add_special_tokens=False)["input_ids"]
-    if len(full_ids) > max_len or len(full_ids) <= len(prompt_ids):
+    if len(full_ids) > max_len:
+        return "too_long"
+    if len(full_ids) <= len(prompt_ids):
         return None
     labels = [-100] * len(prompt_ids) + full_ids[len(prompt_ids):]
     return {"input_ids": full_ids, "attention_mask": [1] * len(full_ids), "labels": labels}
@@ -67,14 +78,23 @@ def encode(tokenizer, example, max_len):
 def build_dataset(tokenizer, rows, max_len, name):
     from datasets import Dataset
 
-    encoded, dropped = [], 0
+    encoded, too_long, mismatch, lengths = [], 0, 0, []
     for row in rows:
         e = encode(tokenizer, row, max_len)
-        if e is None:
-            dropped += 1
+        if e == "too_long":
+            too_long += 1
+        elif e is None:
+            mismatch += 1
         else:
             encoded.append(e)
-    print(f"{name}: {len(encoded)} examples, {dropped} dropped (too long or template mismatch)", flush=True)
+            lengths.append(len(e["input_ids"]))
+    lengths.sort()
+    pct = {q: lengths[min(len(lengths) - 1, int(len(lengths) * q / 100))] for q in (50, 90, 99)} if lengths else {}
+    print(
+        f"{name}: {len(encoded)} examples, dropped {too_long} above {max_len} tokens and "
+        f"{mismatch} with a template mismatch; kept token length percentiles {pct}, max {lengths[-1] if lengths else 0}",
+        flush=True,
+    )
     return Dataset.from_list(encoded) if encoded else None
 
 
@@ -98,14 +118,14 @@ def main():
     )
     text_tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
 
-    # Attention and MLP projections of the language model only; router and vision stay frozen.
+    # Attention, linear-attention and MLP projections of the language model only; router and vision stay frozen.
     model = Loader.get_peft_model(
         model,
         r=args.rank,
-        lora_alpha=args.rank,
+        lora_alpha=args.alpha or args.rank,
         lora_dropout=0,
         bias="none",
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        target_modules=[t for t in args.targets.replace("+", ",").split(",") if t],
         use_gradient_checkpointing="unsloth",
         random_state=3407,
         max_seq_length=args.max_seq_len,
@@ -113,6 +133,8 @@ def main():
 
     train_ds = build_dataset(text_tokenizer, read_jsonl(args.train), args.max_seq_len, "train")
     eval_ds = build_dataset(text_tokenizer, read_jsonl(args.eval), args.max_seq_len, "eval")
+    if eval_ds is not None and args.max_eval and len(eval_ds) > args.max_eval:
+        eval_ds = eval_ds.select(range(0, len(eval_ds), math.ceil(len(eval_ds) / args.max_eval)))
     if train_ds is None:
         raise SystemExit("no usable training examples")
 
@@ -141,8 +163,10 @@ def main():
             lr_scheduler_type="cosine",
             warmup_steps=max(1, steps_per_epoch // 10),
             logging_steps=1,
-            eval_strategy="epoch" if eval_ds is not None else "no",
-            save_strategy="epoch",
+            eval_strategy=("steps" if args.eval_steps else "epoch") if eval_ds is not None else "no",
+            eval_steps=args.eval_steps or None,
+            save_strategy="steps" if args.eval_steps else "epoch",
+            save_steps=args.eval_steps or 500,
             save_total_limit=1,
             optim="adamw_8bit",
             bf16=torch.cuda.is_bf16_supported(),
@@ -170,6 +194,9 @@ def main():
     with open(os.path.join(args.out, "metrics.json"), "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"saved adapter to {adapter_dir}", flush=True)
+    if args.merge_16bit:
+        model.save_pretrained_merged(os.path.join(args.out, "merged"), tokenizer, save_method="merged_16bit")
+        print("saved 16-bit merged model", flush=True)
 
 
 if __name__ == "__main__":
