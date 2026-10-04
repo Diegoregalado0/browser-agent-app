@@ -153,6 +153,9 @@ export class Agent {
     // hostnames with the kind of prompt declined there.
     this.declinedCalls = new Set();
     this.declinedHosts = new Map();
+    // Calls the safety check blocked during the current task, by callKey and page address,
+    // with the reason. The same call on the same page is refused again without a new check.
+    this.blockedCalls = new Map();
     // Local origins (scheme, host and port) the user allowed opening during the current task.
     this.allowedPrivateOrigins = new Set();
     // Tool calls that typed into a password field; their text is hidden everywhere but in
@@ -337,6 +340,7 @@ export class Agent {
     this.taskMetrics = metrics;
     this.declinedCalls.clear();
     this.declinedHosts.clear();
+    this.blockedCalls.clear();
     this.allowedPrivateOrigins.clear();
     const outputAtStart = this.usage.output;
     this.#emit(signal, { type: "status", running: true });
@@ -555,7 +559,8 @@ export class Agent {
       // password field. The next save of the history then hides it too.
       if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
       this.#emit(signal, { type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
-      // Declined or blocked actions are the user's and the safety check's decisions, not loops.
+      // Declined or blocked actions are the user's and the safety check's decisions, not loops;
+      // only the same call blocked again counts (see LoopGuard.recordBlock).
       let authorizing = false;
       // Set while a page tool runs, so a failure there comes back with a screenshot.
       let running = false;
@@ -599,7 +604,13 @@ export class Agent {
         this.#emit(signal, { type: "tool_result", id: call.id, content: output });
         results.push({ ...base, content: output });
       } catch (err) {
-        const note = authorizing || signal.aborted ? null : this.loopGuard.record(call.name, call.input, true, err.message);
+        const note = signal.aborted
+          ? null
+          : err.blocked
+            ? this.loopGuard.recordBlock(call.name, call.input)
+            : authorizing
+              ? null
+              : this.loopGuard.record(call.name, call.input, true, err.message);
         let content = [{ type: "text", text: note ? `${err.message}\n\n${note}` : err.message }];
         if ((running || note) && !signal.aborted) {
           content = [...content, ...(await this.#autoScreenshot(content, running ? "the action failed" : "of the loop check", signal))];
@@ -716,6 +727,12 @@ export class Agent {
     if (signal.aborted) throw new Error("Cancelled by the user.");
     let check = null;
     if (config.permissionMode !== "auto" && this.#changesState(call)) {
+      const blockedKey = `${callKey(call)} ${await this.browser.currentUrl().catch(() => "")}`;
+      const earlier = this.blockedCalls.get(blockedKey);
+      if (earlier !== undefined) {
+        this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name} again: ${earlier}` });
+        throw Object.assign(new Error(`Blocked by the safety check earlier in this task, on this page: ${earlier} If the user really wants this, ask them to confirm it explicitly.`), { blocked: true });
+      }
       check = await (precheck ?? this.#safetyCheck(call, config, signal));
       // A check cut short by Stop is not a reason to ask; the action is not going to run.
       if (signal.aborted) throw new Error("Cancelled by the user.");
@@ -723,7 +740,8 @@ export class Agent {
       this.#emit(signal, { type: "guard", name: call.name, input: this.#shownInput(call), target, page: page.url, verdict, reason });
       if (verdict === "block") {
         this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
-        throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);
+        this.blockedCalls.set(blockedKey, reason);
+        throw Object.assign(new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`), { blocked: true });
       }
       if (verdict === "allow" && !confirm) return;
     } else if (!confirm) return;
