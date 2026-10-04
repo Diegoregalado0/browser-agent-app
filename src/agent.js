@@ -52,6 +52,12 @@ const COMPACT_GROWTH = 1.5;
 const COMPACT_KEEP_MESSAGES = 4;
 const COMPACT_TEXT_CHARS = 1500;
 const SERVER_CLEARED = new Set(["anthropic"]);
+// A request the server refused as longer than the model's context (llama.cpp, OpenAI,
+// vLLM wording). Two page texts in a row can pass a 32k local context between passes.
+const CONTEXT_OVERFLOW = /exceeds the available context size|context_length_exceeded|maximum context length/i;
+// Messages left untouched by the trim before each retry of an overflowing request: first
+// the newest tool result stays whole, then it is trimmed too.
+const OVERFLOW_KEEP = [1, 0];
 // Tools whose output shows the current page as it is after the call.
 const PAGE_TOOLS = new Set(["browser", "navigate", "form_input", "tabs"]);
 
@@ -168,12 +174,13 @@ export class Agent {
   }
 
   // Trims old screenshots and long tool output when the last request was large (see
-  // COMPACT_MIN_TOKENS). The user's own messages are never trimmed.
-  #compact(lastInput, config) {
+  // COMPACT_MIN_TOKENS). The user's own messages are never trimmed. keep: trim now, leaving
+  // only this many of the latest messages whole (after a context overflow).
+  #compact(lastInput, config, keep = null) {
     if (SERVER_CLEARED.has(config.provider)) return false;
-    if (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH) return;
+    if (keep === null && (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH)) return false;
     let trimmed = false;
-    const end = this.messages.length - COMPACT_KEEP_MESSAGES;
+    const end = this.messages.length - (keep ?? COMPACT_KEEP_MESSAGES);
     for (let i = 0; i < end; i++) {
       const m = this.messages[i];
       if (m.role !== "user" || !m.content.some((b) => b.type === "tool_result")) continue;
@@ -359,6 +366,7 @@ export class Agent {
         this.#emit(signal, { type: "assistant_start" });
         let result;
         let waits = 0;
+        let overflows = 0;
         try {
           await this.limiter.take("request", limits.requestsPerMinute, signal, (secs) =>
             this.#emit(signal, { type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
@@ -386,6 +394,15 @@ export class Agent {
               });
               break;
             } catch (err) {
+              let trimmed = false;
+              while (!trimmed && !signal.aborted && CONTEXT_OVERFLOW.test(`${err.message} ${err.code}`) && overflows < OVERFLOW_KEEP.length) {
+                trimmed = this.#compact(this.lastInput, config, OVERFLOW_KEEP[overflows++]);
+              }
+              if (trimmed) {
+                this.#emit(signal, { type: "notice", text: "The conversation passed the model's context size; trimmed earlier page text and screenshots, trying again." });
+                this.onHistory();
+                continue;
+              }
               const delay = rateLimitDelay(err);
               if (delay === null || waits++ >= MAX_RATE_LIMIT_WAITS || signal.aborted) throw err;
               const wait = Math.min(Math.ceil(delay) + 500, 65000);

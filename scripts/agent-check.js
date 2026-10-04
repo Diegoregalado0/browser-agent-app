@@ -370,6 +370,34 @@ await looping.run("try once more", config);
 assert.equal(blockChecks, 2, "a new task reused the last task's block");
 providers.openai.classify = loopClassify;
 
+// A request the server refuses as longer than its context is retried once the tool output
+// is trimmed: first all but the newest result, then the newest too, instead of failing the task.
+const overflowTurn = providers.openai.turn;
+const overflowEvents = [];
+const overflowing = new Agent({ emit: (e) => overflowEvents.push(e), askPermission: async () => "allow" });
+overflowing.browser = { ...agent.browser, run: async () => "x".repeat(5000) };
+const textCall = { type: "tool_call", id: "call_text", name: "get_page_text", input: {} };
+const overflowError = Object.assign(new Error("400 request (34204 tokens) exceeds the available context size (32768 tokens), try increasing it"), { status: 400 });
+replies = [
+  { content: [textCall], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  overflowError,
+  { content: [{ type: "text", text: "Python is older." }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+requests = [];
+providers.openai.turn = async ({ messages }) => {
+  requests.push(structuredClone(messages));
+  const next = replies.shift();
+  if (next instanceof Error) throw next;
+  return next;
+};
+await overflowing.run("compare them", loopConfig);
+providers.openai.turn = overflowTurn;
+assert.equal(requests.length, 3, `an overflowing request was sent ${requests.length} times in all, expected one retry`);
+const retried = requests.at(-1).flatMap((m) => m.content).find((b) => b.type === "tool_result");
+assert.match(retried.content[0].text, /trimmed to save space/, "the newest page text was not trimmed before the retry");
+assert.ok(overflowEvents.some((e) => e.type === "reply" && e.text === "Python is older."), "the task did not finish after the retry");
+assert.ok(overflowEvents.some((e) => e.type === "notice" && /context size/.test(e.text)), "the user is not told about the trim");
+
 // Safety scans see a screenshot only when the page has no usable text: a screenshot of a
 // page with text, alone or attached to other output, is scanned by the page's text, while
 // a page without text (a canvas), read_page's own screenshot of what its outline cannot
