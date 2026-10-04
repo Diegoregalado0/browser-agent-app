@@ -23,6 +23,7 @@ const PROVIDER_HOSTS = [
   "https://api.anthropic.com/*",
   "https://api.openai.com/*",
   "https://generativelanguage.googleapis.com/*",
+  "https://aiplatform.googleapis.com/*",
   "https://api.mistral.ai/*",
   "http://127.0.0.1/*",
   "http://localhost/*",

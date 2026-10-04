@@ -25,6 +25,9 @@ export const DEFAULTS = {
   // The models picked so far, newest first, for quick switching: [{ provider, model }].
   modelHistory: [],
   openaiBaseUrl: "",
+  // Gemini through Vertex AI (a Google Cloud API key, billed to its Cloud project) instead
+  // of the Gemini API.
+  geminiVertex: false,
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
   effort: "high",

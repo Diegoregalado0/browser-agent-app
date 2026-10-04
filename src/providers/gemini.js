@@ -1,5 +1,10 @@
 import { GoogleGenAI, ApiError } from "@google/genai";
 
+// The Gemini API, or Vertex AI when config.geminiVertex is set; both take the same key slot.
+function client(apiKey, config) {
+  return new GoogleGenAI(config?.geminiVertex ? { vertexai: true, apiKey } : { apiKey });
+}
+
 function inline(b) {
   return { inlineData: { mimeType: b.mediaType, data: b.data } };
 }
@@ -47,7 +52,7 @@ export async function listModels({ apiKey }) {
 }
 
 export async function turn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking }) {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = client(apiKey, config);
   const stream = await ai.models.generateContentStream({
     model,
     contents: toContents(messages, model),
@@ -129,8 +134,8 @@ export function describeError(err) {
 }
 
 // One-shot structured JSON call used by the safety checks. `images` are data blocks.
-export async function classify({ apiKey, model, system, text, images = [], schema, signal, onUsage }) {
-  const ai = new GoogleGenAI({ apiKey });
+export async function classify({ apiKey, model, config, system, text, images = [], schema, signal, onUsage }) {
+  const ai = client(apiKey, config);
   const res = await ai.models.generateContent({
     model,
     contents: [{ role: "user", parts: [{ text }, ...images.map(inline)] }],

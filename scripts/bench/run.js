@@ -11,18 +11,28 @@
 //   node scripts/bench/run.js --provider ollama --model gemma4:26b --host http://localhost:11436
 //   BENCH_KEY=$(grep ^MISTRAL_API_KEY= ~/browser-agent/.env | cut -d= -f2) \
 //     node scripts/bench/run.js --provider mistral --model ministral-14b-latest
+//   node scripts/bench/run.js --provider gemini --model gemini-3.8-flash \
+//     --taskfile tasks-extended.js --split train --max-usd 15
 //
-// Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
-//        --port (DevTools port; 0 = any free one) --thinking on|off
+// Flags: --provider --model --runs N --tasks a,b --split train|heldout --host --base-url
+//        --timeout(ms) --port (DevTools port; 0 = any free one) --thinking on|off
+//        --vertex on|off (gemini only, default on) --max-usd --ledger --task-reserve-usd
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
-// (command-line args are visible to every user via `ps`), and is never logged.
+// (command-line args are visible to every user via `ps`), and is never logged. The gemini
+// provider reads GEMINI_VERTEX_KEY (a Google Cloud API key for Vertex AI), or BENCH_KEY.
+//
+// Spend cap (billed providers): every task's estimated cost is added to a ledger file
+// (--ledger, default ~/bench-results/cloud-spend.json) shared by all runs, and a task only
+// starts while the ledger total plus --task-reserve-usd (the most one task can cost under
+// its token limit) stays within --max-usd (default 15); a run stopped that way exits 3. The estimate prices every input
+// token at the uncached rate and counts safety-check tokens too, so it errs high.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
 // thinking costs real minutes per step on shared hardware) and on for mistral (its default
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, renameSync, existsSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -62,7 +72,8 @@ if (!["on", "off"].includes(thinkingArg)) throw new Error('--thinking must be "o
 const thinking = thinkingArg === "on";
 
 const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
-const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id));
+// --split keeps only the tasks of one split (tasks-extended.js marks each train or heldout).
+const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id) && (!args.split || t.split === args.split));
 if (!selectedTasks.length) {
   console.error(`No matching tasks for --tasks ${args.tasks}. Known ids: ${TASKS.map((t) => t.id).join(", ")}`);
   process.exit(1);
@@ -103,8 +114,15 @@ function buildConfig() {
   } else if (args.provider === "mistral") {
     if (!process.env.BENCH_KEY) throw new Error("Mistral needs its API key in the BENCH_KEY environment variable.");
     overrides.keys.mistral = process.env.BENCH_KEY;
+  } else if (args.provider === "gemini") {
+    const key = process.env.GEMINI_VERTEX_KEY || process.env.BENCH_KEY;
+    if (!key) throw new Error("Gemini needs its API key in the GEMINI_VERTEX_KEY (or BENCH_KEY) environment variable.");
+    overrides.keys.gemini = key;
+    overrides.geminiVertex = args.vertex !== "off";
+    // Bounds what one task can cost; TASK_TOKEN_LIMIT is what --task-reserve-usd covers.
+    overrides.limits = { taskTokens: TASK_TOKEN_LIMIT };
   } else {
-    throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, or mistral.`);
+    throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, mistral, or gemini.`);
   }
   return mergeConfig(overrides);
 }
@@ -113,7 +131,7 @@ function buildConfig() {
 // the local server/tunnel answers at all. Mistral is a cloud API, not a local tunnel that
 // can drop out from under the Mac sleeping, so it is not checked here.
 async function endpointReachable() {
-  if (args.provider === "mistral") return { ok: true };
+  if (args.provider === "mistral" || args.provider === "gemini") return { ok: true };
   const url = args.provider === "ollama" ? `${args.host || "http://localhost:11436"}/api/tags` : `${(args.baseUrl || args["base-url"] || "http://localhost:8081/v1").replace(/\/$/, "")}/models`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
@@ -127,15 +145,72 @@ async function endpointReachable() {
 // paid for, so their cost column reads "-". $0.20/1M tokens (in and out) for Ministral 14B,
 // from docs.mistral.ai/inference/pricing as of 2026-10 - reported as an estimate below
 // since it was looked up, not read from a live billing API.
+// Gemini prices are Vertex AI's non-global (regional) rates, the higher of its two, from
+// cloud.google.com/vertex-ai/generative-ai/pricing as of 2026-10-03; the 3.6 to 3.8 Flash
+// rates are introductory through 2026-12-31 and double after.
 const CLOUD_PRICING_PER_MTOK = {
   "ministral-14b-latest": { in: 0.2, out: 0.2 },
+  "gemini-3.8-flash": { in: 0.825, out: 4.125 },
+  "gemini-3.7-flash": { in: 0.825, out: 4.125 },
+  "gemini-3.6-flash": { in: 0.825, out: 4.125 },
+  "gemini-3.5-flash": { in: 1.65, out: 9.9 },
+  "gemini-3.5-flash-lite": { in: 0.33, out: 2.75 },
 };
+const BILLED_PROVIDERS = ["mistral", "gemini"];
 
-function costFor(provider, model, input, output) {
-  if (provider !== "mistral") return null;
+// Per-task token limit for billed runs (the agent's own usage limit, safety checks
+// included). The agent checks it after each model request, so a task can overshoot it by
+// one request; the default reserve prices the limit plus a quarter for that overshoot at
+// the input rate, and 100k more tokens at the output rate.
+const TASK_TOKEN_LIMIT = 400000;
+
+// otherTokens are the safety checks' tokens, which the usage event does not split into
+// input and output; they are priced at the main model's input rate, above the small
+// safety-check model's rates for the mostly-input traffic they are.
+function costFor(provider, model, input, output, otherTokens = 0) {
+  if (!BILLED_PROVIDERS.includes(provider)) return null;
   const price = CLOUD_PRICING_PER_MTOK[model];
   if (!price) return null;
-  return { amount: (input / 1e6) * price.in + (output / 1e6) * price.out, estimate: true };
+  return { amount: ((input + otherTokens) / 1e6) * price.in + (output / 1e6) * price.out, estimate: true };
+}
+
+// The shared spend ledger: { spentUsd, entries: [{ at, runId, run, task, model, usd }] }.
+const billed = BILLED_PROVIDERS.includes(args.provider);
+const maxUsd = Number(args["max-usd"] ?? 15);
+const ledgerPath = args.ledger || join(homedir(), "bench-results", "cloud-spend.json");
+const modelPrice = CLOUD_PRICING_PER_MTOK[args.model] ?? { in: 0, out: 0 };
+const taskReserveUsd = Number(args["task-reserve-usd"] ?? ((TASK_TOKEN_LIMIT * 1.25) / 1e6) * modelPrice.in + (100000 / 1e6) * modelPrice.out);
+if (billed && !CLOUD_PRICING_PER_MTOK[args.model]) {
+  console.error(`No price on file for ${args.model}; add it to CLOUD_PRICING_PER_MTOK before a billed run.`);
+  process.exit(1);
+}
+
+function readLedger() {
+  if (!existsSync(ledgerPath)) return { spentUsd: 0, entries: [] };
+  return JSON.parse(readFileSync(ledgerPath, "utf8"));
+}
+
+function addToLedger(entry) {
+  const ledger = readLedger();
+  ledger.entries.push(entry);
+  ledger.spentUsd = ledger.entries.reduce((s, e) => s + e.usd, 0);
+  mkdirSync(join(ledgerPath, ".."), { recursive: true });
+  writeFileSync(`${ledgerPath}.tmp`, JSON.stringify(ledger, null, 2));
+  renameSync(`${ledgerPath}.tmp`, ledgerPath);
+  return ledger.spentUsd;
+}
+
+// Today's token count across tasks (main model and safety checks), from the controller.
+async function tokensToday(cdp, sessionId) {
+  await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"data_info"})', returnByValue: true }, sessionId);
+  const end = Date.now() + 5000;
+  while (Date.now() < end) {
+    const { result } = await cdp.send("Runtime.evaluate", { expression: "JSON.stringify(window.__bench.events.splice(0))", returnByValue: true }, sessionId);
+    const info = JSON.parse(result.value).find((e) => e.type === "data_info");
+    if (info) return info.tokensToday;
+    await sleep(200);
+  }
+  return null;
 }
 
 async function freshProfile() {
@@ -178,7 +253,7 @@ async function runBenchmark() {
   await setConfig(cdp, sessionId, config);
 
   const rows = [...resumedRows];
-  for (let run = 1; run <= Number(args.runs); run++) {
+  runs: for (let run = 1; run <= Number(args.runs); run++) {
     for (const task of selectedTasks) {
       if (done.has(`${run}:${task.id}`)) {
         console.log(`\n[run ${run}] ${task.id}: already done (resumed), skipping`);
@@ -194,7 +269,16 @@ async function runBenchmark() {
         process.exit(1);
       }
       await waitServerIdle();
+      if (billed) {
+        const spent = readLedger().spentUsd;
+        if (spent + taskReserveUsd > maxUsd) {
+          console.error(`\nStopping: the ledger shows ~$${spent.toFixed(2)} spent, and one more task (reserve $${taskReserveUsd.toFixed(2)}) could pass the $${maxUsd.toFixed(2)} ceiling.`);
+          process.exitCode = 3;
+          break runs;
+        }
+      }
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
+      const tokensBefore = billed ? await tokensToday(cdp, sessionId) : null;
       let result;
       try {
         openEventLog(task, run);
@@ -206,7 +290,19 @@ async function runBenchmark() {
         console.error(`  -> harness error: ${err.message}`);
         result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
       }
-      const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
+      let otherTokens = 0;
+      if (billed) {
+        // The day's count resets at midnight; a task spanning it is charged its whole
+        // reserve rather than a guess.
+        const tokensAfter = await tokensToday(cdp, sessionId);
+        const total = tokensBefore != null && tokensAfter != null && tokensAfter >= tokensBefore ? tokensAfter - tokensBefore : null;
+        otherTokens = total == null ? null : Math.max(0, total - result.tokensIn - result.tokensOut);
+      }
+      const cost = otherTokens == null ? { amount: taskReserveUsd, estimate: true } : costFor(args.provider, args.model, result.tokensIn, result.tokensOut, otherTokens);
+      if (billed) {
+        const spent = addToLedger({ at: new Date().toISOString(), runId, run, task: task.id, model: args.model, usd: cost.amount });
+        console.log(`  -> estimated cost $${cost.amount.toFixed(4)}; ledger total ~$${spent.toFixed(2)} of $${maxUsd.toFixed(2)}`);
+      }
       rows.push({
         run,
         task: task.id,
