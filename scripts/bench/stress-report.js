@@ -53,14 +53,14 @@ if (!soak) {
         fmt(mean(g.map((r) => r.wallMs / 60000))),
         `${fmt(m("stepSecFirstQ"))} / ${fmt(m("stepSecLastQ"))}`,
         fmt(m("maxInputTokens"), 0),
-        fmt(m("compactions")),
+        `${fmt(m("compactions"))} / ${fmt(m("overflowRetries"))}`,
         fmt(m("loopNotes")),
         fmt(m("toolErrors")),
         stops(g),
       ];
     });
   out.push(
-    table(["Dim", "Task", "Rung", "Pass", "Score", "Steps", "Min", "s/step first/last q", "Max ctx", "Compact", "Loop notes", "Tool errs", "Outcomes"], lines),
+    table(["Dim", "Task", "Rung", "Pass", "Score", "Steps", "Min", "s/step first/last q", "Max ctx", "Compact / overflow retry", "Loop notes", "Tool errs", "Outcomes"], lines),
     "",
   );
 }

@@ -88,6 +88,7 @@ export function taskMetrics(events, { agentError = null, timedOut = false, stall
     maxInputTokens: requests.length ? Math.max(...requests.map((r) => r.input)) : null,
     lastInputTokens: requests.length ? requests.at(-1).input : null,
     compactions: events.filter((e) => e.type === "debug" && /^Trimmed old screenshots/.test(e.text)).length,
+    overflowRetries: notices.filter((n) => /passed the model's context size/.test(n)).length,
     unreadableReplies: events.filter((e) => e.type === "debug" && /could not be read/.test(e.text)).length,
     loopNotes: toolResults.filter((e) => /\[Loop check\]/.test(textOf(e.content))).length,
     toolErrors: errors.length,
