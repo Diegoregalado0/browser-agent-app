@@ -323,6 +323,80 @@ replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end"
 await looping.run("open the product", loopConfig);
 const goes = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.name === "navigate");
 assert.equal(goes.at(-1).content.at(-1).text.startsWith("[Loop check]"), true, "a repeated identical navigation gets a loop note");
+// Reads and navigations repeated with the same result get notes but never stop the task:
+// going back to a list page between items repeats them legitimately.
+looping.browser.run = async () => "same outline";
+notices.length = 0;
+requests = [];
+replies = Array.from({ length: 8 }, () => ({ content: [readCall], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+replies.push({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+await looping.run("read it all", loopConfig);
+assert.equal(requests.length, 9, "repeated reads stopped the task");
+assert.ok(!notices.some((t) => /seems stuck/.test(t)), "repeated reads stopped the task");
+// An action that keeps reporting the same result (a click that changes nothing) gets a note
+// at the third repeat and stops the task at the sixth.
+looping.browser.run = async () => "No change among the controls in view.";
+requests = [];
+replies = Array.from({ length: 20 }, () => ({ content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+await looping.run("click until it works", loopConfig);
+const clicks = looping.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.id === "call_click");
+assert.ok(clicks.at(-4).content.some((b) => b.type === "text" && /Loop check.*same result several times/s.test(b.text)), "a repeated no-change click got no note");
+assert.equal(requests.length, 6, `a click repeated with the same result made ${requests.length} requests, expected a stop after 6`);
+assert.ok(notices.some((t) => /seems stuck: the same browser call returned the same result 6 times/.test(t)), "the user is not told why the task stopped");
+// The same call blocked by the safety check is refused on the same page without a new
+// check, gets a note the second time and stops the task the fourth time. It never runs.
+const loopClassify = providers.openai.classify;
+let blockChecks = 0;
+// Content scans of the results go through classify too; only action checks are counted.
+providers.openai.classify = async ({ text }) =>
+  text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (blockChecks++, { verdict: "block", reason: "That button is not what the user asked for." });
+let blockedRuns = 0;
+looping.browser.run = async (name, input) => (input.action === "left_click" && blockedRuns++, "clicked");
+notices.length = 0;
+requests = [];
+replies = Array.from({ length: 20 }, () => ({ content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }));
+const before = looping.messages.length;
+await looping.run("click the button", config);
+const blockedClicks = looping.messages.slice(before).flatMap((m) => m.content).filter((b) => b.type === "tool_result" && b.id === "call_click");
+assert.equal(blockChecks, 1, `a repeated blocked call was checked ${blockChecks} times, expected once`);
+assert.equal(blockedRuns, 0, "a blocked click ran");
+assert.doesNotMatch(blockedClicks[0].content[0].text, /Loop check/, "a single block got a loop note");
+assert.match(blockedClicks[1].content[0].text, /earlier in this task.*Loop check.*already blocked/s, "a repeated block got no note");
+assert.equal(requests.length, 4, `a call blocked again and again made ${requests.length} requests, expected a stop after 4`);
+assert.ok(notices.some((t) => /blocked by the safety check 4 times/.test(t)), "the user is not told why the task stopped");
+// A new task checks the call again.
+replies = [{ content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+await looping.run("try once more", config);
+assert.equal(blockChecks, 2, "a new task reused the last task's block");
+providers.openai.classify = loopClassify;
+
+// A request the server refuses as longer than its context is retried once the tool output
+// is trimmed: first all but the newest result, then the newest too, instead of failing the task.
+const overflowTurn = providers.openai.turn;
+const overflowEvents = [];
+const overflowing = new Agent({ emit: (e) => overflowEvents.push(e), askPermission: async () => "allow" });
+overflowing.browser = { ...agent.browser, run: async () => "x".repeat(5000) };
+const textCall = { type: "tool_call", id: "call_text", name: "get_page_text", input: {} };
+const overflowError = Object.assign(new Error("400 request (34204 tokens) exceeds the available context size (32768 tokens), try increasing it"), { status: 400 });
+replies = [
+  { content: [textCall], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
+  overflowError,
+  { content: [{ type: "text", text: "Python is older." }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
+];
+requests = [];
+providers.openai.turn = async ({ messages }) => {
+  requests.push(structuredClone(messages));
+  const next = replies.shift();
+  if (next instanceof Error) throw next;
+  return next;
+};
+await overflowing.run("compare them", loopConfig);
+providers.openai.turn = overflowTurn;
+assert.equal(requests.length, 3, `an overflowing request was sent ${requests.length} times in all, expected one retry`);
+const retried = requests.at(-1).flatMap((m) => m.content).find((b) => b.type === "tool_result");
+assert.match(retried.content[0].text, /trimmed to save space/, "the newest page text was not trimmed before the retry");
+assert.ok(overflowEvents.some((e) => e.type === "reply" && e.text === "Python is older."), "the task did not finish after the retry");
+assert.ok(overflowEvents.some((e) => e.type === "notice" && /context size/.test(e.text)), "the user is not told about the trim");
 
 // Safety scans see a screenshot only when the page has no usable text: a screenshot of a
 // page with text, alone or attached to other output, is scanned by the page's text, while

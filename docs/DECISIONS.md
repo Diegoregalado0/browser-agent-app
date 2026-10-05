@@ -97,3 +97,28 @@ The benchmark task and its timeout are unchanged. This needs a GPU run to confir
 - Symptom to watch for: read_page or action reports listing extra controls (decorative `.btn` elements or anchors with a pointer cursor), or a scroll that a model meant as the opposite direction.
 - Where: `src/browser-tools.js:731` (scroll) and `SCRIPTED_SELECTOR` in `src/page-scripts.js:35`. Commit `1d70fcd`.
 - Revert or tune: `git revert 1d70fcd`, or narrow `SCRIPTED_SELECTOR`.
+
+## 2026-10-04
+
+### 12. A task that repeats the same action, or the same blocked call, stops
+
+The loop guard only counted failures and repeated page reads. Small local models looped on calls that neither failed nor read: Qwen 3.5 4B sent the same left_click 44 times in one run (the safety check blocked 41 of them, about 3 s each), and Qwen 3.5 9B scrolled the same way 19 times. Now:
+
+- An action (not a read or navigation) that returns the same result as before gets a note the third time and stops the task the sixth time, within the last 20 calls. Screenshots and waits are not counted, since their text says nothing about the page. Reads and navigations keep the note only: going back to a list page between items repeats them legitimately.
+- A call the safety check blocked is refused if it comes again on the same page address in the same task, without a new check. The second time it gets a note, the fourth time the task stops. A single block is still the check's decision, not a loop.
+
+The safety check itself is unchanged; the stored block only refuses, it never allows.
+
+- Symptom to watch for: a task stopped with "the same browser call returned the same result 6 times" while it was making progress (an action whose report does not change although the page does), or a call refused as "blocked earlier in this task" after the page changed without its address changing.
+- Where: `STOP_SAME_RESULT`, `STOP_SAME_BLOCK` and `recordBlock` in `src/loop-guard.js:24`, and `blockedCalls` in `#authorize` in `src/agent.js:731`. Commit `fb0aa42`, checks in `scripts/agent-check.js` (commit `48934ad`).
+- Revert or tune: `git revert 48934ad fb0aa42`, or raise `STOP_SAME_RESULT` and `STOP_SAME_BLOCK`.
+
+### 13. A request longer than the model's context is trimmed and sent again
+
+Compaction runs only once a request has grown by half and leaves the latest four messages whole, so two long page texts in a row can pass a local 32k context between passes. A Qwen 3.6 35B bench run lost "Compare Python and Java" that way: get_page_text returned 60,142 and then 48,171 characters, and llama.cpp refused the next request (34,204 tokens against 32,768), which ended the task with an error. Qwen 3.5 9B hit the same error in the 2026-10-03 runs.
+
+Now, when the server says the request exceeds the context, earlier screenshots and long tool output are trimmed as in a normal pass, leaving only the newest result whole, and the request is sent again. If nothing older can be trimmed, or it still does not fit, the newest result is trimmed too (to its first 1,500 characters, with a note to run the tool again). After that the error ends the task as before. The panel shows a notice when this happens.
+
+- Symptom to watch for: the model asking for page text again right after the notice, or answering from trimmed text. Providers that word the error differently are not matched and fail as before.
+- Where: `CONTEXT_OVERFLOW` and `OVERFLOW_KEEP` at `src/agent.js:57`, the `keep` argument of `#compact`, and the retry in the request loop. Commit `10bbc3a`, checked in `scripts/agent-check.js`.
+- Revert: `git revert 10bbc3a`.

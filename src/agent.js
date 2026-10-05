@@ -52,6 +52,12 @@ const COMPACT_GROWTH = 1.5;
 const COMPACT_KEEP_MESSAGES = 4;
 const COMPACT_TEXT_CHARS = 1500;
 const SERVER_CLEARED = new Set(["anthropic"]);
+// A request the server refused as longer than the model's context (llama.cpp, OpenAI,
+// vLLM wording). Two page texts in a row can pass a 32k local context between passes.
+const CONTEXT_OVERFLOW = /exceeds the available context size|context_length_exceeded|maximum context length/i;
+// Messages left untouched by the trim before each retry of an overflowing request: first
+// the newest tool result stays whole, then it is trimmed too.
+const OVERFLOW_KEEP = [1, 0];
 // Tools whose output shows the current page as it is after the call.
 const PAGE_TOOLS = new Set(["browser", "navigate", "form_input", "tabs"]);
 
@@ -153,6 +159,9 @@ export class Agent {
     // hostnames with the kind of prompt declined there.
     this.declinedCalls = new Set();
     this.declinedHosts = new Map();
+    // Calls the safety check blocked during the current task, by callKey and page address,
+    // with the reason. The same call on the same page is refused again without a new check.
+    this.blockedCalls = new Map();
     // Local origins (scheme, host and port) the user allowed opening during the current task.
     this.allowedPrivateOrigins = new Set();
     // Tool calls that typed into a password field; their text is hidden everywhere but in
@@ -165,12 +174,13 @@ export class Agent {
   }
 
   // Trims old screenshots and long tool output when the last request was large (see
-  // COMPACT_MIN_TOKENS). The user's own messages are never trimmed.
-  #compact(lastInput, config) {
+  // COMPACT_MIN_TOKENS). The user's own messages are never trimmed. keep: trim now, leaving
+  // only this many of the latest messages whole (after a context overflow).
+  #compact(lastInput, config, keep = null) {
     if (SERVER_CLEARED.has(config.provider)) return false;
-    if (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH) return;
+    if (keep === null && (lastInput < COMPACT_MIN_TOKENS || lastInput < this.compactedAt * COMPACT_GROWTH)) return false;
     let trimmed = false;
-    const end = this.messages.length - COMPACT_KEEP_MESSAGES;
+    const end = this.messages.length - (keep ?? COMPACT_KEEP_MESSAGES);
     for (let i = 0; i < end; i++) {
       const m = this.messages[i];
       if (m.role !== "user" || !m.content.some((b) => b.type === "tool_result")) continue;
@@ -337,6 +347,7 @@ export class Agent {
     this.taskMetrics = metrics;
     this.declinedCalls.clear();
     this.declinedHosts.clear();
+    this.blockedCalls.clear();
     this.allowedPrivateOrigins.clear();
     const outputAtStart = this.usage.output;
     this.#emit(signal, { type: "status", running: true });
@@ -355,6 +366,7 @@ export class Agent {
         this.#emit(signal, { type: "assistant_start" });
         let result;
         let waits = 0;
+        let overflows = 0;
         try {
           await this.limiter.take("request", limits.requestsPerMinute, signal, (secs) =>
             this.#emit(signal, { type: "notice", text: `Pausing ${secs}s to stay under your limit of ${limits.requestsPerMinute} model requests per minute.` }),
@@ -382,6 +394,15 @@ export class Agent {
               });
               break;
             } catch (err) {
+              let trimmed = false;
+              while (!trimmed && !signal.aborted && CONTEXT_OVERFLOW.test(`${err.message} ${err.code}`) && overflows < OVERFLOW_KEEP.length) {
+                trimmed = this.#compact(this.lastInput, config, OVERFLOW_KEEP[overflows++]);
+              }
+              if (trimmed) {
+                this.#emit(signal, { type: "notice", text: "The conversation passed the model's context size; trimmed earlier page text and screenshots, trying again." });
+                this.onHistory();
+                continue;
+              }
               const delay = rateLimitDelay(err);
               if (delay === null || waits++ >= MAX_RATE_LIMIT_WAITS || signal.aborted) throw err;
               const wait = Math.min(Math.ceil(delay) + 500, 65000);
@@ -555,7 +576,8 @@ export class Agent {
       // password field. The next save of the history then hides it too.
       if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
       this.#emit(signal, { type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
-      // Declined or blocked actions are the user's and the safety check's decisions, not loops.
+      // Declined or blocked actions are the user's and the safety check's decisions, not loops;
+      // only the same call blocked again counts (see LoopGuard.recordBlock).
       let authorizing = false;
       // Set while a page tool runs, so a failure there comes back with a screenshot.
       let running = false;
@@ -599,7 +621,13 @@ export class Agent {
         this.#emit(signal, { type: "tool_result", id: call.id, content: output });
         results.push({ ...base, content: output });
       } catch (err) {
-        const note = authorizing || signal.aborted ? null : this.loopGuard.record(call.name, call.input, true, err.message);
+        const note = signal.aborted
+          ? null
+          : err.blocked
+            ? this.loopGuard.recordBlock(call.name, call.input)
+            : authorizing
+              ? null
+              : this.loopGuard.record(call.name, call.input, true, err.message);
         let content = [{ type: "text", text: note ? `${err.message}\n\n${note}` : err.message }];
         if ((running || note) && !signal.aborted) {
           content = [...content, ...(await this.#autoScreenshot(content, running ? "the action failed" : "of the loop check", signal))];
@@ -716,6 +744,12 @@ export class Agent {
     if (signal.aborted) throw new Error("Cancelled by the user.");
     let check = null;
     if (config.permissionMode !== "auto" && this.#changesState(call)) {
+      const blockedKey = `${callKey(call)} ${await this.browser.currentUrl().catch(() => "")}`;
+      const earlier = this.blockedCalls.get(blockedKey);
+      if (earlier !== undefined) {
+        this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name} again: ${earlier}` });
+        throw Object.assign(new Error(`Blocked by the safety check earlier in this task, on this page: ${earlier} If the user really wants this, ask them to confirm it explicitly.`), { blocked: true });
+      }
       check = await (precheck ?? this.#safetyCheck(call, config, signal));
       // A check cut short by Stop is not a reason to ask; the action is not going to run.
       if (signal.aborted) throw new Error("Cancelled by the user.");
@@ -723,7 +757,8 @@ export class Agent {
       this.#emit(signal, { type: "guard", name: call.name, input: this.#shownInput(call), target, page: page.url, verdict, reason });
       if (verdict === "block") {
         this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name}: ${reason}` });
-        throw new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`);
+        this.blockedCalls.set(blockedKey, reason);
+        throw Object.assign(new Error(`Blocked by the safety check: ${reason} If the user really wants this, ask them to confirm it explicitly.`), { blocked: true });
       }
       if (verdict === "allow" && !confirm) return;
     } else if (!confirm) return;
