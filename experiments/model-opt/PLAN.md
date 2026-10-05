@@ -145,3 +145,27 @@ checkout-stop-at-payment fails in 13 of 14 runs (21 to 45 steps, 360 s limit; th
 
 ### Recommended local config
 Default: Qwen3.6-35B-A3B UD-Q3_K_XL, n-cpu-moe 31, ubatch-size 2048, batch-size 2048, load-mode none (the nommap run was only measured on Q4_K_M; verify with the first q3kxl run that it still fits and loads), parallel 1, ctx-size 32768, q8_0 KV, reasoning off. Fast tier: the REAP48 v2 file with n-cpu-moe 17, ubatch and batch 2048 (reap48-ub2048). Open points before locking the default: a third q3kxl repeat and one q3kxl run with load-mode none; a bench log rewording of the post-Stop wait; a repeated-identical-call limit in the agent loop (would turn 4b and 9b loops into early failures and help every tier); Q4 ub512 (old main, 9/10, 14.2 s/step) vs q3kxl now (12.5 s/step) used different main commits so the speed gain is indicative only.
+
+## 2026-10-04 primary tuning (Q3_K_XL primary, main ce14000, 10 tasks, 360 s)
+
+Runs: session 20261004-103619 (started 10:36, about 2 h 23 min: nommap, ub4096, primary, nommap, ub4096), 20261004-103622 (started 12:59, about 1 h: primary with `--thinking on` twice), 20261004-143938 (started 14:40, about 1 h 36 min: samp, cr0, samp). s/step is the median gap between assistant_start events (same method as the overnight table; it reproduces 13.3 and 11.5 for the two overnight q3kxl runs). Journal figures come from step_timing.py.
+
+VRAM at idle with the model loaded (nvidia-smi, cap 7.6 GB = 7782 MiB): primary n-cpu-moe 31 ub2048 7553 MiB; same with load-mode none 7553; n-cpu-moe 30 ub2048 7885 (does not fit); n-cpu-moe 31 ub4096 7861 (does not fit); 32 ub4096 7843 (does not fit); 33 ub4096 7511; 33 ub2048 6905; 34 ub4096 7177. So one more expert layer on the GPU does not fit, and ub4096 costs two expert layers.
+
+| config | runs | pass | med s/step | p90 | prompt tok/step | prompt tok/s | gen tok/s | steps/pass | wall min | failures |
+|---|---|---|---|---|---|---|---|---|---|---|
+| primary (same-day control) | 1 | 9 | 10.6 | 19.7 | 1251 | 268 | 20.0 | 8.3 | 21 | checkout |
+| x-nommap (load-mode none) | 2 | 9, 9 | 12.7, 10.7 | 21.3, 21.6 | 1208, 1679 | 251, 303 | 19.8, 19.6 | 7.6, 8.4 | 23, 26 | checkout x2 |
+| x-ub4096 (n-cpu-moe 33) | 2 | 8, 9 | 10.6, 11.6 | 17.9, 19.6 | 1257, 1715 | 275, 304 | 19.0, 17.8 | 9.9, 7.6 | 26, 23 | wikipedia (context overflow), checkout x2 |
+| thinking on (per request, agent only) | 2 | 7, 9 | 13.9, 14.5 | 23.8, 21.7 | 1357, 1421 | 258, 260 | 18.1, 18.2 | 5.6, 6.2 | 31, 23 | youtube, checkout x2, osm |
+| x-samp (temp 0.7, top-p 0.8, top-k 20, presence 1.5) | 2 | 9, 9 | 9.7, 11.5 | 17.8, 20.5 | 1151, 1652 | 246, 296 | 18.3, 18.2 | 8.0, 8.3 | 21, 24 | checkout, osm |
+| x-cr0 (cache-ram 0) | 1 | 7 | 18.6 | 30.8 | 4914 | 340 | 19.1 | 7.9 | 38 | youtube, checkout, dismiss-popup |
+
+Readings:
+- load-mode none: no gain on Q3_K_XL (12.7 and 10.7 vs 10.6 control and 13.3/11.5 overnight). The Q4 gain (12.7 to 10.6, one run) did not carry over. Drop; keep mmap.
+- ub4096: within noise on step time and prefill speed, and it needs n-cpu-moe 33 (two expert layers back on the CPU). Its one extra loss was a 400 "request (34204 tokens) exceeds the available context size (32768)" on wikipedia-compare after two get_page_text results of 60k and 48k characters, which is an agent bug, not the setting (fixed on branch loop-repeat-limit). Drop.
+- thinking on: fewer steps per passing task (5.6 to 6.2 vs 8.3) but each step is 3 to 4 s slower (more generated tokens: 153 to 172 per step vs about 107) and checkout still times out; 8 of 10 on average. Not a default. A hybrid (thinking only after a loop-check note or a failure) is the open route; checkout needs steps more than reasoning.
+- samp (Qwen's recommended non-thinking sampling; the GGUF carries thinking-mode defaults and Browsby sends none): 9 and 9, 9.7 and 11.5 s/step, wall 21 and 24 min, best p90. Ties or slightly beats the control; checkout lost once, osm once (33 steps). Adopt as a low-risk default; presence-penalty 1.5 also discourages repeated calls.
+- cache-ram 0: harmful. Prompt tokens evaluated per step rise 4x (4914 vs 1251) because the single slot is evicted by every safety check and nothing restores it from RAM; 18.6 s/step, 7/10, wall 38 min. Keep the host prompt cache; reduce the journal noise with a log level setting instead.
+
+Recommended final config: Qwen3.6-35B-A3B UD-Q3_K_XL, n-cpu-moe 31, ubatch and batch 2048, mmap (default load mode), parallel 1, ctx-size 32768, q8_0 KV, -fa on, reasoning off, default cache-ram, plus sampling temp 0.7, top-p 0.8, top-k 20, min-p 0, presence-penalty 1.5. Agent: merge loop-repeat-limit (repeated-action and repeated-block stops, cached guard blocks, context-overflow trim and retry) after review.

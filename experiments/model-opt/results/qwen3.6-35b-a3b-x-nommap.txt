@@ -1,0 +1,25 @@
+== qwen3.6-35b-a3b-x-nommap: 9/10 passed; window {'requests': 206, 'prompt_tokens_evaluated': 124379, 'prompt_s': 494.7, 'prompt_tok_s': 251.4, 'gen_tokens': 11074, 'gen_s': 559.3, 'gen_tok_s': 19.8, 'lru_or_low_sim': 159}
+task                   ok   steps    secs s/step  reqs prompt_tok  gen_tok evict
+hn-page2               PASS     3    61.8   20.6    11      13827      480     9
+book-product-page      PASS     8   108.8   13.6    24      17025     1207    21
+lasagna-recipe         PASS     7    81.3   11.6    18       8691      927    12
+httpbin-form           PASS     7    73.4   10.5    20       5787     1001    12
+youtube-play           PASS     8   166.5   20.8    27      10426     1338    25
+wikipedia-compare      PASS     4    73.8   18.4    14      14696      806    11
+checkout-stop-at-payment FAIL    35   360.5   10.3    60      33414     3231    39
+github-issue           PASS     1    27.5   27.5     8       5837      458     4
+osm-directions         PASS    17   256.2   15.1    42      33418     2578    35
+dismiss-popup          PASS    13   189.8   14.6    23       7847     1455    15
+== qwen3.6-35b-a3b-x-nommap: 9/10 passed; window {'requests': 217, 'prompt_tokens_evaluated': 181341, 'prompt_s': 597.8, 'prompt_tok_s': 303.3, 'gen_tokens': 12514, 'gen_s': 638.7, 'gen_tok_s': 19.59, 'lru_or_low_sim': 179}
+task                   ok   steps    secs s/step  reqs prompt_tok  gen_tok evict
+hn-page2               PASS     4    77.1   19.3    15      21678      826    11
+book-product-page      PASS    12   138.1   11.5    26      15213     1458    17
+lasagna-recipe         PASS     6    91.1   15.2    17      13851      971    13
+httpbin-form           PASS     8    88.7   11.1    21       6641     1123    16
+youtube-play           PASS    13   195.1   15.0    32      15945     1726    28
+wikipedia-compare      PASS     5   146.1   29.2    15      63008      817    13
+checkout-stop-at-payment FAIL    32   360.5   11.3    63      35510     3220    53
+github-issue           PASS     1    29.1   29.1     8       5981      463     6
+osm-directions         PASS    24   329.1   13.7    48      27306     3318    42
+dismiss-popup          PASS     3   113.0   37.7     8       3687      540     7
+run dir: /home/dreg3/bench-results/runs/20261004-103619
