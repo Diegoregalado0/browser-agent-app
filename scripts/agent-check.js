@@ -608,7 +608,7 @@ assert.deepEqual(pairs(hostConfig.modelHistory), ["mistral/mistral-small-latest"
 assert.deepEqual(pairs(usedModels(uiConfig(hostConfig))), ["ollama/qwen3:8b", `openai/${first}`]);
 await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", first) });
 assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest", "ollama/qwen3:8b"], "a model was listed twice");
-await fromLocal({ type: "save_config", patch: forgetPatch(uiConfig(hostConfig), { provider: "ollama", model: "qwen3:8b" }) });
+await fromLocal({ type: "save_config", patch: forgetPatch(uiConfig(hostConfig), { provider: "ollama", model: "qwen3:8b", kind: "ollama" }) });
 assert.deepEqual(pairs(hostConfig.modelHistory), [`openai/${first}`, "mistral/mistral-small-latest"]);
 for (let i = 0; i < 20; i++) await fromLocal({ type: "save_config", patch: switchPatch(uiConfig(hostConfig), "openai", `m-${i}`) });
 assert.equal(hostConfig.modelHistory.length, 12);
@@ -1491,10 +1491,14 @@ assert.ok(!JSON.stringify(localEvents).includes("sk-server"), "the server key re
 // Thinking: the setting goes to an OpenAI-compatible server as chat_template_kwargs.
 const localModule = await import("../src/providers/local.js");
 localRequests.length = 0;
-const gpuConfig = { ...hostConfig, localKind: "gpu", thinking: false };
-await localModule.turn({ apiKey: "", model: "Browsby-Steady", config: gpuConfig, system: "s", tools: [], messages: userTurn, signal: new AbortController().signal, onText: () => {}, onThinking: () => {} }).catch(() => {});
-await localModule.classify({ apiKey: "", model: "Browsby-Steady", config: { ...gpuConfig, thinking: true }, system: "s", text: "t", schema: {} }).catch(() => {});
-assert.deepEqual(localRequests.map((r) => r.body.chat_template_kwargs), [{ enable_thinking: false }, { enable_thinking: false }], "Local thinking control did not reach the server");
+// Local has its own thinking setting, off by default whatever the cloud providers' one says.
+assert.equal(DEFAULTS.localThinking, false);
+const gpuConfig = { ...hostConfig, localKind: "gpu", thinking: true, localThinking: false };
+const localTurn = (c) => localModule.turn({ apiKey: "", model: "Browsby-Steady", config: c, system: "s", tools: [], messages: userTurn, signal: new AbortController().signal, onText: () => {}, onThinking: () => {} }).catch(() => {});
+await localTurn(gpuConfig);
+await localTurn({ ...gpuConfig, thinking: false, localThinking: true });
+await localModule.classify({ apiKey: "", model: "Browsby-Steady", config: { ...gpuConfig, localThinking: true }, system: "s", text: "t", schema: {} }).catch(() => {});
+assert.deepEqual(localRequests.map((r) => r.body.chat_template_kwargs), [{ enable_thinking: false }, { enable_thinking: true }, { enable_thinking: false }], "Local thinking control did not reach the server");
 assert.match(localModule.describeError(new OpenAI.AuthenticationError(401, {}, "no", new Headers())), /^The server rejected/);
 localServer.close();
 // Local needs no key to run a task.
@@ -1533,6 +1537,33 @@ assert.ok(!("openaiBaseUrl" in migrated));
 const migratedServer = mergeConfig({ provider: "anthropic", openaiBaseUrl: "https://openrouter.ai/api/v1", models: { openai: "qwen/qwen3-235b" } });
 assert.deepEqual([migratedServer.provider, migratedServer.localKind, migratedServer.serverBaseUrl, migratedServer.models.ollama], ["anthropic", "server", "https://openrouter.ai/api/v1", "qwen/qwen3-235b"]);
 assert.equal(mergeConfig({ openaiBaseUrl: "javascript:alert(1)", provider: "openai" }).provider, "openai", "a bad stored base URL was migrated");
+// Each Local history entry keeps its kind of connection, and picking one switches to it.
+// Entries from before kinds were Ollama's.
+assert.deepEqual(mergeConfig({ modelHistory: [{ provider: "ollama", model: "qwen3:8b" }] }).modelHistory, [{ provider: "ollama", model: "qwen3:8b", kind: "ollama" }]);
+assert.deepEqual(migrated.modelHistory[0], { provider: "ollama", model: "Browsby-Steady", kind: "gpu" });
+{
+  const { switchPatch: sp, usedModels: um, isCurrent } = await import("../ui/models.js");
+  const onGpu = { ...migrated, keyInfo: {} };
+  const back = sp(onGpu, "ollama", "qwen3:8b", "ollama");
+  assert.equal(back.localKind, "ollama", "picking an Ollama model left the GPU connection on");
+  assert.deepEqual(back.modelHistory.slice(0, 2), [{ provider: "ollama", model: "qwen3:8b", kind: "ollama" }, { provider: "ollama", model: "Browsby-Steady", kind: "gpu" }]);
+  assert.ok(!("localKind" in sp(onGpu, "ollama", "Browsby-Swift", "gpu")), "a same-kind switch changed the connection");
+  assert.ok(isCurrent(onGpu, { provider: "ollama", model: "Browsby-Steady", kind: "gpu" }) && !isCurrent(onGpu, { provider: "ollama", model: "Browsby-Steady", kind: "server" }));
+  assert.ok(!um({ ...onGpu, serverBaseUrl: "" }).some((m) => m.kind === "server"));
+  assert.throws(() => cleanSetting("modelHistory", [{ provider: "ollama", model: "x", kind: "cloud" }]));
+}
+// The extension saves a migrated config at once, so it is not migrated on every load.
+{
+  let stored = { config: { provider: "openai", openaiBaseUrl: "http://localhost:8081/v1", models: { openai: "Browsby-Steady" } } };
+  let saves = 0;
+  globalThis.chrome = { storage: { local: { get: async () => structuredClone(stored), set: async (v) => (saves++, (stored = structuredClone(v))) } } };
+  const storage = await import("../extension/storage.js");
+  assert.equal((await storage.loadConfig()).provider, "ollama");
+  assert.ok(!("openaiBaseUrl" in stored.config) && stored.config.localKind === "gpu", "the migration was not saved");
+  await storage.loadConfig();
+  assert.equal(saves, 1, "a config without old settings was saved on load");
+  delete globalThis.chrome;
+}
 const ollamaUser = mergeConfig({ provider: "ollama", models: { ollama: "qwen3:8b" }, ollamaHost: "http://10.0.0.5:11434" });
 assert.deepEqual([ollamaUser.provider, ollamaUser.localKind, ollamaUser.models.ollama, ollamaUser.ollamaHost], ["ollama", "ollama", "qwen3:8b", "http://10.0.0.5:11434"]);
 

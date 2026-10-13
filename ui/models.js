@@ -26,12 +26,15 @@ const LIST_MAX = 60;
 // Model id families that are the providers' small, quick tiers.
 const FAST_MODEL = /(^|[-_.:/])(haiku|flash|flash-lite|mini|nano|lite|small)([-_.:/]|$)/i;
 const MODEL_ID = /^[\w.:/@+-]{1,200}$/;
-const same = (a, b) => a.provider === b.provider && a.model === b.model;
+const same = (a, b) => a.provider === b.provider && a.model === b.model && a.kind === b.kind;
+// A history entry; a Local one carries its kind of connection (the current one by default).
+const entry = (config, provider, model, kind = config.localKind) => ({ provider, model, ...(provider === "ollama" && { kind }) });
+const kindName = (id) => LOCAL_KINDS.find((k) => k.id === id).name;
 
 // Whether the agent can run on a provider: a saved key, or for Local an address, which
 // only an OpenAI-compatible server can lack.
-export function usable(config, provider) {
-  if (providerById(provider)?.local) return config.localKind !== "server" || Boolean(config.serverBaseUrl);
+export function usable(config, provider, kind = config.localKind) {
+  if (providerById(provider)?.local) return kind !== "server" || Boolean(config.serverBaseUrl);
   return config.keyInfo?.[provider]?.source === "saved";
 }
 
@@ -41,18 +44,21 @@ export const localEndpoint = (config, kind = config.localKind) => ({ gpu: config
 // The models already used whose provider can still run, newest first. The current model
 // leads even before it is in the history (set by first-run setup or an earlier version).
 export function usedModels(config) {
-  const current = { provider: config.provider, model: config.models[config.provider] };
+  const current = entry(config, config.provider, config.models[config.provider]);
   const all = [...(current.model ? [current] : []), ...(config.modelHistory ?? [])];
-  return all.filter((m, i) => usable(config, m.provider) && all.findIndex((n) => same(m, n)) === i);
+  return all.filter((m, i) => usable(config, m.provider, m.kind) && all.findIndex((n) => same(m, n)) === i);
 }
 
+// Whether a history entry is the model in use.
+export const isCurrent = (config, m) => same(m, entry(config, config.provider, config.models[config.provider]));
+
 // The settings patch that switches to a model and puts it, and the one it replaces, at
-// the front of the history.
-export function switchPatch(config, provider, model) {
-  const previous = { provider: config.provider, model: config.models[config.provider] };
-  const all = [{ provider, model }, ...(previous.model ? [previous] : []), ...(config.modelHistory ?? [])];
+// the front of the history. A Local model of another kind switches the connection too.
+export function switchPatch(config, provider, model, kind = config.localKind) {
+  const previous = entry(config, config.provider, config.models[config.provider]);
+  const all = [entry(config, provider, model, kind), ...(previous.model ? [previous] : []), ...(config.modelHistory ?? [])];
   const modelHistory = all.filter((m, i) => all.findIndex((n) => same(m, n)) === i).slice(0, MODEL_HISTORY_MAX);
-  return { provider, models: { [provider]: model }, modelHistory };
+  return { provider, models: { [provider]: model }, modelHistory, ...(provider === "ollama" && kind !== config.localKind && { localKind: kind }) };
 }
 
 // The settings patch that takes a model out of the history.
@@ -116,9 +122,9 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     chip.classList.toggle("unset", !model);
   }
 
-  function pick(provider, model) {
+  function pick(provider, model, kind) {
     pending = { provider, model };
-    send({ type: "save_config", patch: switchPatch(config, provider, model) });
+    send({ type: "save_config", patch: switchPatch(config, provider, model, kind) });
   }
 
   // Shown once the saved config confirms the switch.
@@ -147,14 +153,16 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
 
   function renderMenu() {
     const rows = usedModels(config).map((m) => {
-      const current = m.provider === config.provider && m.model === config.models[config.provider];
+      const current = isCurrent(config, m);
       const row = el("div", "mm-row");
+      const where = m.kind ? kindName(m.kind) : providerById(m.provider).name;
       const item = menuItem("menuitemradio", [mark(m.provider), el("span", "mm-name", m.model), ...tagList(m.provider, m.model), icon("check")], () => {
         closeMenu();
-        if (!current) pick(m.provider, m.model);
+        if (!current) pick(m.provider, m.model, m.kind);
       });
       item.setAttribute("aria-checked", String(current));
-      item.setAttribute("aria-label", `${m.model}, ${providerById(m.provider).name}`);
+      item.setAttribute("aria-label", `${m.model}, ${where}`);
+      item.title = where;
       row.append(item);
       if (!current) {
         item.setAttribute("aria-keyshortcuts", "Delete");
@@ -451,7 +459,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     const list = card.querySelector(".ml-list");
     const status = card.querySelector(`#${p}-models-status`);
     const query = field(card, "search").value.trim();
-    const used = usedModels(config).filter((m) => m.provider === p).map((m) => m.model);
+    const used = usedModels(config).filter((m) => m.provider === p && m.kind === entry(config, p, "").kind).map((m) => m.model);
     const all = [...new Set([...used, ...state.models])];
     const shown = all.filter((m) => m.toLowerCase().includes(query.toLowerCase()));
     const options = shown.slice(0, LIST_MAX).map((m) => option(p, m, m));

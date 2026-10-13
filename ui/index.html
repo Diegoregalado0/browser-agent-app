@@ -163,17 +163,24 @@
                 <option value="xhigh">Extra high</option><option value="max">Max</option>
               </select>
             </div>
-            <div class="setting">
+            <div class="setting" data-for-provider="anthropic openai gemini mistral">
               <div class="setting-text">
-                <label class="setting-title" for="thinking">Show model thinking</label>
-                <p class="setting-desc">Shows the model's reasoning summaries in the session when the provider offers them.</p>
+                <label class="setting-title" for="thinking">Let the model think first</label>
+                <p class="setting-desc">Slower, sometimes smarter. Models that can reason do so before each step, and the session shows their reasoning when the provider offers it.</p>
               </div>
               <input id="thinking" type="checkbox" role="switch" class="switch" data-setting="thinking" />
+            </div>
+            <div class="setting" data-for-provider="ollama">
+              <div class="setting-text">
+                <label class="setting-title" for="localThinking">Let the model think first</label>
+                <p class="setting-desc">Slower, sometimes smarter. Off by default for local models, where thinking first can take minutes per step.</p>
+              </div>
+              <input id="localThinking" type="checkbox" role="switch" class="switch" data-setting="localThinking" />
             </div>
             <div class="setting" data-for-provider="anthropic openai">
               <div class="setting-text">
                 <label class="setting-title" for="webSearch">Let the model search the web</label>
-                <p class="setting-desc">The model finds pages with its provider's own search, then opens them in the browser. Each search is billed by the provider, roughly 1 to 1.4 cents. Not available with a custom OpenAI-compatible server.</p>
+                <p class="setting-desc">The model finds pages with its provider's own search, then opens them in the browser. Each search is billed by the provider, roughly 1 to 1.4 cents.</p>
               </div>
               <input id="webSearch" type="checkbox" role="switch" class="switch" data-setting="webSearch" />
             </div>

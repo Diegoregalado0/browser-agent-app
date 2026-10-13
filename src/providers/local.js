@@ -1,6 +1,7 @@
 // The Local provider: Ollama's native API, or an OpenAI-compatible server (the Browsby GPU
 // server preset, llama.cpp, LM Studio, vLLM) through the OpenAI adapter's Chat Completions
-// path, which carries the thinking setting as chat_template_kwargs. See LOCAL_KINDS.
+// path, which carries the thinking setting as chat_template_kwargs (Ollama: think). See
+// LOCAL_KINDS.
 
 // The OpenAI SDK requires a key; a server that needs none gets this stand-in.
 const NO_KEY = "local";
@@ -10,7 +11,9 @@ const NO_KEY = "local";
 let last = null;
 let server = false;
 
+// Local's own thinking setting (localThinking) stands for the shared one.
 async function adapter(opts) {
+  opts = { ...opts, config: { ...opts.config, thinking: opts.config.localThinking } };
   server = opts.config.localKind !== "ollama";
   if (!server) {
     last = await import("./ollama.js");

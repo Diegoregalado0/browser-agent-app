@@ -24,7 +24,8 @@ export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
   keys: { anthropic: "", openai: "", gemini: "", mistral: "", ollama: "" },
-  // The models picked so far, newest first, for quick switching: [{ provider, model }].
+  // The models picked so far, newest first, for quick switching: [{ provider, model }],
+  // with kind (LOCAL_KINDS) on Local entries, so picking one also picks its connection.
   modelHistory: [],
   localKind: "ollama",
   gpuBaseUrl: GPU_BASE_URL,
@@ -33,7 +34,10 @@ export const DEFAULTS = {
   ollamaContext: 32768,
   effort: "high",
   openaiEffort: "medium",
+  // Reasoning before each answer. Local has its own, off: a local model thinking first can
+  // take minutes per step, and its server already defaults to off.
   thinking: true,
+  localThinking: false,
   // Provider-native web search (Anthropic, OpenAI); each search is billed by the provider.
   webSearch: true,
   maxSteps: 80,
@@ -163,9 +167,10 @@ export function cleanSetting(key, value) {
   }
   if (key === "modelHistory") {
     if (!Array.isArray(value) || value.length > MODEL_HISTORY_MAX) fail(`The model history holds up to ${MODEL_HISTORY_MAX} models.`);
+    // A Local entry without a kind is from when Local was only Ollama.
     return value.map((entry) =>
-      isObject(entry) && CHOICES.provider.includes(entry.provider) && typeof entry.model === "string" && entry.model && MODEL_ID.test(entry.model)
-        ? { provider: entry.provider, model: entry.model }
+      isObject(entry) && CHOICES.provider.includes(entry.provider) && typeof entry.model === "string" && entry.model && MODEL_ID.test(entry.model) && (entry.kind === undefined || LOCAL_KINDS.includes(entry.kind))
+        ? { provider: entry.provider, model: entry.model, ...(entry.provider === "ollama" && { kind: entry.kind ?? "ollama" }) }
         : fail("Each model in the history is a provider and a model id."),
     );
   }
@@ -288,7 +293,7 @@ function migrateBaseUrl(stored) {
     keys.openai = "";
   }
   if (Array.isArray(stored.modelHistory)) {
-    next.modelHistory = stored.modelHistory.map((m) => (m?.provider === "openai" && typeof m.model === "string" && !OPENAI_MODEL.test(m.model) ? { ...m, provider: "ollama" } : m));
+    next.modelHistory = stored.modelHistory.map((m) => (m?.provider === "openai" && typeof m.model === "string" && !OPENAI_MODEL.test(m.model) ? { ...m, provider: "ollama", kind } : m));
   }
   return { ...next, models, guardModels, keys };
 }
