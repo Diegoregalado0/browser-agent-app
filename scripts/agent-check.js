@@ -22,7 +22,7 @@ import { DiscordBridge } from "../src/remote-discord.js";
 import { SessionDirectory, shareSession } from "../src/remote-sessions.js";
 import { WebSocketServer } from "ws";
 import { OutlookGraph } from "../src/outlook-graph.js";
-import { Guard } from "../src/guard.js";
+import { Guard, quickAllow } from "../src/guard.js";
 import { TaskMetrics } from "../src/metrics.js";
 import { speedParts } from "../ui/speed.js";
 import { Browser, actionProblem, formatHeaders } from "../src/browser-tools.js";
@@ -1893,3 +1893,12 @@ for (let i = 1; i < imageBodies.length; i++) {
 assert.ok(prefixBreaks <= 3, `old screenshots were dropped one at a time (${prefixBreaks} changed prefixes in 12 requests)`);
 
 console.log("agent checks passed");
+
+// Safety check shortcuts: the browser's start pages and sites the user named need no model call;
+// anything else, and a site the user declined, still goes to the safety model.
+assert.ok(quickAllow({ page: { url: "chrome://newtab/" }, name: "browser", input: { action: "left_click" } }), "a click on the new tab page was sent to the safety model");
+assert.ok(quickAllow({ userRequests: ["Go to github.com/react/react/issues/1"], page: { url: "https://example.com/" }, name: "navigate", input: { url: "https://github.com/react" } }), "going to a site the user named was sent to the safety model");
+assert.equal(quickAllow({ userRequests: ["Open wikipedia"], page: { url: "https://example.com/" }, name: "navigate", input: { url: "https://evil.example.org/" } }), null, "a site the user did not name skipped the safety model");
+assert.equal(quickAllow({ userRequests: ["Go to github.com"], page: { url: "https://example.com/" }, name: "navigate", input: { url: "github.com" }, declined: ['navigate {"url":"https://github.com"}'] }), null, "a site the user declined skipped the safety model");
+assert.equal(quickAllow({ userRequests: ["Go to github.com"], page: { url: "https://github.com/" }, name: "browser", input: { action: "left_click" } }), null, "a click on a web page skipped the safety model");
+console.log("safety shortcut checks passed");
