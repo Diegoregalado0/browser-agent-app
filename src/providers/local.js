@@ -22,7 +22,24 @@ async function adapter(opts) {
   last = await import("./openai.js");
   const { config } = opts;
   const openaiBaseUrl = config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl;
-  return [last, { ...opts, apiKey: opts.apiKey || NO_KEY, config: { ...config, openaiBaseUrl } }];
+  const openaiHeaders = config.clientId ? { "X-Browsby-Client": config.clientId } : undefined;
+  return [last, { ...opts, apiKey: opts.apiKey || NO_KEY, config: { ...config, openaiBaseUrl, openaiHeaders } }];
+}
+
+// Whether the Browsby gate in front of a Local server is busy with another install:
+// { busy, running, freeInSeconds } from <origin>/browsby/busy, or null for Ollama, a
+// server without that endpoint, or any failure.
+export async function busyStatus(config) {
+  if (config.localKind === "ollama" || !config.clientId) return null;
+  try {
+    const origin = new URL(config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl).origin;
+    const res = await fetch(`${origin}/browsby/busy`, { headers: { "X-Browsby-Client": config.clientId }, signal: AbortSignal.timeout(5000) });
+    const body = res.ok ? await res.json() : null;
+    if (typeof body?.busy !== "boolean") return null;
+    return { busy: body.busy, running: Boolean(body.running), freeInSeconds: Number(body.freeInSeconds) || 0 };
+  } catch {
+    return null;
+  }
 }
 
 const call = (method) => async (opts) => {

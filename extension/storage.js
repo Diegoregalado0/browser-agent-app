@@ -4,12 +4,12 @@ import { SESSION_ID_PATTERN, metaOf, sessionRecord } from "../src/session-format
 // Settings live in chrome.storage.local, which stays on this device and is never synced,
 // so API keys do not leave it. Conversations live in IndexedDB.
 
-// Settings from an older version that mergeConfig migrates (an OpenAI base URL) are saved
-// in their new form at once, so the migration runs only once.
+// Settings from an older version that mergeConfig migrates (an OpenAI base URL), and a
+// new install id, are saved at once, so each happens only once.
 export async function loadConfig() {
   const { config } = await chrome.storage.local.get("config");
   const merged = mergeConfig(config);
-  if (config && "openaiBaseUrl" in config) await saveConfig(merged);
+  if (!config || "openaiBaseUrl" in config || config.clientId !== merged.clientId) await saveConfig(merged);
   return merged;
 }
 

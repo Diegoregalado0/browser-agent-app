@@ -434,9 +434,28 @@ const activity = (() => {
   };
 })();
 
+// The busy notice: whether another install is using the Local server, asked when a task
+// starts (by the controller) and every BUSY_POLL_MS while the panel is on a Local server.
+const BUSY_POLL_MS = 30000;
+const onLocalServer = () => config?.provider === "ollama" && config.localKind !== "ollama";
+setInterval(() => onLocalServer() && send({ type: "busy_check" }), BUSY_POLL_MS);
+
 const handlers = {
+  busy({ kind, status }) {
+    const where = kind === "gpu" ? "GPU server" : "Server";
+    const show = onLocalServer() && kind === config.localKind && status?.busy;
+    $("busy-note").hidden = !show;
+    if (!show) return;
+    const minutes = Math.max(1, Math.ceil(status.freeInSeconds / 60));
+    $("busy-note").textContent = status.running
+      ? `${where} is busy with another user. Your task may wait.`
+      : `${where} was just used by another user, free in about ${minutes} min. Your task may wait.`;
+  },
   config(msg) {
+    const wasLocal = onLocalServer() && `${config.localKind} ${config.gpuBaseUrl} ${config.serverBaseUrl}`;
     config = msg.config;
+    const nowLocal = onLocalServer() && `${config.localKind} ${config.gpuBaseUrl} ${config.serverBaseUrl}`;
+    if (nowLocal !== wasLocal) nowLocal ? send({ type: "busy_check" }) : ($("busy-note").hidden = true);
     renderHeader();
     switcher.render(config);
     settings.render(config);

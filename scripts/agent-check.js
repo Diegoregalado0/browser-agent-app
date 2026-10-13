@@ -1446,7 +1446,8 @@ const localServer = createServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
-    localRequests.push({ path: req.url, auth: req.headers.authorization, body: body && JSON.parse(body) });
+    localRequests.push({ path: req.url, auth: req.headers.authorization, client: req.headers["x-browsby-client"], body: body && JSON.parse(body) });
+    if (req.url === "/browsby/busy") return json(req.headers["x-browsby-client"] === "11111111-2222-4333-8444-555555555555" ? { busy: true, running: false, freeInSeconds: 150 } : { busy: false });
     if (req.url === "/v1/models") return json({ object: "list", data: [{ id: "Browsby-Steady" }, { id: "Browsby-Swift" }, { id: "nomic-embed-text" }] });
     if (req.url === "/v1/chat/completions") return json({ choices: [{ index: 0, message: { role: "assistant", content: "Hi" }, finish_reason: "length" }], usage: { total_tokens: 2 } });
     if (req.url === "/api/tags") return json({ models: [{ name: "qwen3:8b" }, { name: "all-minilm" }] });
@@ -1462,7 +1463,7 @@ const localList = async () => {
   await fromLocal({ type: "list_models", provider: "ollama" });
   return localEvents.find((e) => e.type === "models");
 };
-Object.assign(hostConfig, { provider: "ollama", localKind: "ollama", keys: { ...hostConfig.keys, ollama: "" }, models: { ...hostConfig.models, ollama: "" } });
+Object.assign(hostConfig, { provider: "ollama", localKind: "ollama", clientId: "11111111-2222-4333-8444-555555555555", keys: { ...hostConfig.keys, ollama: "" }, models: { ...hostConfig.models, ollama: "" } });
 for (const [kind, fields, chatPath, listed] of [
   ["gpu", { baseUrl: `${localUrl}/v1` }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
   ["server", { baseUrl: `${localUrl}/v1`, key: "sk-server" }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
@@ -1474,6 +1475,7 @@ for (const [kind, fields, chatPath, listed] of [
   const ping = localRequests.find((r) => r.path === chatPath);
   assert.equal(ping.body.model, listed[0], `Local ${kind} tested the wrong model`);
   if (kind !== "ollama") assert.equal(ping.auth, kind === "server" ? "Bearer sk-server" : "Bearer local", `Local ${kind} sent the wrong key`);
+  if (kind !== "ollama") assert.ok(localRequests.every((r) => r.client === hostConfig.clientId), `Local ${kind} left out the install id`);
   // The test saves nothing; the UI's patch does once it passes, as the card and setup send it.
   const { localPatch } = await import("../ui/models.js");
   await fromLocal({ type: "save_config", patch: { ...localPatch(hostConfig, { kind, ...fields }), ...(fields.key && { keys: { ollama: fields.key } }) } });
@@ -1482,6 +1484,24 @@ for (const [kind, fields, chatPath, listed] of [
   assert.deepEqual(models.models, listed.includes("qwen3:8b") ? ["qwen3:8b", "all-minilm"] : listed, `Local ${kind} listed the wrong models`);
 }
 assert.equal(hostConfig.gpuBaseUrl, `${localUrl}/v1`);
+// The busy notice: the gate at the Local server's origin says whether another install is
+// using it; Ollama and a server without the endpoint say nothing.
+{
+  const { busyStatus } = await import("../src/providers/local.js");
+  const gpu = { ...hostConfig, localKind: "gpu" };
+  assert.deepEqual(await busyStatus(gpu), { busy: true, running: false, freeInSeconds: 150 });
+  assert.deepEqual(await busyStatus({ ...gpu, clientId: "99999999-2222-4333-8444-555555555555" }), { busy: false, running: false, freeInSeconds: 0 });
+  assert.equal(await busyStatus({ ...gpu, gpuBaseUrl: "http://127.0.0.1:9/v1" }), null, "a missing gate did not fail quietly");
+  assert.equal(await busyStatus({ ...gpu, localKind: "ollama" }), null);
+  hostConfig.localKind = "gpu";
+  localEvents.length = 0;
+  await fromLocal({ type: "busy_check" });
+  assert.deepEqual(localEvents.find((e) => e.type === "busy"), { type: "busy", kind: "gpu", status: { busy: true, running: false, freeInSeconds: 150 } });
+  hostConfig.localKind = "ollama";
+  // No settings patch changes the install id.
+  await fromLocal({ type: "save_config", patch: { clientId: "22222222-2222-4333-8444-555555555555" } }).catch(() => {});
+  assert.equal(hostConfig.clientId, "11111111-2222-4333-8444-555555555555", "a settings patch changed the install id");
+}
 assert.equal(hostConfig.serverBaseUrl, `${localUrl}/v1`);
 assert.equal(hostConfig.ollamaHost, localUrl);
 // A server without a base URL is not tested, and a saved server key is never sent back.
@@ -1552,6 +1572,16 @@ assert.deepEqual(migrated.modelHistory[0], { provider: "ollama", model: "Browsby
   assert.ok(!um({ ...onGpu, serverBaseUrl: "" }).some((m) => m.kind === "server"));
   assert.throws(() => cleanSetting("modelHistory", [{ provider: "ollama", model: "x", kind: "cloud" }]));
 }
+// Every install gets one anonymous id, kept across loads and resets, never in the UI's config.
+{
+  const { publicConfig, resetConfig } = await import("../src/config-core.js");
+  const fresh = mergeConfig({});
+  assert.match(fresh.clientId, /^[0-9a-f-]{36}$/);
+  assert.equal(mergeConfig({ clientId: fresh.clientId }).clientId, fresh.clientId);
+  assert.notEqual(mergeConfig({ clientId: "not-an-id" }).clientId, "not-an-id");
+  assert.equal(resetConfig(fresh).clientId, fresh.clientId);
+  assert.ok(!("clientId" in publicConfig(fresh)), "the install id reached the UI");
+}
 // The extension saves a migrated config at once, so it is not migrated on every load.
 {
   let stored = { config: { provider: "openai", openaiBaseUrl: "http://localhost:8081/v1", models: { openai: "Browsby-Steady" } } };
@@ -1562,6 +1592,7 @@ assert.deepEqual(migrated.modelHistory[0], { provider: "ollama", model: "Browsby
   assert.ok(!("openaiBaseUrl" in stored.config) && stored.config.localKind === "gpu", "the migration was not saved");
   await storage.loadConfig();
   assert.equal(saves, 1, "a config without old settings was saved on load");
+  assert.match(stored.config.clientId, /^[0-9a-f-]{36}$/, "the install id was not saved");
   delete globalThis.chrome;
 }
 const ollamaUser = mergeConfig({ provider: "ollama", models: { ollama: "qwen3:8b" }, ollamaHost: "http://10.0.0.5:11434" });

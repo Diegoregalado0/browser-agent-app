@@ -575,3 +575,6 @@ header .spacer { min-width: 4px; }
   :root:not([data-theme="light"]) .onboard-mark .mark-ring { stroke: #f6f1e7; }
 }
 .onboard.center-title .onboard-step-text { text-align: center; }
+
+/* One calm line above the composer while another user has the Local server. */
+.busy-note { margin: 0 12px 6px; font-size: 12px; color: var(--muted); }

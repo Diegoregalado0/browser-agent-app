@@ -1,5 +1,6 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
+import { busyStatus } from "./providers/local.js";
 import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { today } from "./limits.js";
@@ -119,6 +120,10 @@ export function createController(host) {
     for (const client of clients) client.send(event);
   };
 
+  // Tells every UI whether the gate in front of a Local server is busy with another
+  // install; a null status hides the notice.
+  const checkBusy = async (config) => broadcast({ type: "busy", kind: config.localKind, status: await busyStatus(config) });
+
   const broadcastConfig = (config) => {
     savedGhost = config.ghostMode;
     broadcast({ type: "config", config: clientConfig(config) });
@@ -234,8 +239,10 @@ export function createController(host) {
           return reply({ type: "error", text: `That request is too long. Keep it under ${PROMPT_MAX_CHARS.toLocaleString("en-US")} characters.` });
         }
         try {
+          const config = await host.loadConfig();
+          if (config.provider === "ollama") checkBusy(config);
           await host.ensureBrowser(agent);
-          await agent.run(text, await host.loadConfig());
+          await agent.run(text, config);
         } catch (err) {
           broadcast({ type: "error", text: err.message });
         }
@@ -304,6 +311,11 @@ export function createController(host) {
       case "reset":
         clearConversation();
         return;
+      case "busy_check": {
+        const config = await host.loadConfig();
+        if (config.provider === "ollama") await checkBusy(config);
+        return;
+      }
       case "list_sessions":
         reply({ type: "sessions", sessions: await host.sessions.list(), current: session?.id ?? null });
         return;

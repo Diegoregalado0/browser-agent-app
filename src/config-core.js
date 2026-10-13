@@ -63,7 +63,12 @@ export const DEFAULTS = {
   // Remote control over the owner's Discord bot. The token never leaves settings storage;
   // the UI sees only the bridge's status.
   discord: { token: "", userId: "", userName: "", pairCode: "" },
+  // An anonymous id for this install, sent only to a Local server (X-Browsby-Client), so
+  // the Browsby gate can tell this install's requests from other users'. Set once on load
+  // (mergeConfig), never shown in the UI and never changed by a settings patch.
+  clientId: "",
 };
+const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 // Settings back to their defaults. API keys, the Discord bot, Ghost mode and finished
 // setup are kept: keys and the bot are connections rather than preferences, and Ghost
@@ -75,6 +80,7 @@ export function resetConfig(config) {
     ghostMode: config.ghostMode,
     setupDone: config.setupDone,
     discord: config.discord,
+    clientId: config.clientId,
   };
 }
 
@@ -141,7 +147,7 @@ export function cleanSetting(key, value) {
     throw new Error(text);
   };
   const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-  if (!Object.hasOwn(DEFAULTS, key) || ["keys", "discord"].includes(key)) fail(`Unknown setting ${String(key).slice(0, 40)}.`);
+  if (!Object.hasOwn(DEFAULTS, key) || ["keys", "discord", "clientId"].includes(key)) fail(`Unknown setting ${String(key).slice(0, 40)}.`);
   if (CHOICES[key]) return CHOICES[key].includes(value) ? value : fail(`Unknown ${key} value.`);
   if (NUMBER_RANGES[key]) {
     const [min, max, name] = NUMBER_RANGES[key];
@@ -221,7 +227,7 @@ export function publicConfig(config) {
     const key = config.keys[p] || "";
     keyInfo[p] = { source: key ? "saved" : "none", mask: key ? maskKey(key) : "" };
   }
-  const { keys, discord: _discord, ...rest } = config;
+  const { keys, discord: _discord, clientId: _clientId, ...rest } = config;
   return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
 }
 
@@ -234,8 +240,9 @@ export function mergeConfig(stored = {}) {
   const config = { ...defaults, keys: { ...defaults.keys, ...stored.keys } };
   if (stored.discord) config.discord = stored.discord;
   if (typeof stored.ghostMode === "boolean") config.ghostMode = stored.ghostMode;
+  config.clientId = CLIENT_ID.test(stored.clientId) ? stored.clientId : crypto.randomUUID();
   for (const [key, value] of Object.entries(stored)) {
-    if (!Object.hasOwn(DEFAULTS, key) || ["keys", "discord", "ghostMode"].includes(key)) continue;
+    if (!Object.hasOwn(DEFAULTS, key) || ["keys", "discord", "ghostMode", "clientId"].includes(key)) continue;
     let merged = ["models", "limits", "guardModels"].includes(key) ? { ...defaults[key], ...value } : value;
     // In a list, only the entries that fail are dropped.
     if (Array.isArray(value)) {

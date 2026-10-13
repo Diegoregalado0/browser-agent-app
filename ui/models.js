@@ -540,8 +540,12 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         if (focused) (menu.querySelector(`[aria-label="${CSS.escape(focused)}"]`) ?? menuItems()[0]).focus();
       }
       renderCards();
-      // A provider chosen elsewhere (first-run setup) while Settings > Models shows gets its card opened.
-      if (previous && previous !== config.provider && cardsRoot.offsetParent) setExpanded(cardOf(config.provider), true);
+      // A provider chosen elsewhere (first-run setup) while Settings > Models shows gets its card
+      // opened in place of the previous one's.
+      if (previous && previous !== config.provider && cardsRoot.offsetParent) {
+        setExpanded(cardOf(previous), false);
+        setExpanded(cardOf(config.provider), true);
+      }
       if (pending && config.provider === pending.provider && config.models[pending.provider] === pending.model) confirmSwitch();
     },
     handlers: {

@@ -127,7 +127,7 @@ const thinkingKwargs = (config, on) => (config.chatTemplateKwargs === false ? {}
 // dangerouslyAllowBrowser: in the extension edition the user's own key calls the API
 // from their browser, which the SDK allows only with this opt-in.
 function client({ apiKey, config }) {
-  return new OpenAI({ apiKey, baseURL: config.openaiBaseUrl || undefined, dangerouslyAllowBrowser: true, fetch: recordingFetch });
+  return new OpenAI({ apiKey, baseURL: config.openaiBaseUrl || undefined, defaultHeaders: config.openaiHeaders, dangerouslyAllowBrowser: true, fetch: recordingFetch });
 }
 
 export async function listModels(opts) {
