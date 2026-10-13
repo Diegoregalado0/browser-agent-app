@@ -103,7 +103,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     root.classList.toggle("center-title", Boolean(centered));
     $("wizard-title").textContent = title;
     $("wizard-lead").replaceChildren(...[lead].flat());
-    for (const id of ["wizard-providers", "wizard-key-field", "wizard-outlook-logo"]) $(id).hidden = !parts.includes(id);
+    for (const id of ["wizard-providers", "wizard-key-field", "wizard-base-field", "wizard-outlook-logo"]) $(id).hidden = !parts.includes(id);
     result("");
     setButton("wizard-next", next?.[0], next?.[1]);
     setButton("wizard-skip", skip?.[0] ?? (closable ? "Close" : ""), skip?.[1] ?? close);
@@ -145,6 +145,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   function enterKey(p) {
     provider = p;
     $("wizard-key").value = "";
+    $("wizard-base").value = config.openaiBaseUrl || "";
     if (p.id === "ollama") {
       const cmd = el("code", null, "OLLAMA_ORIGINS=chrome-extension://* ollama serve");
       return show("key", {
@@ -168,7 +169,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     show("key", {
       title: `Add your ${p.name} key`,
       lead: "The key stays on this device and is sent only to the provider.",
-      parts: ["wizard-key-field"],
+      parts: p.id === "openai" ? ["wizard-key-field", "wizard-base-field"] : ["wizard-key-field"],
       centered: true,
       next: ["Test and continue", test],
       back: pickProvider,
@@ -191,10 +192,10 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     $("wizard-next").disabled = true;
     $("wizard-next").textContent = "Testing…";
     result("pending", "Testing the connection…");
-    send({ type: "test_provider", provider: provider.id, key: key || undefined });
+    send({ type: "test_provider", provider: provider.id, key: key || undefined, ...(provider.id === "openai" && { baseUrl: $("wizard-base").value.trim() }) });
   }
 
-  $("wizard-key").addEventListener("keydown", (e) => e.key === "Enter" && !$("wizard-next").disabled && test());
+  for (const id of ["wizard-key", "wizard-base"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && !$("wizard-next").disabled && test());
 
   function outlookScreen() {
     $("wizard-outlook-logo").innerHTML = OUTLOOK_LOGO;
@@ -274,6 +275,9 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
         const key = $("wizard-key").value.trim();
         $("wizard-key").value = "";
         const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) };
+        // A base URL that passed the test is saved with the key; an empty one returns to OpenAI.
+        const base = $("wizard-base").value.trim();
+        if (msg.provider === "openai" && base !== (config.openaiBaseUrl || "")) patch.openaiBaseUrl = base;
         // The saved config arrives after this; finish() reads the chosen provider from it.
         config = { ...config, provider: msg.provider };
         if (!mcp.outlookAvailable) return finish(patch);

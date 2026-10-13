@@ -1,6 +1,6 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
-import { apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
+import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { today } from "./limits.js";
 
@@ -39,7 +39,11 @@ async function testConnection(id, apiKey, config) {
   const started = Date.now();
   try {
     const models = await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
-    const model = config.models[id] || (await within(firstChatModel(provider, models, apiKey, config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds."));
+    // The built-in default model is skipped when the endpoint does not list it (OpenAI's default
+    // on a local server); a model the user chose is always the one tested.
+    const unlistedDefault = config.models[id] === DEFAULTS.models[id] && models.length && !models.includes(config.models[id]);
+    const saved = unlistedDefault ? "" : config.models[id];
+    const model = saved || (await within(firstChatModel(provider, models, apiKey, config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds."));
     if (!model) {
       const fix = id === "ollama" ? "Pull one that supports tools with ollama pull <model>" : "Pick a chat model in Settings > Models";
       if (!models.length) {
@@ -48,8 +52,15 @@ async function testConnection(id, apiKey, config) {
       }
       throw new Error(`None of the ${models.length} listed models can chat with tools; they look like embedding, speech or other special-purpose models. ${fix}, then test again.`);
     }
-    await within(provider.ping({ apiKey, model, config }), MODEL_TEST_TIMEOUT_MS, `${model} did not answer within 60 seconds.`);
     const count = `${models.length} model${models.length === 1 ? "" : "s"} available`;
+    const slow = `${model} did not answer within 60 seconds.`;
+    try {
+      await within(provider.ping({ apiKey, model, config }), MODEL_TEST_TIMEOUT_MS, slow);
+    } catch (err) {
+      // A custom server can take minutes to load a model into memory; it answered the listing.
+      if (err.message !== slow || !(id === "openai" && config.openaiBaseUrl)) throw err;
+      return `Connected. ${count}; ${model} is still loading, so its first answer can take a few minutes.`;
+    }
     return `Connected in ${((Date.now() - started) / 1000).toFixed(1)}s. ${count}; ${model} answered.`;
   } catch (err) {
     throw new Error(provider.describeError(err) || err.message);
@@ -394,6 +405,10 @@ export function createController(host) {
           const merged = ["models", "limits", "guardModels"].includes(key) && value && typeof value === "object" ? { ...config[key], ...value } : value;
           changes[key] = cleanSetting(key, merged);
         }
+        // A custom OpenAI-compatible server does not serve OpenAI's default model, so it is not
+        // kept as the chosen one; the model list then asks for one the server has.
+        const models = changes.models ?? config.models;
+        if (changes.openaiBaseUrl && models.openai === DEFAULTS.models.openai) changes.models = { ...models, openai: "" };
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
         const keyChanges = {};
         for (const [p, k] of Object.entries(keys && typeof keys === "object" ? keys : {})) {

@@ -1387,12 +1387,23 @@ const testResult = async (msg) => {
 const stubOpenai = { ...providers.openai };
 Object.assign(providers.openai, { listModels: openai.listModels, ping: openai.ping, describeError: openai.describeError });
 hostConfig.models.openai = "gpt-chosen";
+{
+  const before = structuredClone(hostConfig);
+  hostConfig.models.openai = DEFAULTS.models.openai;
+  await fromLocal({ type: "save_config", patch: { openaiBaseUrl: "http://localhost:8081/v1" } });
+  assert.equal(hostConfig.models.openai, "", "OpenAI's default model stayed chosen after switching to a custom server");
+  hostConfig = Object.assign(hostConfig, before);
+}
 const outOfCredit = await testResult({ provider: "openai", baseUrl: `${standInUrl}/v1` });
 Object.assign(providers.openai, stubOpenai);
 assert.equal(outOfCredit.ok, false, "an out-of-credit account passed the connection test");
 assert.match(outOfCredit.text, /out of credit/);
 assert.equal(testBodies.at(-1).body.model, "gpt-chosen", "the test request did not use the chosen model");
 assert.equal(testBodies.at(-1).body.max_tokens, 1, "the test request was not the smallest one");
+hostConfig.models.openai = DEFAULTS.models.openai;
+await testResult({ provider: "openai", baseUrl: `${standInUrl}/v1` });
+assert.equal(testBodies.at(-1).body.model, "gpt-cheap", "a server that does not list the default model was tested with the default");
+hostConfig.models.openai = "gpt-chosen";
 const noModels = await testResult({ provider: "ollama", host: standInUrl });
 assert.equal(noModels.ok, false);
 assert.match(noModels.text, /ollama pull <model>/);
