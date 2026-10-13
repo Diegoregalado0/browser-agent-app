@@ -6,7 +6,7 @@ It runs on your own AI key, with the provider you choose, and nothing is sent th
 
 ## Why it is different
 
-- **Your key, your provider.** Use a key from Anthropic, OpenAI, Google Gemini, or Mistral, or run a local model with Ollama. The key stays on your computer and is sent only to that provider, which bills you directly.
+- **Your key, your provider.** Use a key from Anthropic, OpenAI, Google Gemini, or Mistral, or run a local model (the Browsby GPU server, an OpenAI-compatible server such as llama.cpp or LM Studio, or Ollama). The key stays on your computer and is sent only to that provider, which bills you directly.
 - **No account, no middleman.** There is no Browsby account and no Browsby server. Your tasks, pages, and history never pass through us.
 - **Keep Chrome.** It is an extension in the Chrome you already have. It works in its own tabs, next to yours, in a side panel.
 - **It asks before it matters.** A safety check compares each action with what you asked for. On banks, payment sites, password managers, and password fields, it always asks first. You can press Stop at any time.
@@ -140,7 +140,7 @@ It works only while Chrome is open with a Browsby panel open; the bot runs in on
 Browsby is free. Your provider bills you for what the agent uses, at its normal API rates. Local models through Ollama have no API cost. The usage limits above keep a runaway task from spending much.
 
 **Which models can I use?**
-Any model your key can use at Anthropic, OpenAI, Google Gemini, or Mistral, or a local model through Ollama. Settings > Models can load the list for your key. For best results, pick a model that supports tool use and can read images. The OpenAI option also takes a base URL for OpenAI-compatible servers running on your own computer, such as LM Studio.
+Any model your key can use at Anthropic, OpenAI, Google Gemini, or Mistral, or a local model. Settings > Models can load the list for your key. For best results, pick a model that supports tool use and can read images. The Local option connects to the Browsby GPU server, to an OpenAI-compatible server (llama.cpp, LM Studio, vLLM) by its base URL with an optional key, or to Ollama.
 
 **Why does it pause, or say it is rate limited?**
 Either you hit one of your own limits, or your provider asked it to slow down. It waits and continues. Raise the limits in Settings if they are too tight for you.

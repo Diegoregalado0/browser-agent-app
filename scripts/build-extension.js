@@ -18,7 +18,7 @@ const ZIP_DEST = join(ROOT, "dist", "browser-agent-extension.zip");
 const ZIP = join(ROOT, "dist", "browser-agent-extension.tmp.zip");
 const { version } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 
-// Model provider APIs the extension calls with the user's key. Ollama runs locally.
+// Model provider APIs the extension calls with the user's key, and Local servers on this computer.
 const PROVIDER_HOSTS = [
   "https://api.anthropic.com/*",
   "https://api.openai.com/*",

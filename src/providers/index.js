@@ -31,5 +31,5 @@ export const providers = {
   openai: lazy("OpenAI", () => import("./openai.js")),
   gemini: lazy("Google Gemini", () => import("./gemini.js")),
   mistral: lazy("Mistral", () => import("./mistral.js")),
-  ollama: lazy("Ollama", () => import("./ollama.js")),
+  ollama: lazy("Local", () => import("./local.js")),
 };

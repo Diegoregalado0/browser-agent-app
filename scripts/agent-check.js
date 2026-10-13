@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { Agent } from "../src/agent.js";
 import { providers } from "../src/providers/index.js";
-import { DEFAULTS, keyProblem, mergeConfig } from "../src/config-core.js";
+import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, mergeConfig } from "../src/config-core.js";
 import { renderMarkdown } from "../ui/markdown.js";
 import * as openai from "../src/providers/openai.js";
 import * as ollama from "../src/providers/ollama.js";
@@ -550,7 +550,10 @@ noEcho(stored);
 for (const patch of [
   { ollamaHost: "file:///etc/passwd" },
   { ollamaHost: "javascript:alert(1)" },
-  { openaiBaseUrl: "https://user:pass@evil.example/v1" },
+  { serverBaseUrl: "https://user:pass@evil.example/v1" },
+  { gpuBaseUrl: "javascript:alert(1)" },
+  { gpuBaseUrl: "" },
+  { localKind: "cloud" },
   { approvedOrigins: "https://bank.example https://a.test" },
   { approvedOrigins: ["javascript:alert(1)"] },
   { sensitiveSites: "mybank.example" },
@@ -1165,9 +1168,17 @@ providers.openai.classify = async () => {
 };
 providers.openai.describeError = () => "This model is not enabled for your account.";
 const unavailable = await new Guard().checkAction({ config, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} });
-// A custom OpenAI-compatible server runs the checks on the main model.
-const custom = { ...config, openaiBaseUrl: "http://localhost:8081/v1", models: { ...config.models, openai: "local-model" } };
-const customUnavailable = await new Guard().checkAction({ config: custom, userRequests: ["x"], page: { title: "", url: "https://a.test/" }, name: "navigate", input: {} });
+// Local runs the checks on the main model, whichever kind of connection it uses.
+const localBefore = providers.ollama;
+providers.ollama = { ...providers.openai };
+const customUnavailable = await new Guard().checkAction({
+  config: { ...config, provider: "ollama", localKind: "gpu", models: { ...config.models, ollama: "local-model" } },
+  userRequests: ["x"],
+  page: { title: "", url: "https://a.test/" },
+  name: "navigate",
+  input: {},
+});
+providers.ollama = localBefore;
 Object.assign(providers.openai, { classify: savedClassify, describeError: savedDescribe });
 assert.equal(unavailable.verdict, "ask");
 assert.equal(unavailable.reason, "Safety check unavailable (gpt-6-luna: This model is not enabled for your account).");
@@ -1386,24 +1397,24 @@ const testResult = async (msg) => {
 };
 const stubOpenai = { ...providers.openai };
 Object.assign(providers.openai, { listModels: openai.listModels, ping: openai.ping, describeError: openai.describeError });
-hostConfig.models.openai = "gpt-chosen";
-{
-  const before = structuredClone(hostConfig);
-  hostConfig.models.openai = DEFAULTS.models.openai;
-  await fromLocal({ type: "save_config", patch: { openaiBaseUrl: "http://localhost:8081/v1" } });
-  assert.equal(hostConfig.models.openai, "", "OpenAI's default model stayed chosen after switching to a custom server");
-  hostConfig = Object.assign(hostConfig, before);
-}
-const outOfCredit = await testResult({ provider: "openai", baseUrl: `${standInUrl}/v1` });
+// OpenAI is official OpenAI only: a base URL is no setting any more.
+assert.throws(() => cleanSetting("openaiBaseUrl", "http://localhost:8081/v1"), /Unknown setting/);
+await fromLocal({ type: "save_config", patch: { openaiBaseUrl: `${standInUrl}/v1` } });
+assert.ok(!("openaiBaseUrl" in hostConfig), "OpenAI accepted a base URL");
+hostConfig.localKind = "server";
+hostConfig.models.ollama = "gpt-chosen";
+const outOfCredit = await testResult({ provider: "ollama", kind: "server", baseUrl: `${standInUrl}/v1` });
 Object.assign(providers.openai, stubOpenai);
 assert.equal(outOfCredit.ok, false, "an out-of-credit account passed the connection test");
 assert.match(outOfCredit.text, /out of credit/);
 assert.equal(testBodies.at(-1).body.model, "gpt-chosen", "the test request did not use the chosen model");
 assert.equal(testBodies.at(-1).body.max_tokens, 1, "the test request was not the smallest one");
-hostConfig.models.openai = DEFAULTS.models.openai;
-await testResult({ provider: "openai", baseUrl: `${standInUrl}/v1` });
-assert.equal(testBodies.at(-1).body.model, "gpt-cheap", "a server that does not list the default model was tested with the default");
-hostConfig.models.openai = "gpt-chosen";
+// A model chosen for another kind of connection is not the one tested on a new kind.
+hostConfig.localKind = "ollama";
+await testResult({ provider: "ollama", kind: "server", baseUrl: `${standInUrl}/v1` });
+assert.equal(testBodies.at(-1).body.model, "gpt-cheap", "the model of another kind of connection was tested");
+hostConfig.localKind = "ollama";
+hostConfig.models.ollama = "";
 const noModels = await testResult({ provider: "ollama", host: standInUrl });
 assert.equal(noModels.ok, false);
 assert.match(noModels.text, /ollama pull <model>/);
@@ -1425,6 +1436,105 @@ assert.equal(noChatModel.ok, false);
 assert.match(noChatModel.text, /None of the 3 listed models can chat with tools.*ollama pull <model>/);
 assert.equal(testBodies.filter((b) => b.path === "/api/chat").length, chats, "a test request went to a model that cannot chat");
 standIn.close();
+
+// Local: each kind of connection tests, saves nothing it was not given, and lists its chat
+// models, with no key. The GPU preset and a server use Chat Completions (a server with the
+// key it was given, the preset with a stand-in), Ollama its native API.
+const localRequests = [];
+const localServer = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
+    localRequests.push({ path: req.url, auth: req.headers.authorization, body: body && JSON.parse(body) });
+    if (req.url === "/v1/models") return json({ object: "list", data: [{ id: "Browsby-Steady" }, { id: "Browsby-Swift" }, { id: "nomic-embed-text" }] });
+    if (req.url === "/v1/chat/completions") return json({ choices: [{ index: 0, message: { role: "assistant", content: "Hi" }, finish_reason: "length" }], usage: { total_tokens: 2 } });
+    if (req.url === "/api/tags") return json({ models: [{ name: "qwen3:8b" }, { name: "all-minilm" }] });
+    if (req.url === "/api/show") return json({ capabilities: JSON.parse(body).model === "qwen3:8b" ? ["completion", "tools"] : ["embedding"] });
+    if (req.url === "/api/chat") return json({ model: "qwen3:8b", message: { role: "assistant", content: "Hi" }, done: true });
+    res.writeHead(404).end();
+  });
+});
+await new Promise((r) => localServer.listen(0, "127.0.0.1", r));
+const localUrl = `http://127.0.0.1:${localServer.address().port}`;
+const localList = async () => {
+  localEvents.length = 0;
+  await fromLocal({ type: "list_models", provider: "ollama" });
+  return localEvents.find((e) => e.type === "models");
+};
+Object.assign(hostConfig, { provider: "ollama", localKind: "ollama", keys: { ...hostConfig.keys, ollama: "" }, models: { ...hostConfig.models, ollama: "" } });
+for (const [kind, fields, chatPath, listed] of [
+  ["gpu", { baseUrl: `${localUrl}/v1` }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
+  ["server", { baseUrl: `${localUrl}/v1`, key: "sk-server" }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
+  ["ollama", { host: localUrl }, "/api/chat", ["qwen3:8b"]],
+]) {
+  localRequests.length = 0;
+  const tested = await testResult({ provider: "ollama", kind, ...fields });
+  assert.equal(tested.ok, true, `Local ${kind} did not connect: ${tested.text}`);
+  const ping = localRequests.find((r) => r.path === chatPath);
+  assert.equal(ping.body.model, listed[0], `Local ${kind} tested the wrong model`);
+  if (kind !== "ollama") assert.equal(ping.auth, kind === "server" ? "Bearer sk-server" : "Bearer local", `Local ${kind} sent the wrong key`);
+  // The test saves nothing; the UI's patch does once it passes, as the card and setup send it.
+  const { localPatch } = await import("../ui/models.js");
+  await fromLocal({ type: "save_config", patch: { ...localPatch(hostConfig, { kind, ...fields }), ...(fields.key && { keys: { ollama: fields.key } }) } });
+  assert.equal(hostConfig.localKind, kind);
+  const models = await localList();
+  assert.deepEqual(models.models, listed.includes("qwen3:8b") ? ["qwen3:8b", "all-minilm"] : listed, `Local ${kind} listed the wrong models`);
+}
+assert.equal(hostConfig.gpuBaseUrl, `${localUrl}/v1`);
+assert.equal(hostConfig.serverBaseUrl, `${localUrl}/v1`);
+assert.equal(hostConfig.ollamaHost, localUrl);
+// A server without a base URL is not tested, and a saved server key is never sent back.
+hostConfig.serverBaseUrl = "";
+assert.match((await testResult({ provider: "ollama", kind: "server" })).text, /base URL/);
+assert.ok(!JSON.stringify(localEvents).includes("sk-server"), "the server key reached the UI");
+// Thinking: the setting goes to an OpenAI-compatible server as chat_template_kwargs.
+const localModule = await import("../src/providers/local.js");
+localRequests.length = 0;
+const gpuConfig = { ...hostConfig, localKind: "gpu", thinking: false };
+await localModule.turn({ apiKey: "", model: "Browsby-Steady", config: gpuConfig, system: "s", tools: [], messages: userTurn, signal: new AbortController().signal, onText: () => {}, onThinking: () => {} }).catch(() => {});
+await localModule.classify({ apiKey: "", model: "Browsby-Steady", config: { ...gpuConfig, thinking: true }, system: "s", text: "t", schema: {} }).catch(() => {});
+assert.deepEqual(localRequests.map((r) => r.body.chat_template_kwargs), [{ enable_thinking: false }, { enable_thinking: false }], "Local thinking control did not reach the server");
+assert.match(localModule.describeError(new OpenAI.AuthenticationError(401, {}, "no", new Headers())), /^The server rejected/);
+localServer.close();
+// Local needs no key to run a task.
+{
+  const keyless = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  keyless.browser = agent.browser;
+  const localBefore = providers.ollama;
+  providers.ollama = { ...providers.openai, turn: async () => ({ content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } }) };
+  const keylessErrors = [];
+  keyless.emit = (e) => e.type === "error" && keylessErrors.push(e.text);
+  await keyless.run("hi", { ...config, provider: "ollama", localKind: "gpu", keys: { ...DEFAULTS.keys }, models: { ...config.models, ollama: "Browsby-Steady" } });
+  providers.ollama = localBefore;
+  assert.ok(!keylessErrors.some((t) => /API key/.test(t)), `Local asked for a key: ${keylessErrors}`);
+  assert.equal(apiKeyFor({ ...hostConfig, localKind: "gpu", keys: { ...hostConfig.keys, ollama: "sk-server" } }, "ollama"), "", "the GPU preset sent a server key");
+}
+
+// Settings from before Local: an OpenAI base URL becomes Local, the GPU preset for its
+// address, with the server's model, history, safety model and key moved; OpenAI keeps its
+// own models. Ollama settings carry on as Local's Ollama kind.
+const migrated = mergeConfig({
+  provider: "openai",
+  openaiBaseUrl: "http://localhost:8081/v1",
+  models: { openai: "Browsby-Steady", ollama: "qwen3:8b" },
+  keys: { openai: "local", anthropic: "sk-ant" },
+  guardModels: { openai: "Browsby-Swift" },
+  modelHistory: [{ provider: "openai", model: "Browsby-Steady" }, { provider: "openai", model: "Browsby-Swift" }, { provider: "openai", model: "gpt-6-sol" }, { provider: "ollama", model: "qwen3:8b" }],
+});
+assert.equal(migrated.provider, "ollama");
+assert.equal(migrated.localKind, "gpu");
+assert.equal(migrated.gpuBaseUrl, "http://localhost:8081/v1");
+assert.deepEqual([migrated.models.ollama, migrated.models.openai], ["Browsby-Steady", DEFAULTS.models.openai]);
+assert.deepEqual([migrated.keys.openai, migrated.keys.ollama, migrated.keys.anthropic], ["", "local", "sk-ant"], "the server key stayed under OpenAI");
+assert.deepEqual(migrated.guardModels, { ollama: "Browsby-Swift" });
+assert.deepEqual(pairs(migrated.modelHistory), ["ollama/Browsby-Steady", "ollama/Browsby-Swift", "openai/gpt-6-sol", "ollama/qwen3:8b"]);
+assert.ok(!("openaiBaseUrl" in migrated));
+const migratedServer = mergeConfig({ provider: "anthropic", openaiBaseUrl: "https://openrouter.ai/api/v1", models: { openai: "qwen/qwen3-235b" } });
+assert.deepEqual([migratedServer.provider, migratedServer.localKind, migratedServer.serverBaseUrl, migratedServer.models.ollama], ["anthropic", "server", "https://openrouter.ai/api/v1", "qwen/qwen3-235b"]);
+assert.equal(mergeConfig({ openaiBaseUrl: "javascript:alert(1)", provider: "openai" }).provider, "openai", "a bad stored base URL was migrated");
+const ollamaUser = mergeConfig({ provider: "ollama", models: { ollama: "qwen3:8b" }, ollamaHost: "http://10.0.0.5:11434" });
+assert.deepEqual([ollamaUser.provider, ollamaUser.localKind, ollamaUser.models.ollama, ollamaUser.ollamaHost], ["ollama", "ollama", "qwen3:8b", "http://10.0.0.5:11434"]);
 
 // Ollama gets a think field only for models that list the thinking capability: the
 // user's setting in a task, off in safety checks. The capability is asked once per model.

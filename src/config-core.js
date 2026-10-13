@@ -1,9 +1,9 @@
 // Settings shape, defaults, and key handling. No file or environment access here.
 
 // Small models used for safety checks when none is set for the provider. Empty means
-// the main model is used, as for Ollama, where a second local model would compete for
-// memory. Mistral enables models per account; when the account cannot use a default here,
-// the checks fall back to the main model (see Guard).
+// the main model is used, as for Local, where a second model would compete for memory or
+// is not served at all. Mistral enables models per account; when the account cannot use a
+// default here, the checks fall back to the main model (see Guard).
 export const DEFAULT_GUARD_MODELS = {
   openai: "gpt-6-luna",
   anthropic: "claude-haiku-4-5",
@@ -12,19 +12,23 @@ export const DEFAULT_GUARD_MODELS = {
   ollama: "",
 };
 
-// The safety-check model when none is set. A custom OpenAI-compatible server (OpenRouter,
-// llama.cpp, vLLM, ...) does not serve OpenAI's small model, so it uses the main model.
-export function defaultGuardModel(config, provider) {
-  return provider === "openai" && config.openaiBaseUrl ? "" : DEFAULT_GUARD_MODELS[provider];
-}
+// The Local provider (id "ollama", from when Ollama was its only kind) reaches one of:
+//   gpu     the Browsby GPU server, an OpenAI-compatible endpoint at gpuBaseUrl, no key
+//   server  any OpenAI-compatible server (llama.cpp, LM Studio, vLLM) at serverBaseUrl,
+//           with keys.ollama when it wants one
+//   ollama  Ollama's native API at ollamaHost
+export const LOCAL_KINDS = ["gpu", "server", "ollama"];
+export const GPU_BASE_URL = "http://localhost:8081/v1";
 
 export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
-  keys: { anthropic: "", openai: "", gemini: "", mistral: "" },
+  keys: { anthropic: "", openai: "", gemini: "", mistral: "", ollama: "" },
   // The models picked so far, newest first, for quick switching: [{ provider, model }].
   modelHistory: [],
-  openaiBaseUrl: "",
+  localKind: "ollama",
+  gpuBaseUrl: GPU_BASE_URL,
+  serverBaseUrl: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
   effort: "high",
@@ -70,7 +74,9 @@ export function resetConfig(config) {
   };
 }
 
+// Local sends a key only to an OpenAI-compatible server the user gave one for.
 export function apiKeyFor(config, provider) {
+  if (provider === "ollama" && config.localKind !== "server") return "";
   return config.keys[provider] || "";
 }
 
@@ -92,6 +98,7 @@ const CHOICES = {
   permissionMode: ["guarded", "ask", "auto"],
   effort: ["default", "low", "medium", "high", "xhigh", "max"],
   openaiEffort: ["default", "none", "low", "medium", "high", "xhigh", "max"],
+  localKind: LOCAL_KINDS,
 };
 // [min, max, name in messages]
 const NUMBER_RANGES = {
@@ -162,7 +169,8 @@ export function cleanSetting(key, value) {
         : fail("Each model in the history is a provider and a model id."),
     );
   }
-  if (key === "openaiBaseUrl") return value === "" ? value : httpUrl(value, "The base URL");
+  if (key === "gpuBaseUrl") return httpUrl(value, "The base URL");
+  if (key === "serverBaseUrl") return value === "" ? value : httpUrl(value, "The base URL");
   if (key === "ollamaHost") return httpUrl(value, "The Ollama host");
   if (key === "customInstructions") {
     if (typeof value !== "string") fail("Custom instructions must be text.");
@@ -209,14 +217,14 @@ export function publicConfig(config) {
     keyInfo[p] = { source: key ? "saved" : "none", mask: key ? maskKey(key) : "" };
   }
   const { keys, discord: _discord, ...rest } = config;
-  const defaultGuardModels = Object.fromEntries(Object.keys(DEFAULT_GUARD_MODELS).map((p) => [p, defaultGuardModel(config, p)]));
-  return { ...rest, keyInfo, defaultGuardModels };
+  return { ...rest, keyInfo, defaultGuardModels: DEFAULT_GUARD_MODELS };
 }
 
 // Stored settings over the defaults, with nested objects merged. A stored value that fails
 // cleanSetting (from an older version, or edited outside the app) falls back to its default
 // rather than being trusted. Keys that are not settings any more are dropped.
 export function mergeConfig(stored = {}) {
+  stored = migrateBaseUrl(stored ?? {});
   const defaults = structuredClone(DEFAULTS);
   const config = { ...defaults, keys: { ...defaults.keys, ...stored.keys } };
   if (stored.discord) config.discord = stored.discord;
@@ -240,4 +248,47 @@ export function mergeConfig(stored = {}) {
     } catch {}
   }
   return config;
+}
+
+// OpenAI's own model ids; any other id saved under OpenAI belonged to a custom server.
+// ponytail: name pattern, misreads a custom server model named like gpt-*; such an entry
+// stays under OpenAI and is picked again from Settings > Models.
+const OPENAI_MODEL = /^(gpt-|chatgpt-|codex-|o\d)/i;
+
+// Versions before the Local provider reached an OpenAI-compatible server through OpenAI's
+// base URL. Such a config becomes Local (the GPU preset or a server), with the server's
+// model, model history entries, safety model and key moved over. The key moves rather
+// than stays, so it is never sent to api.openai.com.
+function migrateBaseUrl(stored) {
+  const url = stored.openaiBaseUrl;
+  if (typeof url !== "string" || !url) return stored;
+  try {
+    httpUrl(url, "");
+  } catch {
+    return stored;
+  }
+  const { openaiBaseUrl: _url, ...next } = stored;
+  const kind = /^http:\/\/(localhost|127\.0\.0\.1):8081\/v1\/?$/.test(url) ? "gpu" : "server";
+  next[kind === "gpu" ? "gpuBaseUrl" : "serverBaseUrl"] = url;
+  const models = { ...stored.models };
+  const guardModels = { ...stored.guardModels };
+  const keys = { ...stored.keys };
+  if (stored.provider === "openai" || !models.ollama) {
+    next.localKind = kind;
+    if (models.openai && !OPENAI_MODEL.test(models.openai)) models.ollama = models.openai;
+  }
+  if (stored.provider === "openai") next.provider = "ollama";
+  if (models.openai && !OPENAI_MODEL.test(models.openai)) delete models.openai;
+  if (guardModels.openai && !OPENAI_MODEL.test(guardModels.openai)) {
+    guardModels.ollama ||= guardModels.openai;
+    delete guardModels.openai;
+  }
+  if (keys.openai) {
+    keys.ollama ||= keys.openai;
+    keys.openai = "";
+  }
+  if (Array.isArray(stored.modelHistory)) {
+    next.modelHistory = stored.modelHistory.map((m) => (m?.provider === "openai" && typeof m.model === "string" && !OPENAI_MODEL.test(m.model) ? { ...m, provider: "ollama" } : m));
+  }
+  return { ...next, models, guardModels, keys };
 }

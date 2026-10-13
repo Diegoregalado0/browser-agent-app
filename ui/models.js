@@ -1,4 +1,4 @@
-import { keyProblem, MODEL_HISTORY_MAX } from "../src/config-core.js";
+import { keyProblem, MODEL_HISTORY_MAX, GPU_BASE_URL } from "../src/config-core.js";
 
 // Models, in two places. The quick selector: the current model as a button at the top
 // left, opening a menu of the models already used, to switch between them. The main menu
@@ -11,8 +11,15 @@ export const PROVIDERS = [
   { id: "openai", name: "OpenAI", mark: "O", keyPage: "https://platform.openai.com/api-keys" },
   { id: "gemini", name: "Google Gemini", mark: "G", keyPage: "https://aistudio.google.com/apikey" },
   { id: "mistral", name: "Mistral", mark: "M", keyPage: "https://console.mistral.ai/api-keys" },
-  { id: "ollama", name: "Ollama", mark: "L", local: true },
+  { id: "ollama", name: "Local", mark: "L", local: true },
 ];
+// The kinds of Local connection (LOCAL_KINDS), as the Local card and first-run setup offer them.
+export const LOCAL_KINDS = [
+  { id: "gpu", name: "Browsby GPU server", label: "The Browsby GPU server, through its tunnel on this computer" },
+  { id: "server", name: "OpenAI-compatible server", label: "An OpenAI-compatible server: llama.cpp, LM Studio, vLLM and similar" },
+  { id: "ollama", name: "Ollama", label: "Ollama on this computer or your network" },
+];
+export const OLLAMA_COMMAND = "OLLAMA_ORIGINS=chrome-extension://* ollama serve";
 const providerById = (id) => PROVIDERS.find((p) => p.id === id);
 // A provider's model list shows this many before asking for a search.
 const LIST_MAX = 60;
@@ -21,11 +28,15 @@ const FAST_MODEL = /(^|[-_.:/])(haiku|flash|flash-lite|mini|nano|lite|small)([-_
 const MODEL_ID = /^[\w.:/@+-]{1,200}$/;
 const same = (a, b) => a.provider === b.provider && a.model === b.model;
 
-// Whether the agent can run on a provider: a saved key, or for Ollama its host, which
-// always has a value.
+// Whether the agent can run on a provider: a saved key, or for Local an address, which
+// only an OpenAI-compatible server can lack.
 export function usable(config, provider) {
-  return providerById(provider)?.local ? true : config.keyInfo?.[provider]?.source === "saved";
+  if (providerById(provider)?.local) return config.localKind !== "server" || Boolean(config.serverBaseUrl);
+  return config.keyInfo?.[provider]?.source === "saved";
 }
+
+// The address a Local connection of this kind reaches.
+export const localEndpoint = (config, kind = config.localKind) => ({ gpu: config.gpuBaseUrl, server: config.serverBaseUrl, ollama: config.ollamaHost })[kind];
 
 // The models already used whose provider can still run, newest first. The current model
 // leads even before it is in the history (set by first-run setup or an earlier version).
@@ -47,6 +58,17 @@ export function switchPatch(config, provider, model) {
 // The settings patch that takes a model out of the history.
 export function forgetPatch(config, entry) {
   return { modelHistory: (config.modelHistory ?? []).filter((m) => !same(m, entry)) };
+}
+
+// The settings patch that saves a Local connection that passed its test. A new kind of
+// connection drops the model chosen for the previous one, which it does not serve.
+export function localPatch(config, { kind, baseUrl, host }) {
+  const patch = {};
+  if (kind !== config.localKind) Object.assign(patch, { localKind: kind, models: { ollama: "" } });
+  if (kind === "ollama" && host && host !== config.ollamaHost) patch.ollamaHost = host;
+  const setting = { gpu: "gpuBaseUrl", server: "serverBaseUrl" }[kind];
+  if (setting && baseUrl && baseUrl !== config[setting]) patch[setting] = baseUrl;
+  return patch;
 }
 
 // Short labels for a model, only where they are known.
@@ -225,7 +247,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
   const lists = {};
   // Providers whose connection test is running.
   const testing = new Set();
-  const endpointOf = (p) => [config.keyInfo?.[p]?.mask, p === "openai" ? config.openaiBaseUrl : p === "ollama" ? config.ollamaHost : ""].join(" ");
+  const endpointOf = (p) => [config.keyInfo?.[p]?.mask, providerById(p).local ? `${config.localKind} ${localEndpoint(config)}` : ""].join(" ");
 
   function inputField(card, label, input, note) {
     input.id = `${card.dataset.provider}-${input.dataset.role}`;
@@ -249,15 +271,35 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     toggle.type = "button";
     toggle.setAttribute("aria-expanded", "false");
     toggle.setAttribute("aria-controls", `${p.id}-body`);
-    toggle.append(mark(p.id), el("span", "pc-name", p.local ? "Ollama (local)" : p.name), el("span", "pc-status"), icon("down"));
+    toggle.append(mark(p.id), el("span", "pc-name", p.name), el("span", "pc-status"), icon("down"));
     const body = Object.assign(el("div", "pc-body"), { id: `${p.id}-body`, hidden: true });
     toggle.onclick = () => setExpanded(card, body.hidden);
     card.append(toggle, body);
 
+    const key = Object.assign(el("input"), { type: "password", spellcheck: false, autocomplete: "off" });
+    key.dataset.role = "key";
     if (p.local) {
+      // One group of fields per kind of connection; the select shows the chosen kind's.
+      const kind = el("select");
+      kind.dataset.role = "kind";
+      kind.append(...LOCAL_KINDS.map((k) => Object.assign(el("option", null, k.name), { value: k.id })));
+      kind.onchange = () => showKind(card);
+      body.append(inputField(card, "Connection", kind));
+      const group = (id, ...fields) => {
+        const node = el("div", "pc-kind");
+        node.dataset.kind = id;
+        node.append(...fields);
+        return node;
+      };
+      const url = (role, placeholder) => {
+        const input = Object.assign(el("input"), { type: "url", inputMode: "url", spellcheck: false, autocomplete: "off", placeholder });
+        input.dataset.role = role;
+        return input;
+      };
+      const gpuBase = url("gpu-base", GPU_BASE_URL);
+      const serverBase = url("server-base", "http://localhost:1234/v1");
       const host = Object.assign(el("input"), { spellcheck: false, placeholder: "http://127.0.0.1:11434" });
       host.dataset.role = "host";
-      body.append(inputField(card, "Host", host, ["Start Ollama with ", el("code", null, "OLLAMA_ORIGINS=chrome-extension://* ollama serve"), ". Use a model that supports tools."]));
       const ctx = Object.assign(el("input"), { type: "number", min: 4096, step: 1024, className: "narrow-input" });
       ctx.dataset.role = "context";
       ctx.addEventListener("change", () => {
@@ -265,22 +307,24 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         ctx.value = value;
         send({ type: "save_config", patch: { ollamaContext: value } });
       });
-      body.append(inputField(card, "Context window (tokens)", ctx));
+      body.append(
+        group("gpu", inputField(card, "Base URL", gpuBase, "The GPU server through its tunnel on this computer. No key needed.")),
+        group(
+          "server",
+          inputField(card, "Base URL", serverBase, "For llama.cpp, LM Studio, vLLM and similar."),
+          inputField(card, "API key (optional)", key, "Only if the server asks for one. It stays on this device and goes only to this server."),
+        ),
+        group(
+          "ollama",
+          inputField(card, "Host", host, ["Start Ollama with ", el("code", null, OLLAMA_COMMAND), ". Use a model that supports tools."]),
+          inputField(card, "Context window (tokens)", ctx),
+        ),
+      );
     } else {
-      const key = Object.assign(el("input"), { type: "password", spellcheck: false, autocomplete: "off" });
-      key.dataset.role = "key";
       const link = Object.assign(el("a", null, new URL(p.keyPage).hostname), { href: p.keyPage, target: "_blank", rel: "noopener noreferrer" });
       body.append(inputField(card, "API key", key, ["Get one at ", link, `. It stays on this device and goes only to ${p.name}.`]));
-      if (p.id === "openai") {
-        const more = el("details", "pc-more");
-        more.append(el("summary", null, "OpenAI-compatible server"));
-        const base = Object.assign(el("input"), { spellcheck: false, placeholder: "https://api.openai.com/v1" });
-        base.dataset.role = "base";
-        more.append(inputField(card, "Base URL", base, "For OpenRouter, LM Studio, vLLM and similar. Leave blank for OpenAI."));
-        body.append(more);
-      }
     }
-    for (const field of body.querySelectorAll('[data-role="key"], [data-role="host"], [data-role="base"]')) {
+    for (const field of body.querySelectorAll('[data-role="key"], [data-role="host"], [data-role$="base"]')) {
       field.addEventListener("keydown", (e) => e.key === "Enter" && !testing.has(p.id) && test(card));
     }
 
@@ -289,17 +333,15 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     testButton.type = "button";
     testButton.onclick = () => test(card);
     actions.append(testButton);
-    if (!p.local) {
-      const remove = el("button", "link-danger pc-remove", "Remove key");
-      remove.type = "button";
-      remove.onclick = () =>
-        confirmInline(remove, {
-          question: `Remove the saved ${p.name} key?`,
-          confirmLabel: "Remove",
-          onConfirm: () => send({ type: "save_config", patch: { keys: { [p.id]: "__clear__" } } }),
-        });
-      actions.append(remove);
-    }
+    const remove = el("button", "link-danger pc-remove", "Remove key");
+    remove.type = "button";
+    remove.onclick = () =>
+      confirmInline(remove, {
+        question: `Remove the saved ${p.local ? "server" : p.name} key?`,
+        confirmLabel: "Remove",
+        onConfirm: () => send({ type: "save_config", patch: { keys: { [p.id]: "__clear__" } } }),
+      });
+    actions.append(remove);
     const result = Object.assign(el("p", "pc-result"), { id: `${p.id}-result` });
     result.setAttribute("aria-live", "polite");
     body.append(actions, result);
@@ -354,10 +396,29 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
 
   const field = (card, role) => card.querySelector(`[data-role="${role}"]`);
 
+  // The Local card shows the fields of the kind of connection chosen in its select.
+  function showKind(card) {
+    const kind = field(card, "kind").value;
+    for (const group of card.querySelectorAll(".pc-kind")) group.hidden = group.dataset.kind !== kind;
+    card.querySelector(".pc-remove").hidden = !(kind === "server" && config.keyInfo?.ollama?.source === "saved");
+  }
+
+  // The fields a Local test sends and, once it passes, saves: { kind, baseUrl, host }.
+  function localFields(card) {
+    const kind = field(card, "kind").value;
+    const baseUrl = kind === "ollama" ? undefined : field(card, `${kind}-base`).value.trim();
+    return { kind, baseUrl, host: kind === "ollama" ? field(card, "host").value.trim() : undefined };
+  }
+
+  // The first field of the kind shown, for focus after a failed test.
+  const firstField = (card) => card.querySelector(".pc-kind:not([hidden]) input") ?? field(card, "key");
+
   function test(card) {
     const p = card.dataset.provider;
-    const key = field(card, "key")?.value.trim();
-    if (field(card, "key") && !key && !usable(config, p)) {
+    const local = providerById(p).local;
+    const kind = local && field(card, "kind").value;
+    const key = local && kind !== "server" ? "" : field(card, "key").value.trim();
+    if (!local && !key && !usable(config, p)) {
       result(card, "error", "Paste an API key first.");
       return field(card, "key").focus();
     }
@@ -369,7 +430,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     testing.add(p);
     card.querySelector(".pc-test").disabled = true;
     result(card, "pending", "Testing the connection…");
-    send({ type: "test_provider", provider: p, key: key || undefined, baseUrl: field(card, "base")?.value.trim(), host: field(card, "host")?.value.trim() });
+    send({ type: "test_provider", provider: p, key: key || undefined, ...(local && localFields(card)) });
   }
 
   function loadIfNeeded(p) {
@@ -427,15 +488,20 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       const status = card.querySelector(".pc-status");
       status.className = `pc-status${ok ? " saved" : ""}`;
       status.textContent = !ok ? "Not connected" : p === config.provider ? "In use" : providerById(p).local ? "" : `Key ${info.mask}`;
+      const local = providerById(p).local;
+      if (local && ok && p !== config.provider) status.textContent = LOCAL_KINDS.find((k) => k.id === config.localKind).name;
       const key = field(card, "key");
-      if (key) key.placeholder = ok ? `Paste a new key to replace ${info.mask}` : "Paste your API key";
-      card.querySelector(".pc-test").textContent = providerById(p).local || (ok && !key?.value) ? "Test connection" : "Test and save";
-      card.querySelector(".pc-remove")?.toggleAttribute("hidden", !ok);
-      for (const [role, value] of [["host", config.ollamaHost], ["base", config.openaiBaseUrl], ["context", config.ollamaContext]]) {
-        const input = field(card, role);
-        if (input && document.activeElement !== input) input.value = value ?? "";
+      const saved = info?.source === "saved";
+      key.placeholder = saved ? `Paste a new key to replace ${info.mask}` : local ? "None" : "Paste your API key";
+      card.querySelector(".pc-test").textContent = !local && ok && !key.value ? "Test connection" : "Test and save";
+      card.querySelector(".pc-remove").hidden = !ok;
+      if (local) {
+        for (const [role, value] of [["kind", config.localKind], ["gpu-base", config.gpuBaseUrl], ["server-base", config.serverBaseUrl], ["host", config.ollamaHost], ["context", config.ollamaContext]]) {
+          const input = field(card, role);
+          if (document.activeElement !== input) input.value = value ?? "";
+        }
+        showKind(card);
       }
-      if (p === "openai" && config.openaiBaseUrl) card.querySelector(".pc-more").open = true;
       card.querySelector(".pc-models").hidden = !ok;
       if (!card.querySelector(".pc-body").hidden) loadIfNeeded(p);
       renderList(card);
@@ -456,6 +522,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       setExpanded(cardOf(config.provider), true);
     },
     render(next) {
+      const previous = config?.provider;
       config = next;
       renderChip();
       // The menu is drawn again with focus kept on the same item.
@@ -465,6 +532,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         if (focused) (menu.querySelector(`[aria-label="${CSS.escape(focused)}"]`) ?? menuItems()[0]).focus();
       }
       renderCards();
+      // A provider chosen elsewhere (first-run setup) while Settings > Models shows gets its card opened.
+      if (previous && previous !== config.provider && cardsRoot.offsetParent) setExpanded(cardOf(config.provider), true);
       if (pending && config.provider === pending.provider && config.models[pending.provider] === pending.model) confirmSwitch();
     },
     handlers: {
@@ -474,16 +543,14 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         card.querySelector(".pc-test").disabled = false;
         if (!msg.ok) {
           result(card, "error", msg.text);
-          return (field(card, "key") ?? field(card, "host")).focus();
+          return (providerById(msg.provider).local ? firstField(card) : field(card, "key")).focus();
         }
-        const key = field(card, "key")?.value.trim();
+        const local = providerById(msg.provider).local;
+        const key = local && field(card, "kind").value !== "server" ? "" : field(card, "key").value.trim();
         const patch = {};
         if (key) patch.keys = { [msg.provider]: key };
-        const host = field(card, "host")?.value.trim();
-        if (host && host !== config.ollamaHost) patch.ollamaHost = host;
-        const base = field(card, "base")?.value.trim();
-        if (base !== undefined && base !== config.openaiBaseUrl) patch.openaiBaseUrl = base;
-        if (field(card, "key")) field(card, "key").value = "";
+        if (local) Object.assign(patch, localPatch(config, localFields(card)));
+        field(card, "key").value = "";
         result(card, "ok", Object.keys(patch).length ? `${msg.text} Saved.` : msg.text);
         if (Object.keys(patch).length) send({ type: "save_config", patch });
         else {

@@ -1,8 +1,9 @@
 import { OUTLOOK_LOGO } from "./mcp.js";
-import { keyProblem } from "../src/config-core.js";
+import { GPU_BASE_URL, keyProblem } from "../src/config-core.js";
+import { LOCAL_KINDS, OLLAMA_COMMAND, localEndpoint, localPatch } from "./models.js";
 
-// First-run setup, full screen over the app: welcome, provider, its key (or a local server
-// check), then Outlook when this build can connect it. It opens once while config.setupDone is false,
+// First-run setup, full screen over the app: welcome, provider, its key (for Local: the kind
+// of connection, then its address), then Outlook when this build can connect it. It opens once while config.setupDone is false,
 // and again from Settings > General. The first run cannot be skipped until a provider
 // works; setupDone is saved only after that (and after the Outlook screen is answered).
 
@@ -18,7 +19,7 @@ const PROVIDERS = [
   { id: "anthropic", name: "Anthropic", keyPage: "https://console.anthropic.com/settings/keys" },
   { id: "gemini", name: "Google Gemini", keyPage: "https://aistudio.google.com/apikey" },
   { id: "mistral", name: "Mistral", keyPage: "https://console.mistral.ai/api-keys" },
-  { id: "ollama", name: "Local", label: "Local models on this computer, with Ollama", glyph: "models" },
+  { id: "ollama", name: "Local", label: "Local models: the Browsby GPU server, an OpenAI-compatible server or Ollama", glyph: "models" },
 ];
 
 // Shows where a screen sits in a setup flow: "Step 2 of 3" for screen readers, and a bar
@@ -70,6 +71,8 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   // Reopened after setup was finished, so it may be closed without finishing.
   let closable = false;
   let provider = null;
+  // The kind of Local connection being set up (LOCAL_KINDS).
+  let kind = null;
   // The provider whose connection test is running.
   let testing = null;
 
@@ -93,7 +96,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
 
   // Shows one screen: its title, lead text, which parts are visible, and its buttons.
   // The steps after the welcome: provider, key, and Outlook when this build can connect it.
-  const stepOf = (name) => ({ provider: 1, key: 2, outlook: 3 })[name] ?? 0;
+  const stepOf = (name) => ({ provider: 1, kind: 1, key: 2, outlook: 3 })[name] ?? 0;
 
   function show(name, { title, lead = "", parts = [], next, skip, back, focus, centered }) {
     screen = name;
@@ -121,18 +124,23 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     });
   }
 
-  function pickProvider() {
+  // Fills the button list with one button per choice: { name, label, glyph }.
+  function choices(list, onPick) {
     $("wizard-providers").replaceChildren(
-      ...PROVIDERS.map((p) => {
+      ...list.map((p) => {
         const button = el("button");
         button.type = "button";
         if (p.glyph) button.append(icon(p.glyph));
         button.append(el("span", null, p.name));
         button.setAttribute("aria-label", p.label ?? p.name);
-        button.onclick = () => enterKey(p);
+        button.onclick = () => onPick(p);
         return button;
       }),
     );
+  }
+
+  function pickProvider() {
+    choices(PROVIDERS, (p) => (p.id === "ollama" ? pickKind(p) : enterKey(p)));
     show("provider", {
       title: "Pick your provider",
       parts: ["wizard-providers"],
@@ -141,21 +149,70 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     });
   }
 
-  // The key screen, or for Ollama a check that the local server answers.
-  function enterKey(p) {
+  // Local's submenu: the kind of connection.
+  function pickKind(p) {
+    choices(LOCAL_KINDS, (k) => enterLocal(p, k.id));
+    show("kind", {
+      title: "Connect a local model",
+      parts: ["wizard-providers"],
+      centered: true,
+      back: pickProvider,
+      focus: $("wizard-providers").querySelector(`button:nth-child(${LOCAL_KINDS.findIndex((k) => k.id === config.localKind) + 1})`),
+    });
+  }
+
+  // A Local connection's screen: its address (and for a server an optional key), or for
+  // Ollama a check that it answers.
+  function enterLocal(p, id) {
     provider = p;
+    kind = id;
     $("wizard-key").value = "";
-    $("wizard-base").value = config.openaiBaseUrl || "";
-    if (p.id === "ollama") {
-      const cmd = el("code", null, "OLLAMA_ORIGINS=chrome-extension://* ollama serve");
+    $("wizard-base").value = localEndpoint(config, id) || "";
+    const back = () => pickKind(p);
+    if (id === "ollama") {
       return show("key", {
-        title: "Use a local model",
-        lead: ["Start your model with ", cmd, ", then test the connection."],
+        title: "Use Ollama",
+        lead: ["Start Ollama with ", el("code", null, OLLAMA_COMMAND), ", then test the connection."],
         next: ["Test connection", test],
-        back: pickProvider,
+        back,
         focus: $("wizard-next"),
       });
     }
+    if (id === "gpu") {
+      $("wizard-base").placeholder = GPU_BASE_URL;
+      $("wizard-base-note").textContent = "Reached through the tunnel on this computer. No key needed.";
+      return show("key", {
+        title: "Connect the Browsby GPU server",
+        lead: "Models run on the GPU server, not on this computer.",
+        parts: ["wizard-base-field"],
+        centered: true,
+        next: ["Connect", test],
+        back,
+        focus: $("wizard-next"),
+      });
+    }
+    $("wizard-base").placeholder = "http://localhost:1234/v1";
+    $("wizard-base-note").textContent = "For llama.cpp, LM Studio, vLLM and similar.";
+    $("wizard-key-label").textContent = "API key (optional)";
+    const info = config.keyInfo?.ollama;
+    $("wizard-key").placeholder = info?.source === "saved" ? "Leave blank to keep the current key" : "None";
+    $("wizard-key-note").textContent = "Only if the server asks for one. It stays on this device and goes only to this server.";
+    show("key", {
+      title: "Connect an OpenAI-compatible server",
+      parts: ["wizard-base-field", "wizard-key-field"],
+      centered: true,
+      next: ["Test and continue", test],
+      back,
+      focus: $("wizard-base"),
+    });
+  }
+
+  // The key screen.
+  function enterKey(p) {
+    provider = p;
+    kind = null;
+    $("wizard-key").value = "";
+    $("wizard-key-label").textContent = "API key";
     const info = config.keyInfo?.[p.id];
     const has = info && info.source !== "none";
     $("wizard-key").placeholder = has ? "Leave blank to keep the current key" : "Paste your API key";
@@ -169,7 +226,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     show("key", {
       title: `Add your ${p.name} key`,
       lead: "The key stays on this device and is sent only to the provider.",
-      parts: p.id === "openai" ? ["wizard-key-field", "wizard-base-field"] : ["wizard-key-field"],
+      parts: ["wizard-key-field"],
       centered: true,
       next: ["Test and continue", test],
       back: pickProvider,
@@ -177,8 +234,11 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     });
   }
 
+  // The fields a Local test sends and, once it passes, saves (see localPatch).
+  const localFields = () => ({ kind, ...(kind !== "ollama" && { baseUrl: $("wizard-base").value.trim() }) });
+
   function test() {
-    const key = $("wizard-key").value.trim();
+    const key = kind === "server" || !kind ? $("wizard-key").value.trim() : "";
     if (provider.id !== "ollama" && !key && config.keyInfo?.[provider.id]?.source === "none") {
       result("error", "Paste an API key first.");
       return $("wizard-key").focus();
@@ -192,7 +252,7 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
     $("wizard-next").disabled = true;
     $("wizard-next").textContent = "Testing…";
     result("pending", "Testing the connection…");
-    send({ type: "test_provider", provider: provider.id, key: key || undefined, ...(provider.id === "openai" && { baseUrl: $("wizard-base").value.trim() }) });
+    send({ type: "test_provider", provider: provider.id, key: key || undefined, ...(kind && localFields()) });
   }
 
   for (const id of ["wizard-key", "wizard-base"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && !$("wizard-next").disabled && test());
@@ -267,19 +327,16 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
       provider_test(msg) {
         if (msg.provider !== testing || screen !== "key") return;
         testing = null;
-        setButton("wizard-next", provider.id === "ollama" ? "Test connection" : "Test and continue", test);
+        setButton("wizard-next", { ollama: "Test connection", gpu: "Connect" }[kind] ?? "Test and continue", test);
         if (!msg.ok) {
           result("error", msg.text);
-          return (provider.id === "ollama" ? $("wizard-next") : $("wizard-key")).focus();
+          return ({ ollama: $("wizard-next"), gpu: $("wizard-base"), server: $("wizard-base") }[kind] ?? $("wizard-key")).focus();
         }
-        const key = $("wizard-key").value.trim();
+        const key = !kind || kind === "server" ? $("wizard-key").value.trim() : "";
         $("wizard-key").value = "";
-        const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }) };
-        // A base URL that passed the test is saved with the key; an empty one returns to OpenAI.
-        const base = $("wizard-base").value.trim();
-        if (msg.provider === "openai" && base !== (config.openaiBaseUrl || "")) patch.openaiBaseUrl = base;
-        // The saved config arrives after this; finish() reads the chosen provider from it.
-        config = { ...config, provider: msg.provider };
+        const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }), ...(kind && localPatch(config, localFields())) };
+        // The saved config arrives after this; finish() reads the chosen provider and model from it.
+        config = { ...config, provider: msg.provider, models: { ...config.models, ...patch.models } };
         if (!mcp.outlookAvailable) return finish(patch);
         send({ type: "save_config", patch });
         outlookScreen();

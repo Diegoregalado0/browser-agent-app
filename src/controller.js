@@ -39,15 +39,17 @@ async function testConnection(id, apiKey, config) {
   const started = Date.now();
   try {
     const models = await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
-    // The built-in default model is skipped when the endpoint does not list it (OpenAI's default
-    // on a local server); a model the user chose is always the one tested.
+    // The built-in default model is skipped when the endpoint does not list it; a model the
+    // user chose is always the one tested.
     const unlistedDefault = config.models[id] === DEFAULTS.models[id] && models.length && !models.includes(config.models[id]);
     const saved = unlistedDefault ? "" : config.models[id];
     const model = saved || (await within(firstChatModel(provider, models, apiKey, config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds."));
     if (!model) {
-      const fix = id === "ollama" ? "Pull one that supports tools with ollama pull <model>" : "Pick a chat model in Settings > Models";
+      const ollama = id === "ollama" && config.localKind === "ollama";
+      const fix = ollama ? "Pull one that supports tools with ollama pull <model>" : "Pick a chat model in Settings > Models";
       if (!models.length) {
-        if (id === "ollama") throw new Error(`Ollama is running but has no models yet. ${fix}, then test again.`);
+        if (ollama) throw new Error(`Ollama is running but has no models yet. ${fix}, then test again.`);
+        if (id === "ollama") throw new Error("The server answered but lists no models. Load one on the server, then test again.");
         throw new Error("The provider lists no models for this key.");
       }
       throw new Error(`None of the ${models.length} listed models can chat with tools; they look like embedding, speech or other special-purpose models. ${fix}, then test again.`);
@@ -57,8 +59,8 @@ async function testConnection(id, apiKey, config) {
     try {
       await within(provider.ping({ apiKey, model, config }), MODEL_TEST_TIMEOUT_MS, slow);
     } catch (err) {
-      // A custom server can take minutes to load a model into memory; it answered the listing.
-      if (err.message !== slow || !(id === "openai" && config.openaiBaseUrl)) throw err;
+      // An OpenAI-compatible server can take minutes to load a model into memory; it answered the listing.
+      if (err.message !== slow || !(id === "ollama" && config.localKind !== "ollama")) throw err;
       return `Connected. ${count}; ${model} is still loading, so its first answer can take a few minutes.`;
     }
     return `Connected in ${((Date.now() - started) / 1000).toFixed(1)}s. ${count}; ${model} answered.`;
@@ -368,8 +370,19 @@ export function createController(host) {
             if (problem) return result(false, problem);
             config.keys[msg.provider] = key;
           }
-          if (msg.provider === "openai" && typeof msg.baseUrl === "string") config.openaiBaseUrl = cleanSetting("openaiBaseUrl", msg.baseUrl.trim());
-          if (msg.provider === "ollama" && msg.host) config.ollamaHost = cleanSetting("ollamaHost", String(msg.host).trim());
+          if (msg.provider === "ollama") {
+            // The model chosen for another kind of connection is not tested on this one.
+            if (msg.kind !== undefined && msg.kind !== config.localKind) {
+              config.localKind = cleanSetting("localKind", msg.kind);
+              config.models.ollama = "";
+            }
+            if (msg.host) config.ollamaHost = cleanSetting("ollamaHost", String(msg.host).trim());
+            if (typeof msg.baseUrl === "string") {
+              const setting = config.localKind === "gpu" ? "gpuBaseUrl" : "serverBaseUrl";
+              config[setting] = cleanSetting(setting, msg.baseUrl.trim());
+            }
+            if (config.localKind === "server" && !config.serverBaseUrl) return result(false, "Enter the server's base URL first.");
+          }
         } catch (err) {
           return result(false, err.message);
         }
@@ -405,10 +418,6 @@ export function createController(host) {
           const merged = ["models", "limits", "guardModels"].includes(key) && value && typeof value === "object" ? { ...config[key], ...value } : value;
           changes[key] = cleanSetting(key, merged);
         }
-        // A custom OpenAI-compatible server does not serve OpenAI's default model, so it is not
-        // kept as the chosen one; the model list then asks for one the server has.
-        const models = changes.models ?? config.models;
-        if (changes.openaiBaseUrl && models.openai === DEFAULTS.models.openai) changes.models = { ...models, openai: "" };
         // Empty key fields mean "unchanged"; "__clear__" removes a saved key.
         const keyChanges = {};
         for (const [p, k] of Object.entries(keys && typeof keys === "object" ? keys : {})) {

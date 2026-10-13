@@ -13,7 +13,7 @@ The short version: Browsby has no server, no account, and no analytics. I do not
 - **What:** the API key you paste for Anthropic, OpenAI, Google Gemini, or Mistral. If you connect them, a Discord bot token, and the Microsoft sign-in tokens for Outlook.
 - **Where it is stored:** in this Chrome profile's local extension storage (`chrome.storage.local`) on your computer. It is not synced to your Google account or other devices.
 - **Where it goes:** each API key is sent only to the provider it belongs to, as part of requests to that provider. The Discord bot token is sent only to Discord. Microsoft tokens are sent only to Microsoft. Keys and tokens are never shown to the AI model.
-- **One exception you control:** in the OpenAI settings you can enter a custom base URL for an OpenAI-compatible server (such as LM Studio on your own computer). If you do, the OpenAI key you saved and your requests go to that address instead of OpenAI. Only enter an address you trust.
+- **One exception you control:** the Local provider sends your requests, and the optional server key you saved for it, to the address you enter (such as LM Studio on your own computer). Only enter an address you trust.
 
 ### Your tasks and the pages the agent works on
 
@@ -37,7 +37,7 @@ If you turn on "Let the model search the web" (Anthropic and OpenAI), your provi
 
 AI provider SDKs also send standard technical details with each request, such as the SDK version and browser platform.
 
-**With Ollama (a local model),** requests go to the Ollama address in Settings, by default `http://127.0.0.1:11434` on your own computer, so your task and page content do not leave your computer. If you change that address to another computer, the data goes there.
+**With Ollama (a local model),** requests go to the Ollama address in Settings > Models > Local, by default `http://127.0.0.1:11434` on your own computer, so your task and page content do not leave your computer. If you change that address to another computer, the data goes there.
 
 What each provider does with the data it receives is governed by that provider's own terms and privacy policy, not by me. Some providers retain API data for a period, and some free tiers may use it to improve their models. Check your provider's terms (links in section 3).
 

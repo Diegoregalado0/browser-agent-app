@@ -3,8 +3,9 @@ import { sleep } from "../limits.js";
 
 // Official OpenAI uses the Responses API: current reasoning models reject function tools
 // on Chat Completions unless reasoning is off, and Responses carries encrypted reasoning
-// between turns. A custom base URL (OpenRouter, LM Studio, vLLM, ...) uses Chat
-// Completions, the dialect OpenAI-compatible servers implement.
+// between turns. config.openaiBaseUrl, set by the Mistral and Local adapters (never a
+// setting), points it at another endpoint, which gets Chat Completions, the dialect
+// OpenAI-compatible servers implement.
 
 // Tool-call arguments, or a marker the agent reports back when they are not valid JSON.
 function parseArgs(args) {

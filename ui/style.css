@@ -502,8 +502,7 @@ header .spacer { min-width: 4px; }
 .pc-body input:not([type="number"]) { width: 100%; }
 .pc-body a { color: var(--accent); }
 .pc-body code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; overflow-wrap: anywhere; }
-.pc-more summary { cursor: pointer; font-size: 12px; color: var(--muted); }
-.pc-more[open] summary { margin-bottom: 8px; }
+.pc-kind { display: flex; flex-direction: column; gap: 10px; }
 .pc-models { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .pc-models .field-note:empty { display: none; }
 .ml-list { max-height: min(300px, 45vh); overflow-y: auto; margin: 0 -4px; padding: 2px 4px; }

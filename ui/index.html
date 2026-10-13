@@ -444,15 +444,15 @@
       <h1 id="wizard-title" tabindex="-1"></h1>
       <p id="wizard-lead" class="onboard-lead"></p>
       <div id="wizard-providers" class="onboard-providers" hidden></div>
+      <div id="wizard-base-field" class="card-field" hidden>
+        <label class="card-label" for="wizard-base">Base URL</label>
+        <input id="wizard-base" type="url" inputmode="url" autocomplete="off" spellcheck="false" aria-describedby="wizard-base-note wizard-result" />
+        <p class="field-note" id="wizard-base-note"></p>
+      </div>
       <div id="wizard-key-field" class="card-field" hidden>
-        <label class="card-label" for="wizard-key">API key</label>
+        <label class="card-label" id="wizard-key-label" for="wizard-key">API key</label>
         <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" aria-describedby="wizard-key-note wizard-result" />
         <p class="field-note" id="wizard-key-note"></p>
-      </div>
-      <div id="wizard-base-field" class="card-field" hidden>
-        <label class="card-label" for="wizard-base">Base URL (optional)</label>
-        <input id="wizard-base" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1" aria-describedby="wizard-base-note wizard-result" />
-        <p class="field-note" id="wizard-base-note">For a local or OpenAI-compatible server, such as http://localhost:8081/v1. A local server accepts any key, such as "local". Leave blank for OpenAI.</p>
       </div>
       <p class="pc-result" id="wizard-result" aria-live="polite"></p>
       <div class="onboard-actions">
