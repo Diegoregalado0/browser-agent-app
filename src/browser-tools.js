@@ -290,8 +290,10 @@ export class Browser {
     this.deadline = null;
     // Tabs whose last call timed out (see send).
     this.unresponsive = new Set();
-    // Page dialogs settled since the last tool result, as notes for the model (see #onDialog).
+    // Page dialogs settled since the last tool result, as notes for the model (see #onDialog),
+    // and the notes the last run reported, for the content scan.
     this.dialogNotes = [];
+    this.reportedDialogs = [];
     transport.onAttach = (id) => this.#prepareTab(id);
     transport.onEvent = (id, method, params) =>
       method === "Page.javascriptDialogOpening" ? this.#onDialog(id, params) : this.#onNetworkEvent(id, method, params);
@@ -915,14 +917,15 @@ export class Browser {
   // dialog settled since the last result. The action runs under its deadline (see #bounded).
   async run(name, input) {
     this.deadline = Date.now() + this.actionTimeoutMs * (LOADING_TOOLS.has(name) ? 2 : 1);
+    this.reportedDialogs = [];
     try {
       const output = await this.#run(name, input);
       await this.highlightQueue;
-      const notes = this.dialogNotes.splice(0);
+      const notes = (this.reportedDialogs = this.dialogNotes.splice(0));
       if (!notes.length) return output;
       return typeof output === "string" ? `${output}\n${notes.join("\n")}` : [...output, { type: "text", text: notes.join("\n") }];
     } catch (err) {
-      const notes = this.dialogNotes.splice(0);
+      const notes = (this.reportedDialogs = this.dialogNotes.splice(0));
       if (notes.length) err.message = `${err.message}\n${notes.join("\n")}`;
       throw err;
     } finally {

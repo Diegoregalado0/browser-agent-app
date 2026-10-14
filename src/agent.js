@@ -581,6 +581,8 @@ export class Agent {
       let authorizing = false;
       // Set while a page tool runs, so a failure there comes back with a screenshot.
       let running = false;
+      // Notes of page dialogs the browser run reported, scanned on their own (see #scanDialogs).
+      let dialogs = [];
       try {
         if (call.input?.__invalid_json !== undefined) throw new Error("Tool arguments were not valid JSON.");
         // Before the checks, so no safety check is spent on a call that cannot run.
@@ -607,7 +609,9 @@ export class Agent {
         if (signal.aborted) throw new Error("Cancelled by the user.");
         running = pageTool;
         let output = toBlocks(
-          this.mcp?.has(call.name) ? await this.mcp.call(call.name, call.input, { signal }) : await this.browser.run(call.name, call.input),
+          this.mcp?.has(call.name)
+            ? await this.mcp.call(call.name, call.input, { signal })
+            : await this.browser.run(call.name, call.input).finally(() => (dialogs = this.browser.reportedDialogs ?? [])),
         );
         running = false;
         if (signal.aborted) throw new Error("Cancelled by the user.");
@@ -617,7 +621,7 @@ export class Agent {
         else if (pageTool && originBefore !== (await this.#origin())) {
           output = [...output, ...(await this.#autoScreenshot(output, "the page is on a different site now", signal))];
         }
-        if (guarded) output = await this.#scanned(call, output, config, signal);
+        if (guarded) output = await this.#scanDialogs(call, dialogs, await this.#scanned(call, output, config, signal), config, signal);
         this.#emit(signal, { type: "tool_result", id: call.id, content: output });
         results.push({ ...base, content: output });
       } catch (err) {
@@ -633,6 +637,7 @@ export class Agent {
           content = [...content, ...(await this.#autoScreenshot(content, running ? "the action failed" : "of the loop check", signal))];
           if (guarded) content = await this.#scanned(call, content, config, signal);
         }
+        if (guarded && !signal.aborted) content = await this.#scanDialogs(call, dialogs, content, config, signal);
         this.#emit(signal, { type: "tool_result", id: call.id, isError: true, content });
         results.push({ ...base, isError: true, content });
       }
@@ -682,6 +687,20 @@ export class Agent {
       this.taskMetrics.check(scanMs);
       if (config.debugMode) this.#emit(signal, { type: "debug", text: `Content scan of ${call.name}: ${scanMs} ms.` });
     }
+    return this.#flagged(output, warning, signal);
+  }
+
+  // Page dialog messages are page content that the once-per-address scan of a page skips
+  // once the page was scanned, so a run that reported dialogs has their notes scanned too.
+  async #scanDialogs(call, notes, output, config, signal) {
+    if (!notes.length) return output;
+    const warning = await this.guard.scanContent({ config, name: call.name, output: [{ type: "text", text: notes.join("\n") }], signal });
+    if (signal.aborted) return output;
+    return this.#flagged(output, warning, signal);
+  }
+
+  // Output with a safety notice in front when a scan flagged it.
+  #flagged(output, warning, signal) {
     if (!warning) return output;
     this.#emit(signal, { type: "notice", text: `Possible prompt injection on this page: ${warning}` });
     return [
