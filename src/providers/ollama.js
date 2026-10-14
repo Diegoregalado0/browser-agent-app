@@ -40,9 +40,27 @@ function toMessages(system, messages) {
 // The library sends a request's own abort signal only once the response starts, and none
 // for a request that does not stream, so Stop could not cut short the prompt processing
 // before the first token. Every request made for a task carries the task's signal.
+// With requestTimeoutMs (set by Local), a request whose answer has not started by then is
+// abandoned and sent again up to requestRetries times; a streamed reply is not cut off.
 function client(config, signal) {
+  const timeoutMs = config.requestTimeoutMs;
+  const signals = (init) => [init.signal, signal].filter(Boolean);
+  const timed = async (url, init = {}) => {
+    for (let attempt = 0; ; attempt++) {
+      const timer = new AbortController();
+      const id = setTimeout(() => timer.abort(new Error(`Ollama did not answer within ${Math.round(timeoutMs / 1000)}s (the request timed out).`)), timeoutMs);
+      try {
+        return await fetch(url, { ...init, signal: AbortSignal.any([...signals(init), timer.signal]) });
+      } catch (err) {
+        if (!timer.signal.aborted || signals(init).some((s) => s.aborted)) throw err;
+        if (attempt >= (config.requestRetries ?? 0)) throw timer.signal.reason;
+      } finally {
+        clearTimeout(id);
+      }
+    }
+  };
   const withSignal = (url, init = {}) => fetch(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal });
-  return new Ollama({ host: config.ollamaHost, ...(signal && { fetch: withSignal }) });
+  return new Ollama({ host: config.ollamaHost, ...(timeoutMs ? { fetch: timed } : signal && { fetch: withSignal }) });
 }
 
 // Whether a model lists the "thinking" capability, asked once per host and model. Models

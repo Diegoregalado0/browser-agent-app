@@ -125,9 +125,18 @@ async function paceFor(model, estimate, signal, onWait) {
 const thinkingKwargs = (config, on) => (config.chatTemplateKwargs === false ? {} : { chat_template_kwargs: { enable_thinking: on } });
 
 // dangerouslyAllowBrowser: in the extension edition the user's own key calls the API
-// from their browser, which the SDK allows only with this opt-in.
+// from their browser, which the SDK allows only with this opt-in. requestTimeoutMs and
+// requestRetries (set by Local) replace the SDK's 10 minutes and 2 retries.
 function client({ apiKey, config }) {
-  return new OpenAI({ apiKey, baseURL: config.openaiBaseUrl || undefined, defaultHeaders: config.openaiHeaders, dangerouslyAllowBrowser: true, fetch: recordingFetch });
+  return new OpenAI({
+    apiKey,
+    baseURL: config.openaiBaseUrl || undefined,
+    defaultHeaders: config.openaiHeaders,
+    dangerouslyAllowBrowser: true,
+    fetch: recordingFetch,
+    ...(config.requestTimeoutMs && { timeout: config.requestTimeoutMs }),
+    ...(config.requestRetries !== undefined && { maxRetries: config.requestRetries }),
+  });
 }
 
 export async function listModels(opts) {
@@ -334,6 +343,7 @@ export function describeError(err) {
   if (err?.code === "insufficient_quota" || err?.type === "insufficient_quota") return `OpenAI account is out of credit: ${err.message}`;
   if (err instanceof OpenAI.RateLimitError) return `OpenAI rate limit hit (429): ${err.message}`;
   if (err instanceof OpenAI.BadRequestError) return `OpenAI bad request (400): ${err.message}`;
+  if (err instanceof OpenAI.APIConnectionTimeoutError) return "No answer from the OpenAI endpoint in time (the request timed out).";
   if (err instanceof OpenAI.APIConnectionError) return "Could not reach the OpenAI endpoint.";
   if (err instanceof OpenAI.APIError) return `OpenAI error${err.status ? ` ${err.status}` : ""}: ${err.message}`;
   return null;

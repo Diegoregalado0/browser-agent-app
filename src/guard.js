@@ -54,6 +54,9 @@ const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", 
 // Scans read at most this much text: the start of a page is where text aimed at the agent
 // has to be to steer it, and a longer scan costs seconds per step on local models.
 export const SCAN_MAX_CHARS = 8000;
+// How long one safety model request may take. One that times out is not tried again: an
+// action check then asks the user, and a content scan is not remembered (see #scan).
+export const CHECK_TIMEOUT_MS = 60000;
 
 export function isStateChanging(name, input) {
   if (name === "browser") return !READ_ONLY_BROWSER_ACTIONS.has(input.action);
@@ -103,6 +106,7 @@ export class Guard {
     // Addresses whose page was scanned, with the warning (see scanContent).
     this.scannedPages = new Map();
     this.flags = [];
+    this.checkTimeoutMs = CHECK_TIMEOUT_MS;
   }
 
   reset() {
@@ -125,9 +129,13 @@ export class Guard {
     // errors (bad key, model not in the plan) and a zero quota fail at once.
     for (let attempt = 0; ; attempt++) {
       const { impl, provider, model, fallback, apiKey } = this.#resolve(config);
+      const timeout = AbortSignal.timeout(this.checkTimeoutMs);
       try {
-        return await impl.classify({ apiKey, model, config, signal, onUsage: this.onUsage, ...args });
+        return await impl.classify({ apiKey, model, config, signal: signal ? AbortSignal.any([signal, timeout]) : timeout, onUsage: this.onUsage, ...args });
       } catch (err) {
+        if (timeout.aborted && !signal?.aborted) throw new Error(`no answer within ${Math.round(this.checkTimeoutMs / 1000)}s`);
+        // A request the provider timed out is not tried again either.
+        if (/timed out/i.test(err?.message)) throw err;
         const status = err?.status;
         const zeroQuota = status === 429 && err.headers?.get?.("x-ratelimit-limit-req-minute") === "0";
         // A default model the account cannot use (not enabled, or not found) gives way to the
