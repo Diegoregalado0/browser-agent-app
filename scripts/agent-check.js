@@ -180,7 +180,7 @@ agent.reset();
 agent.browser.currentUrl = async () => "https://example.com/";
 agent.browser.run = async (name, input) => (filled.push(input.value), "set");
 providers.openai.classify = ({ text }) =>
-  new Promise((resolve) => setTimeout(() => resolve(/"forbidden"/.test(text) ? { verdict: "block", category: "other_party", reason: "no" } : { verdict: "allow", reason: "ok" }), 300));
+  new Promise((resolve) => setTimeout(() => resolve(/"forbidden"/.test(text) ? { verdict: "block", category: "hijack", reason: "no" } : { verdict: "allow", reason: "ok" }), 300));
 replies = [
   { content: [field("f1", "a"), field("f2", "forbidden"), field("f3", "c")], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
   { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
@@ -349,7 +349,7 @@ const loopClassify = providers.openai.classify;
 let blockChecks = 0;
 // Content scans of the results go through classify too; only action checks are counted.
 providers.openai.classify = async ({ text }) =>
-  text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (blockChecks++, { verdict: "block", category: "other_party", reason: "That button sends the user's data to an unrelated site." });
+  text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (blockChecks++, { verdict: "block", category: "hijack", reason: "That button sends the user's data to an unrelated site." });
 let blockedRuns = 0;
 looping.browser.run = async (name, input) => (input.action === "left_click" && blockedRuns++, "clicked");
 notices.length = 0;
@@ -2089,4 +2089,21 @@ console.log("safety shortcut checks passed");
   assert.equal(quickAllow({ page, name: "browser", input: { action: "key", text: "Enter" } }), null, "Enter skipped the safety model");
   providers.openai.classify = saved;
   console.log("safety category checks passed");
+}
+
+// The safety check stops only high-stakes categories: a search, the user's own goals and
+// non-hijack blocks never stop a task outright; typing a search query skips the model.
+{
+  const guard = new Guard();
+  const saved = providers.openai.classify;
+  const page = { url: "https://www.google.com/", title: "Google" };
+  const check = (verdict, extra = {}) => (providers.openai.classify = async () => verdict, guard.checkAction({ config: { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" } }, userRequests: ["Find and complete my homework"], page, name: "browser", input: { action: "left_click", ref: "ref_2" }, ...extra }));
+  assert.equal((await check({ verdict: "ask", category: "other_party", reason: "academic integrity" })).verdict, "allow", "an unknown category stopped the task");
+  assert.equal((await check({ verdict: "block", category: "message", reason: "posts" })).verdict, "ask", "a block for a non-hijack category was not turned into a question");
+  assert.equal((await check({ verdict: "block", category: "hijack", reason: "planted instructions" })).verdict, "block", "a hijack was not blocked");
+  assert.ok(quickAllow({ page, name: "browser", input: { action: "type", text: "Math 032 - Homework 6 Solutions" }, target: 'combobox "Search"' }), "typing a search query went to the safety model");
+  assert.equal(quickAllow({ page, name: "browser", input: { action: "type", text: "4111 1111 1111 1111" }, target: 'textbox "Search"' }), null, "a card number typed into a search box skipped the safety model");
+  assert.equal(quickAllow({ page, name: "browser", input: { action: "type", text: "hello" }, target: 'textbox "Message"' }), null, "typing a message skipped the safety model");
+  providers.openai.classify = saved;
+  console.log("safety scope checks passed");
 }
