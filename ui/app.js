@@ -436,7 +436,7 @@ const activity = (() => {
 
 // The busy notice: whether another install is using the Local server, asked when a task
 // starts (by the controller) and every BUSY_POLL_MS while the panel is on a Local server.
-const BUSY_POLL_MS = 30000;
+const BUSY_POLL_MS = 5000;
 const onLocalServer = () => config?.provider === "ollama" && config.localKind !== "ollama";
 setInterval(() => onLocalServer() && send({ type: "busy_check" }), BUSY_POLL_MS);
 
@@ -446,10 +446,9 @@ const handlers = {
     const show = onLocalServer() && kind === config.localKind && status?.busy;
     $("busy-note").hidden = !show;
     if (!show) return;
-    const minutes = Math.max(1, Math.ceil(status.freeInSeconds / 60));
     $("busy-note").textContent = status.running
       ? `${where} is busy with another user. Your task may wait.`
-      : `${where} was just used by another user, free in about ${minutes} min. Your task may wait.`;
+      : `${where} was just used by another user.`;
   },
   config(msg) {
     const wasLocal = onLocalServer() && `${config.localKind} ${config.gpuBaseUrl} ${config.serverBaseUrl}`;
@@ -521,6 +520,15 @@ const handlers = {
     activity.set("Thinking…");
   },
   tool_call(msg) {
+    // Text written before an action in the same turn narrates the step; it belongs with the
+    // actions, collapsed, not in the chat.
+    if (textNode) {
+      const note = el("details", "thinking");
+      note.append(el("summary", null, "Note"), el("div", null, textNode.raw));
+      textNode.remove();
+      textNode = null;
+      ensureGroup().body.appendChild(note);
+    }
     const g = ensureGroup();
     g.actions++;
     renderGroupSummary(g);

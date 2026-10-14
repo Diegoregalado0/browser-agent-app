@@ -180,7 +180,7 @@ agent.reset();
 agent.browser.currentUrl = async () => "https://example.com/";
 agent.browser.run = async (name, input) => (filled.push(input.value), "set");
 providers.openai.classify = ({ text }) =>
-  new Promise((resolve) => setTimeout(() => resolve(/"forbidden"/.test(text) ? { verdict: "block", reason: "no" } : { verdict: "allow", reason: "ok" }), 300));
+  new Promise((resolve) => setTimeout(() => resolve(/"forbidden"/.test(text) ? { verdict: "block", category: "other_party", reason: "no" } : { verdict: "allow", reason: "ok" }), 300));
 replies = [
   { content: [field("f1", "a"), field("f2", "forbidden"), field("f3", "c")], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
   { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
@@ -349,7 +349,7 @@ const loopClassify = providers.openai.classify;
 let blockChecks = 0;
 // Content scans of the results go through classify too; only action checks are counted.
 providers.openai.classify = async ({ text }) =>
-  text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (blockChecks++, { verdict: "block", reason: "That button is not what the user asked for." });
+  text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (blockChecks++, { verdict: "block", category: "other_party", reason: "That button sends the user's data to an unrelated site." });
 let blockedRuns = 0;
 looping.browser.run = async (name, input) => (input.action === "left_click" && blockedRuns++, "clicked");
 notices.length = 0;
@@ -753,7 +753,7 @@ controller.agent.browser = agent.browser;
 controller2.agent.browser = agent.browser;
 agent.browser.currentUrl = async () => "https://example.com/";
 agent.browser.run = async () => "clicked";
-providers.openai.classify = async () => ({ verdict: "ask", reason: "check with the user" });
+providers.openai.classify = async () => ({ verdict: "ask", category: "message", reason: "check with the user" });
 providers.openai.turn = async () => replies.shift();
 replies = [
   { content: [{ type: "tool_call", id: "d1", name: "browser", input: { action: "left_click", coordinate: [1, 1] } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
@@ -1328,7 +1328,7 @@ const declineResults = declining.messages.flatMap((m) => m.content).filter((b) =
 assert.match(declineResults[1].content[0].text, /already declined this exact action/);
 assert.equal(bankRuns, 0, "a declined action or navigation ran");
 const guardAsks = [];
-providers.openai.classify = async ({ text }) => (guardAsks.push(text), { verdict: "ask", reason: "not requested" });
+providers.openai.classify = async ({ text }) => (guardAsks.push(text), { verdict: "ask", category: "message", reason: "not requested" });
 declining.browser = { ...agent.browser, run: async () => (bankRuns++, "done") };
 replies = [
   { content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
@@ -1702,7 +1702,7 @@ assert.equal(mailSent, 1, "a declined send was sent, or the event was not create
 mailAnswer = "once";
 providers.openai.classify = async () => ({ verdict: "allow", reason: "ok" });
 await mailRun("guarded", [{ ...sendCall, id: "s2" }]);
-providers.openai.classify = async () => ({ verdict: "ask", reason: "not requested" });
+providers.openai.classify = async () => ({ verdict: "ask", category: "message", reason: "not requested" });
 await mailRun("guarded", [{ ...sendCall, id: "s3" }]);
 assert.equal(mailPrompts.length, 3, "a send the safety check allowed did not ask, or one it flagged asked twice");
 assert.match(mailPrompts[2].text, /^Safety check: not requested Allow the agent to send an email to eve@x\.test/);
@@ -1756,7 +1756,7 @@ assert.equal(localPrompts.length, 3, "a local origin allowed in an earlier task 
 const secretPrompts = [];
 const typist = new Agent({ emit: () => {}, askPermission: async (p) => (secretPrompts.push(p.text), "once") });
 typist.browser = { ...agent.browser, callInPage: async () => true, run: async () => "typed" };
-providers.openai.classify = async () => ({ verdict: "ask", reason: "a password" });
+providers.openai.classify = async () => ({ verdict: "ask", category: "credentials", reason: "a password" });
 replies = [
   { content: [{ type: "tool_call", id: "pw1", name: "browser", input: { action: "type", text: "hunter2-secret" } }, { type: "tool_call", id: "pw2", name: "form_input", input: { ref: "ref_1", value: "hunter2-secret" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } },
   { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } },
@@ -2074,3 +2074,19 @@ assert.equal(quickAllow({ userRequests: ["Open wikipedia"], page: { url: "https:
 assert.equal(quickAllow({ userRequests: ["Go to github.com"], page: { url: "https://example.com/" }, name: "navigate", input: { url: "github.com" }, declined: ['navigate {"url":"https://github.com"}'] }), null, "a site the user declined skipped the safety model");
 assert.equal(quickAllow({ userRequests: ["Go to github.com"], page: { url: "https://github.com/" }, name: "browser", input: { action: "left_click" } }), null, "a click on a web page skipped the safety model");
 console.log("safety shortcut checks passed");
+
+// A safety verdict of ask or block counts only with a named sensitive kind; without one the
+// action is allowed, so a wrong click or an odd step never stops the task.
+{
+  const guard = new Guard();
+  const saved = providers.openai.classify;
+  const page = { url: "https://example.com/", title: "Example" };
+  const call = (verdict) => (providers.openai.classify = async () => verdict, guard.checkAction({ config: { ...structuredClone(DEFAULTS), provider: "openai", keys: { ...DEFAULTS.keys, openai: "test" } }, userRequests: ["Find the featured article"], page, name: "browser", input: { action: "left_click", ref: "ref_3" } }));
+  assert.equal((await call({ verdict: "ask", category: "none", reason: "does not serve the request" })).verdict, "allow", "an ask with no sensitive kind stopped the task");
+  assert.equal((await call({ verdict: "block", reason: "wrong button" })).verdict, "allow", "a block with no sensitive kind stopped the task");
+  assert.equal((await call({ verdict: "ask", category: "purchase", reason: "buys something" })).verdict, "ask", "an ask about a purchase was dropped");
+  assert.ok(quickAllow({ page, name: "browser", input: { action: "key", text: "Escape" } }), "pressing Escape went to the safety model");
+  assert.equal(quickAllow({ page, name: "browser", input: { action: "key", text: "Enter" } }), null, "Enter skipped the safety model");
+  providers.openai.classify = saved;
+  console.log("safety category checks passed");
+}
