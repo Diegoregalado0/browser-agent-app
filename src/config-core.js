@@ -40,6 +40,8 @@ export const DEFAULTS = {
   localThinking: false,
   // Provider-native web search (Anthropic, OpenAI); each search is billed by the provider.
   webSearch: true,
+  // The read-only canvas tool, on Canvas LMS sites.
+  canvasTool: true,
   maxSteps: 80,
   permissionMode: "guarded",
   guardModels: {},

@@ -9,6 +9,8 @@ import {
   agentCursorScript,
 } from "./page-scripts.js";
 import { sleep } from "./limits.js";
+import { CANVAS_TOOL_DEF, MAX_PAGES, allowedPath, nextPath, responseProblem, runCanvas, stripGuard } from "./canvas.js";
+import { isCanvasHost } from "./site-guides.js";
 
 // Screenshots are scaled to at most this width; coordinates the model sends back are in
 // screenshot pixels and are mapped to CSS pixels before input is dispatched.
@@ -36,6 +38,31 @@ const LOADING_TOOLS = new Set(["navigate", "tabs"]);
 const UNRESPONSIVE_CHECK_MS = 2000;
 // How much of a page dialog's message the model is told.
 const DIALOG_MAX_CHARS = 200;
+
+// What one Canvas API response may bring back into the extension (a page of 100 assignments
+// with long descriptions runs to a few megabytes).
+const CANVAS_RESPONSE_MAX_CHARS = 4000000;
+// Canvas serves every page, signed in or not, with its ENV object and a _csrf_token cookie.
+// Any site could copy both; a copy only gets the Canvas notes and same-origin reads of its
+// own data, which is scanned like page text.
+const CANVAS_SIGNAL = `(() => {
+  try {
+    const env = window.ENV;
+    return !!env && typeof env === "object" && Object.prototype.hasOwnProperty.call(env, "DOMAIN_ROOT_ACCOUNT_ID") && /(^|;\\s*)_csrf_token=/.test(document.cookie);
+  } catch {
+    return false;
+  }
+})()`;
+
+// Runs in an isolated world of the Canvas page, so page scripts cannot change fetch: one
+// GET to a path on the page's own origin, with its cookies, never following a redirect.
+async function canvasFetchScript(path, maxChars) {
+  const url = new URL(path, location.origin);
+  if (url.origin !== location.origin) return { error: "not same-origin" };
+  const res = await fetch(url.href, { method: "GET", credentials: "same-origin", redirect: "manual", cache: "no-store", headers: { Accept: "application/json" } });
+  if (res.type === "opaqueredirect") return { status: 0, redirected: true, text: "" };
+  return { status: res.status, contentType: res.headers.get("content-type") || "", link: res.headers.get("link") || "", text: (await res.text()).slice(0, maxChars) };
+}
 
 // The easing of the visible pointer (CSS ease-out), applied to the real mouse path too.
 const easeOut = (t) => 1 - (1 - t) ** 3;
@@ -143,6 +170,7 @@ export const BROWSER_TOOL_DEFS = [
       required: ["action"],
     },
   },
+  CANVAS_TOOL_DEF,
 ];
 
 // The error for a browser or tabs call whose action is missing or unknown, naming the field
@@ -1021,9 +1049,70 @@ export class Browser {
         return this.#tabs(input);
       case "network_requests":
         return this.#networkRequests(input);
+      case "canvas":
+        return this.#canvas(input);
       default:
         throw new Error(`Unknown browser tool ${name}`);
     }
+  }
+
+  // Whether the current tab shows a Canvas site: a known Canvas host, or a page with
+  // Canvas's own signals (CANVAS_SIGNAL).
+  async isCanvas() {
+    const url = await this.currentUrl();
+    if (isCanvasHost(url)) return true;
+    if (!/^https?:/.test(url)) return false;
+    return (await this.evaluate(CANVAS_SIGNAL).catch(() => false)) === true;
+  }
+
+  // Calls fn in an isolated world of the current tab's top frame.
+  async #isolatedCall(fn, ...args) {
+    const { frameTree } = await this.send("Page.getFrameTree");
+    const { executionContextId } = await this.send("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "browsby-canvas" });
+    const res = await this.send("Runtime.evaluate", {
+      expression: `(${fn.toString()})(...${JSON.stringify(args)})`,
+      contextId: executionContextId,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (res.exceptionDetails) throw new Error(res.exceptionDetails.exception?.description || res.exceptionDetails.text);
+    return res.result.value;
+  }
+
+  async #canvas(input) {
+    const url = await this.currentUrl();
+    let origin;
+    try {
+      origin = new URL(url).origin;
+    } catch {}
+    if (!origin || !/^https?:/.test(origin) || !(await this.isCanvas())) {
+      throw new Error(
+        "The current tab is not on a Canvas site, so the canvas tool cannot read it. Navigate to the school's Canvas site first (ask the user for its address if you do not know it). If it shows a sign-in page, ask the user to sign in.",
+      );
+    }
+    // GET only, to allowlisted paths on this origin; a list follows its next pages up to MAX_PAGES.
+    const get = async (path, { pages = MAX_PAGES } = {}) => {
+      const pathname = new URL(path, origin).pathname;
+      let items = null;
+      for (let page = 0; path && page < pages; page++) {
+        if (!allowedPath(new URL(path, origin).pathname)) throw new Error("That Canvas address is not one the canvas tool reads.");
+        const res = await this.#isolatedCall(canvasFetchScript, path, CANVAS_RESPONSE_MAX_CHARS);
+        if (res.error) throw new Error(`Canvas request refused: ${res.error}.`);
+        const problem = responseProblem(res, origin);
+        if (problem) throw new Error(problem);
+        let data;
+        try {
+          data = JSON.parse(stripGuard(res.text));
+        } catch {
+          throw new Error("Canvas sent something that is not JSON (it may be cut off or a sign-in page). Read the page instead, or ask the user to sign in.");
+        }
+        if (!Array.isArray(data)) return data;
+        items = [...(items ?? []), ...data];
+        path = nextPath(res.link, origin, pathname);
+      }
+      return items;
+    };
+    return runCanvas(input, { get, origin });
   }
 
   // What a browser/form_input action will hit, for safety checks. Null when unknown.

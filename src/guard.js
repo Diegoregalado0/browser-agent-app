@@ -58,7 +58,7 @@ const SCAN_SCHEMA = {
 };
 
 const READ_ONLY_BROWSER_ACTIONS = new Set(["screenshot", "hover", "scroll", "wait"]);
-const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "navigate", "form_input", "tabs", "network_requests"]);
+const SCANNED_TOOLS = new Set(["read_page", "get_page_text", "find", "browser", "navigate", "form_input", "tabs", "network_requests", "canvas"]);
 // Scans read at most this much text: the start of a page is where text aimed at the agent
 // has to be to steer it, and a longer scan costs seconds per step on local models.
 export const SCAN_MAX_CHARS = 8000;

@@ -196,8 +196,12 @@ export class Agent {
 
   // The first time a conversation reaches a site with notes (site-guides.js), they ride
   // along with the tool result, once.
-  async #addSiteGuide(results, signal) {
-    const guide = siteGuide(await this.browser.currentUrl().catch(() => ""));
+  // A Canvas site off the known hosts is recognized by its page (Browser.isCanvas).
+  async #addSiteGuide(results, config, signal) {
+    const url = await this.browser.currentUrl().catch(() => "");
+    const tool = Boolean(config.canvasTool);
+    let guide = siteGuide(url, { tool });
+    if (!guide && !this.guidesGiven.has("canvas") && results.length && (await this.browser.isCanvas?.().catch(() => false))) guide = siteGuide(url, { canvas: true, tool });
     if (signal.aborted || !guide || this.guidesGiven.has(guide.key) || !results.length) return;
     this.guidesGiven.add(guide.key);
     results.at(-1).content = [...results.at(-1).content, { type: "text", text: guide.text }];
@@ -341,7 +345,7 @@ export class Agent {
       throw err;
     }
 
-    const tools = [...BROWSER_TOOL_DEFS, ...(this.mcp?.toolDefs() ?? [])];
+    const tools = [...BROWSER_TOOL_DEFS.filter((t) => config.canvasTool || t.name !== "canvas"), ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.taskMetrics = metrics;
@@ -516,7 +520,7 @@ export class Agent {
 
         const results = (task.results = []);
         await this.#runTools(calls, config, signal, results);
-        await this.#addSiteGuide(results, signal);
+        await this.#addSiteGuide(results, config, signal);
         if (signal.aborted) return;
         task.results = null;
         this.messages.push({ role: "user", content: results });
