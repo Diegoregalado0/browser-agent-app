@@ -13,7 +13,8 @@
 //     node scripts/bench/run.js --provider mistral --model ministral-14b-latest
 //
 // Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
-//        --port (DevTools port; 0 = any free one) --thinking on|off
+//        --port (DevTools port; 0 = any free one) --thinking on|off --taskfile <file>
+//        --canvas-tool on|off (the read-only canvas tool; default on)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
@@ -61,6 +62,9 @@ const thinkingArg = args.thinking || defaultThinking(args.provider);
 if (!["on", "off"].includes(thinkingArg)) throw new Error('--thinking must be "on" or "off".');
 const thinking = thinkingArg === "on";
 
+const canvasToolArg = args["canvas-tool"] || "on";
+if (!["on", "off"].includes(canvasToolArg)) throw new Error('--canvas-tool must be "on" or "off".');
+
 const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
 const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id));
 if (!selectedTasks.length) {
@@ -72,7 +76,7 @@ if (!selectedTasks.length) {
 // done (run+task pairs), which are skipped; its runId is reused so the same two files get
 // overwritten in place rather than starting a new pair.
 let resumedRows = [];
-let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}${canvasToolArg === "off" ? "-nocanvastool" : ""}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 if (args.resume) {
   const { readFileSync } = await import("node:fs");
   const prior = JSON.parse(readFileSync(args.resume, "utf8"));
@@ -85,7 +89,7 @@ const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
 // Build the config the panel will read for this run. Reuses the app's own merge/validation
 // instead of hand-rolling a config shape.
 function buildConfig() {
-  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking };
+  const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking, canvasTool: canvasToolArg === "on" };
   overrides.models[args.provider] = args.model;
   if (args.provider === "ollama") {
     overrides.ollamaHost = args.host || "http://localhost:11436";
@@ -194,6 +198,7 @@ async function runBenchmark() {
         process.exit(1);
       }
       await waitServerIdle();
+      await waitGpuFree();
       console.log(`\n[run ${run}] ${task.id}: ${task.name}`);
       let result;
       try {
@@ -222,7 +227,7 @@ async function runBenchmark() {
       console.log(`  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s`);
       // Written after every task, not just at the end, so a crash mid-run only costs the
       // task in flight: --resume picks up from here, same two files, overwritten in place.
-      writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, rows });
+      writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, canvasTool: canvasToolArg, rows });
     }
   }
 
@@ -373,8 +378,10 @@ async function drainEvents(cdp, sessionId) {
 
 // Fixed permission policy: allow ordinary prompts (safety checks, new-site approvals),
 // deny anything that reaches a sensitive site or a password field. Never answered as
-// "always", since that would persist a setting change between tasks/runs.
-function decisionFor(kind) {
+// "always", since that would persist a setting change between tasks/runs. A task's
+// allowPrivate hosts (a local stand-in site) get their local-address prompt answered once.
+function decisionFor(kind, text = "", task = {}) {
+  if (kind === "sensitive" && (task.allowPrivate ?? []).some((host) => text.startsWith(`${host} is on this computer or your local network`))) return "once";
   return ["sensitive", "password"].includes(kind) ? "deny" : "once";
 }
 
@@ -430,6 +437,32 @@ async function serverBusy() {
     if (res.ok) return Number((await res.json()).active) > 0;
   } catch {}
   return false;
+}
+
+// The Browsby GPU server's gate reports at /browsby/busy whether another user is on the GPU.
+// A task waits for it to be free, up to GPU_WAIT_MS, so the run neither slows them down nor
+// measures time spent queued behind them. A gate that does not answer counts as free.
+const GPU_WAIT_MS = 30 * 60000;
+
+async function gpuBusy() {
+  const base = (args.baseUrl || args["base-url"] || "").replace(/\/v1\/?$/, "").replace(/\/$/, "");
+  if (!base || args.provider === "mistral") return false;
+  try {
+    const res = await fetch(`${base}/browsby/busy`, { signal: AbortSignal.timeout(3000) });
+    return res.ok && (await res.json()).busy === true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitGpuFree() {
+  const deadline = Date.now() + GPU_WAIT_MS;
+  let said = false;
+  while ((await gpuBusy()) && Date.now() < deadline) {
+    if (!said) console.error("  -> the GPU server is busy with another user; waiting");
+    said = true;
+    await sleep(10000);
+  }
 }
 
 async function waitServerIdle() {
@@ -503,7 +536,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
       if (batch.length) lastActivity = Date.now();
       for (const e of batch) {
         events.push(e);
-        if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind));
+        if (e.type === "permission_request") await answerPermission(cdp, sessionId, e.id, decisionFor(e.kind, e.text, task));
         if (e.type === "status" && e.running === false) finished = true;
         if (e.type === "error" && !timedOut) {
           agentError = e.text;
@@ -587,11 +620,11 @@ function fmtCost(c) {
   return c == null ? "-" : `~$${c.amount.toFixed(4)} (estimate)`;
 }
 
-function writeReport({ runId, provider, model, thinking, rows }) {
+function writeReport({ runId, provider, model, thinking, canvasTool, rows }) {
   mkdirSync(RESULTS_DIR, { recursive: true });
   const jsonPath = join(RESULTS_DIR, `${runId}.json`);
   const mdPath = join(RESULTS_DIR, `${runId}.md`);
-  writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, rows }, null, 2));
+  writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, canvasTool, rows }, null, 2));
 
   const header = `| Task | Run | Success | Steps | Tokens in | Tokens out | Wall time (s) | Cost | Notes |\n|---|---|---|---|---|---|---|---|---|`;
   const lines = rows.map(
@@ -619,7 +652,7 @@ function writeReport({ runId, provider, model, thinking, rows }) {
   const md = [
     `# Browsby benchmark: ${provider} / ${model}`,
     "",
-    `Thinking: ${thinking}.`,
+    `Thinking: ${thinking}. Canvas tool: ${canvasTool}.`,
     "",
     `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${anyEstimate ? `~$${totalCost.toFixed(4)} (estimate)` : "-"}.`,
     "",
