@@ -182,7 +182,7 @@ async function runBenchmark() {
   await setConfig(cdp, sessionId, config);
 
   const rows = [...resumedRows];
-  for (let run = 1; run <= Number(args.runs); run++) {
+  runs: for (let run = 1; run <= Number(args.runs); run++) {
     for (const task of selectedTasks) {
       if (done.has(`${run}:${task.id}`)) {
         console.log(`\n[run ${run}] ${task.id}: already done (resumed), skipping`);
@@ -194,8 +194,10 @@ async function runBenchmark() {
       // what is already in rows/on disk stands, and nothing misleading gets added to it.
       const reachable = await endpointReachable();
       if (!reachable.ok) {
+        // The test browser and its profile are still closed and removed below.
         console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
-        process.exit(1);
+        process.exitCode = 1;
+        break runs;
       }
       await waitServerIdle();
       await waitGpuFree();
