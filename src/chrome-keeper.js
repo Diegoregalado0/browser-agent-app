@@ -48,6 +48,10 @@ const chrome = spawn(
     "--restore-last-session",
     "--no-first-run",
     "--no-default-browser-check",
+    // The debugging pipe that installs the extension also marks every page as automated
+    // (navigator.webdriver), which the shipped extension in a person's own Chrome does not;
+    // without this, search engines answer every query with a CAPTCHA.
+    "--disable-blink-features=AutomationControlled",
     ...(HEADLESS ? ["--headless=new"] : []),
   ],
   { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },

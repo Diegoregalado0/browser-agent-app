@@ -91,8 +91,8 @@ export function browserProcesses() {
 
 // Connects to the test browser, launching it through the keeper (which installs the
 // extension) when it is not running. devtoolsPort applies only to a new launch; 0 picks a
-// free port. Chrome runs with --remote-debugging-pipe, which sets navigator.webdriver, so
-// pages can tell it is automated.
+// free port. The keeper launches Chrome so pages see navigator.webdriver as false, as they
+// do with the shipped extension in a person's own Chrome.
 export async function connectChrome({ devtoolsPort = 0 } = {}) {
   const existing = activePort();
   if (existing) {
