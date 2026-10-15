@@ -394,6 +394,7 @@ export class Agent {
                 signal,
                 onText: (delta) => (firstToken(), this.#emit(signal, { type: "text", delta })),
                 onThinking: (delta) => (firstToken(), this.#emit(signal, { type: "thinking", delta })),
+                onAction: (delta) => (firstToken(), this.#emit(signal, { type: "action_delta", delta })),
                 onWait: (secs) => this.#emit(signal, { type: "notice", text: `Pacing for ${config.provider}'s token rate limit; waiting ${secs}s.` }),
               });
               break;

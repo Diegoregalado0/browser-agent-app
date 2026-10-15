@@ -155,7 +155,7 @@ function recordInput(model, usage) {
   if (usage) budgets.set(model, { ...budgets.get(model), lastInput: usage.input });
 }
 
-async function chatTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking, onWait }) {
+async function chatTurn({ apiKey, model, config, system, tools, messages, signal, onText, onThinking, onAction, onWait }) {
   await paceFor(model, nextEstimate(model), signal, onWait);
   const started = Date.now();
   const stream = await client({ apiKey, config }).chat.completions.create(
@@ -203,7 +203,10 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
       const call = (calls[tc.index] ||= { id: "", name: "", args: "" });
       if (tc.id) call.id = tc.id;
       if (tc.function?.name) call.name += tc.function.name;
-      if (tc.function?.arguments) call.args += tc.function.arguments;
+      if (tc.function?.arguments) {
+        call.args += tc.function.arguments;
+        onAction?.(tc.function.arguments);
+      }
     }
     if (choice.finish_reason) finish = choice.finish_reason;
   }

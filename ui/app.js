@@ -506,6 +506,11 @@ const handlers = {
     activity.addText(msg.delta);
     activity.set("Writing…");
   },
+  // The model is writing an action (a tool call); counted like text for the speed figures.
+  action_delta(msg) {
+    activity.addText(msg.delta);
+    activity.set("Writing action…");
+  },
   thinking(msg) {
     const g = ensureGroup();
     if (!thinkingBody) {

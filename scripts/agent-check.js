@@ -2280,3 +2280,13 @@ console.log("safety shortcut checks passed");
   providers.openai.classify = saved;
   console.log("safety scope checks passed");
 }
+
+// Replies: a table becomes a bulleted list without its header or empty cells, and stray
+// blank lines between rows do not split it; headings render as bold.
+{
+  const { renderMarkdown } = await import("../ui/markdown.js");
+  const html = renderMarkdown("Due:\n\n| Due | Item | Status |\n\n|---|---|---|\n\n| Thu | Quiz 5 | — |\n\n| Fri | Homework 6 | Open |\n\n### Notes");
+  assert.equal(html, "<p>Due:</p><ul><li>Thu · Quiz 5</li><li>Fri · Homework 6 · Open</li></ul><p><strong>Notes</strong></p>", "a table reply did not render as a readable list");
+  assert.equal(renderMarkdown("<b>x</b>"), "<p>&lt;b&gt;x&lt;/b&gt;</p>", "reply text injected HTML");
+  console.log("reply format checks passed");
+}
