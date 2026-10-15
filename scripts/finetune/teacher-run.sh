@@ -13,7 +13,8 @@
 #
 # Usage: teacher-run.sh [passes]   (default 5)
 # Env:   MODEL (gemini-3.8-flash), MAX_USD (15), TIMEOUT_MS (300000), POLL_S (300), EXCLUDE,
-#        BUCKET (gs://YOUR_GCS_BUCKET), GCLOUD_PROJECT (YOUR_GCP_PROJECT)
+#        BUCKET, GCLOUD_PROJECT (defaults, with GCLOUD_ACCOUNT, from config.local.sh next to this
+#        script; not committed, copy config.example.sh)
 # Auth:  short-lived access tokens for the teacher service account, which run.js gets from
 #        gcloud by impersonation as GCLOUD_ACCOUNT; no key or token is stored.
 set -u
@@ -27,9 +28,13 @@ POLL_S="${POLL_S:-300}"
 # heroku-js-alert leaves a JavaScript dialog open that stalls the agent until the timeout,
 # so it costs a full timeout per pass for no trajectory.
 EXCLUDE="${EXCLUDE:-heroku-js-alert}"
-BUCKET="${BUCKET:-gs://YOUR_GCS_BUCKET}"
-GCLOUD_PROJECT="${GCLOUD_PROJECT:-YOUR_GCP_PROJECT}"
-GCLOUD_ACCOUNT="YOUR_GCP_ACCOUNT"
+CONFIG="$REPO/scripts/finetune/config.local.sh"
+[ -f "$CONFIG" ] || { echo "missing $CONFIG, copy config.example.sh and fill it in" >&2; exit 1; }
+# shellcheck source=scripts/finetune/config.example.sh
+. "$CONFIG"
+BUCKET="${BUCKET:-$LOCAL_BUCKET}"
+GCLOUD_PROJECT="${GCLOUD_PROJECT:-$LOCAL_GCLOUD_PROJECT}"
+GCLOUD_ACCOUNT="$LOCAL_GCLOUD_ACCOUNT"
 TEACHER_SA="browsby-teacher@$GCLOUD_PROJECT.iam.gserviceaccount.com"
 RESULTS="$HOME/bench-results"
 OUT="$RESULTS/teacher"
