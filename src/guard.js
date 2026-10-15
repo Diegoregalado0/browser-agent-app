@@ -94,7 +94,14 @@ export function quickAllow({ userRequests = [], page = {}, name, input = {}, tar
     return null;
   }
   if (!host.includes(".") || declined.some((d) => d.toLowerCase().includes(host))) return null;
-  const named = userRequests.some((r) => String(r).toLowerCase().includes(host));
+  // Whole hostnames the user typed, matched exactly or as a parent domain, so "netflix.com"
+  // never vouches for "x.com" and "google.com" covers "maps.google.com".
+  const named = userRequests.some((r) =>
+    (String(r).toLowerCase().match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/g) || []).some((h) => {
+      const site = h.replace(/^www\./, "");
+      return host === site || host.endsWith(`.${site}`);
+    }),
+  );
   return named ? `The user asked to go to ${host}.` : null;
 }
 

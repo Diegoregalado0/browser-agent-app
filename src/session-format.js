@@ -8,9 +8,14 @@ export const CURRENT_TAB_TAG = /\n*<current_tab[^>]*\/>$/;
 // The current-tab note for a request. Its title and address come from the page, so they
 // are shortened and escaped: page text cannot close the tag, and the tag is always found
 // again by CURRENT_TAB_TAG, so the page's title never counts as the user's words.
-export function currentTabTag(page) {
+// It also carries today's date, weekday and time zone, since the model has no clock; the
+// system prompt stays unchanged so its cache keeps hitting.
+export function currentTabTag(page, now = new Date()) {
   const attr = (text, max) => String(text ?? "").slice(0, max).replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<current_tab id="${attr(page.id, 40)}" title="${attr(page.title, 200)}" url="${attr(page.url, 300)}" />`;
+  const pad = (n) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${now.toLocaleDateString("en-US", { weekday: "long" })}`;
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  return `<current_tab id="${attr(page.id, 40)}" title="${attr(page.title, 200)}" url="${attr(page.url, 300)}" today="${attr(today, 40)}" time_zone="${attr(zone, 60)}" />`;
 }
 export const SESSION_ID_PATTERN = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
 

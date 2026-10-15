@@ -2290,3 +2290,16 @@ console.log("safety shortcut checks passed");
   assert.equal(renderMarkdown("<b>x</b>"), "<p>&lt;b&gt;x&lt;/b&gt;</p>", "reply text injected HTML");
   console.log("reply format checks passed");
 }
+
+// A site the user named vouches only for itself and its subdomains, never for a host that
+// merely ends with the same letters; each request carries today's date.
+{
+  const nav = (request, url) => quickAllow({ userRequests: [request], page: { url: "https://example.com/" }, name: "navigate", input: { url } });
+  assert.equal(nav("open netflix.com", "https://x.com/"), null, "x.com skipped the safety model because the user named netflix.com");
+  assert.equal(nav("go to google.com", "https://le.com/"), null, "le.com skipped the safety model because the user named google.com");
+  assert.ok(nav("go to google.com", "https://maps.google.com/"), "a subdomain of a named site went to the safety model");
+  assert.ok(nav("open www.wikipedia.org please", "https://wikipedia.org/wiki/Main_Page"), "a named site went to the safety model");
+  const { currentTabTag } = await import("../src/session-format.js");
+  assert.match(currentTabTag({ id: "t1", title: "T", url: "https://a.org/" }, new Date(2026, 9, 15)), / today="2026-10-15 Thursday" time_zone="/, "the request did not carry today's date");
+  console.log("named site and date checks passed");
+}
