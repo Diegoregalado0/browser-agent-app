@@ -2,15 +2,20 @@
 # Settings for the Google Cloud LoRA pipeline, sourced by every script in this directory.
 # Any variable can be overridden from the environment, for example BASE_MODEL=qwen3.5-4b.
 
-# The only account, project and billing account the pipeline may ever use. These are constants, not
+# The only account, project and billing account the pipeline may ever use, plus the bucket, come from
+# config.local.sh next to this file (not committed; copy config.example.sh). They are constants, not
 # environment overridable; guard_gcp refuses to run anything else.
-readonly ALLOWED_ACCOUNT="YOUR_GCP_ACCOUNT"
-readonly ALLOWED_PROJECT="YOUR_GCP_PROJECT"
-readonly ALLOWED_BILLING="billingAccounts/XXXXXX-XXXXXX-XXXXXX"
+if [ ! -f "$HERE/config.local.sh" ]; then
+  echo "config: missing $HERE/config.local.sh, copy config.example.sh and fill it in." >&2
+  exit 1
+fi
+# shellcheck source=finetune/gcp/config.example.sh
+. "$HERE/config.local.sh"
+readonly ALLOWED_ACCOUNT ALLOWED_PROJECT ALLOWED_BILLING
 
 PROJECT="${PROJECT:-$ALLOWED_PROJECT}"
 REGION="${REGION:-us-central1}"
-BUCKET="${BUCKET:-gs://YOUR_GCS_BUCKET}"
+BUCKET="${BUCKET:-$LOCAL_BUCKET}"
 GCP_ACCOUNT="${GCP_ACCOUNT:-$ALLOWED_ACCOUNT}"
 export CLOUDSDK_CORE_ACCOUNT="$GCP_ACCOUNT" CLOUDSDK_CORE_PROJECT="$PROJECT"
 
@@ -50,7 +55,7 @@ guard_gcp() {
 
 # Identity of the training VM: writes to BUCKET and deletes its own VM. launch.sh creates it and
 # grants those two roles when it is missing, so the project's default compute account stays as it is.
-VM_SA_NAME="${VM_SA_NAME:-browsby-trainer-vm}"
+VM_SA_NAME="${VM_SA_NAME:-${LOCAL_VM_SA_NAME:-browsby-trainer-vm}}"
 VM_SERVICE_ACCOUNT="${VM_SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 # Base model key, see model_profile below.

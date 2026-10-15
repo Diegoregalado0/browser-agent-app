@@ -9,3 +9,4 @@ bench-results/
 !SECURITY.md
 !legal/*.md
 !docs/*.md
+config.local.sh
