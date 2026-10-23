@@ -2303,3 +2303,48 @@ console.log("safety shortcut checks passed");
   assert.match(currentTabTag({ id: "t1", title: "T", url: "https://a.org/" }, new Date(2026, 9, 15)), / today="2026-10-15 Thursday" time_zone="/, "the request did not carry today's date");
   console.log("named site and date checks passed");
 }
+
+// Once requests are large, a new task first gets a summary of all but the last two tasks;
+// requests then carry the summary and the user's earlier requests word for word in place of
+// those messages, while the saved and shown conversation keeps everything.
+{
+  const turnBefore = providers.openai.turn;
+  const sent = [];
+  let queue = [];
+  providers.openai.turn = async ({ messages }) => (sent.push(structuredClone(messages)), queue.shift());
+  const say = (text, input = 150000) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input, output: 5 } });
+  const notices = [];
+  const long = new Agent({ emit: (e) => e.type === "notice" && notices.push(e.text), askPermission: async () => "allow" });
+  long.browser = agent.browser;
+  queue = [say("The lamp costs 42 EUR.")];
+  await long.run("Find the lamp's price. Never buy anything on this site.", loopConfig);
+  queue = [say("The chair costs 80 EUR.")];
+  await long.run("And the chair?", loopConfig);
+  queue = [say("The user asked for the lamp price: 42 EUR."), say("The desk costs 120 EUR.")];
+  await long.run("And the desk?", loopConfig);
+  assert.match(sent.at(-2).at(-1).content.at(-1).text, /summary of it/, "the summary was not asked for");
+  const request = sent.at(-1);
+  const head = request[0].content[0].text;
+  assert.match(head, /lamp price: 42 EUR/, "the request lacks the summary");
+  assert.match(head, /1\. Find the lamp's price\. Never buy anything on this site\./, "the user's earlier request is not kept word for word");
+  assert.match(request[0].content[1].text, /^And the chair\?/, "the summary does not ride in front of the first kept request");
+  assert.ok(!request.some((m) => m.content.some((b) => /^Find the lamp/.test(b.text ?? ""))), "the summarized messages were still sent");
+  assert.equal(long.messages.length, 6, "the history lost messages");
+  assert.ok(!transcriptOf(long.shownMessages()).some((i) => /earlier_conversation_summary/.test(i.text ?? "")), "the summary shows as a message");
+  assert.ok(notices.some((t) => /Summarizing/.test(t)), "the user is not told about the summary");
+
+  // A summary attempt that calls a tool instead changes nothing.
+  sent.length = 0;
+  const stubborn = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  stubborn.browser = agent.browser;
+  for (const text of ["one", "two"]) {
+    queue = [say("done")];
+    await stubborn.run(text, loopConfig);
+  }
+  queue = [{ content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, say("done")];
+  await stubborn.run("three", loopConfig);
+  assert.equal(stubborn.summary, null, "a summary that called a tool was used");
+  assert.match(sent.at(-1)[0].content[0].text, /^one/, "the full history was not sent after the summary failed");
+  providers.openai.turn = turnBefore;
+  console.log("conversation summary checks passed");
+}
