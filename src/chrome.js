@@ -35,7 +35,9 @@ export function buildOutdated() {
   try {
     keyed = Boolean(JSON.parse(readFileSync(MANIFEST, "utf8")).key);
   } catch {}
-  return !keyed || mtime(MANIFEST) < Math.max(...BUILD_SOURCES.map((s) => newestSource(join(PROJECT_DIR, s))));
+  // An internal build (BROWSBY_HUMAN_INPUT=1) and a store build differ without any source change.
+  const internal = existsSync(join(EXTENSION_DIR, "internal-build")) !== (process.env.BROWSBY_HUMAN_INPUT === "1");
+  return !keyed || internal || mtime(MANIFEST) < Math.max(...BUILD_SOURCES.map((s) => newestSource(join(PROJECT_DIR, s))));
 }
 // Held while one caller launches Chrome, so two launches at once do not start a second
 // keeper (whose Chrome would hand off to the first and open an extra window).

@@ -136,6 +136,8 @@ for (const size of [16, 32, 48, 128]) {
 rmSync(ZIP, { force: true });
 if (!HUMAN_INPUT) execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));
+// Marks an internal build, so the sandbox app rebuilds when the kind it wants differs.
+if (HUMAN_INPUT) writeFileSync(join(OUT, "internal-build"), "BROWSBY_HUMAN_INPUT=1\n");
 rmSync(DEST, { recursive: true, force: true });
 renameSync(OUT, DEST);
 if (HUMAN_INPUT) console.log(`Built ${DEST} (internal: human-like input, no store zip)`);
