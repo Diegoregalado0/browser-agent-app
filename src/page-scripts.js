@@ -218,7 +218,7 @@ export function refCenterScript(ref) {
     x += fr.left + f.clientLeft + parseFloat(s.paddingLeft);
     y += fr.top + f.clientTop + parseFloat(s.paddingTop);
   }
-  return { x: Math.round(x), y: Math.round(y) };
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(r.width), h: Math.round(r.height) };
 }
 
 export function formInputScript(ref, value) {

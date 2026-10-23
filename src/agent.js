@@ -325,6 +325,7 @@ export class Agent {
       await within(this.ending, ENDING_WAIT_MS);
       if (signal.aborted) return;
       this.browser.showActions = config.showActions;
+      this.browser.humanInput = config.humanInput;
       await this.browser.startTask({ highlight: config.highlightTab });
       const page = await this.browser.currentPage();
       if (signal.aborted) return;

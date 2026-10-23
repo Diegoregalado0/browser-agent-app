@@ -48,6 +48,8 @@ export const DEFAULTS = {
   highlightTab: true,
   // A visible pointer that glides to each target, and typing shown character by character.
   showActions: false,
+  // Only internal builds offer it (src/human-input.js).
+  humanInput: false,
   customInstructions: "",
   autoConfirmAge: false,
   approvedOrigins: [],

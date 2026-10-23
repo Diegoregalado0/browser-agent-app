@@ -309,6 +309,8 @@ export class Browser {
     // With showActions on, a visible pointer glides to each target and typing appears
     // character by character. pointers holds its last spot per tab, in CSS pixels.
     this.showActions = false;
+    // Human-like mouse and typing (src/human-input.js); only internal builds can turn it on.
+    this.humanInput = false;
     this.pointers = new Map();
     // The controls in view per tab, as last reported to the model: { url, title, items }.
     this.views = new Map();
@@ -629,6 +631,17 @@ export class Browser {
     return this.send("Input.dispatchMouseEvent", { type, x, y, ...extra });
   }
 
+  // Mouse input and the visible pointer, for src/human-input.js. Human-like input runs when the
+  // humanInput setting is on in an internal build (BROWSBY_HUMAN_INPUT=1 npm run
+  // build:extension); the store build defines globalThis.BROWSBY_HUMAN_INPUT as false, which
+  // drops every branch on it.
+  #io() {
+    return {
+      mouse: (type, x, y, extra) => this.#mouse(type, x, y, extra),
+      show: this.showActions ? (from, to, ms, click) => this.callInPage(agentCursorScript, from, to, ms, click).catch(() => {}) : null,
+    };
+  }
+
   async #cursorVisible(visible) {
     const at = this.pointers.get(this.currentId);
     if (this.showActions && at) await this.callInPage(agentCursorScript, at, null, 0, false, visible).catch(() => {});
@@ -638,6 +651,12 @@ export class Browser {
   // the real mouse follows the same eased path, so hover effects appear along the way.
   // drag holds the left button during the move.
   async #glide(x, y, { click = false, drag = false, modifiers = 0 } = {}) {
+    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+      const { move } = await import("./human-input.js");
+      await move(this.#io(), this.pointers.get(this.currentId) ?? { x: x - 120, y: y + 90 }, { x, y }, { drag, modifiers, click });
+      this.pointers.set(this.currentId, { x, y });
+      return;
+    }
     const held = drag ? { button: "left", buttons: 1 } : {};
     const from = this.pointers.get(this.currentId);
     if (!this.showActions) {
@@ -662,7 +681,14 @@ export class Browser {
     this.pointers.set(this.currentId, { x, y });
   }
 
-  async #click(x, y, { button = "left", count = 1, modifiers = 0 } = {}) {
+  // w and h are the target's size when known; human-like input clicks somewhere inside it.
+  async #click(x, y, { button = "left", count = 1, modifiers = 0, w, h } = {}) {
+    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+      const human = await import("./human-input.js");
+      const from = this.pointers.get(this.currentId) ?? { x: x - 120, y: y + 90 };
+      this.pointers.set(this.currentId, await human.click(this.#io(), from, { x, y, w, h }, { button, count, modifiers }));
+      return;
+    }
     await this.#glide(x, y, { click: true, modifiers });
     for (let i = 1; i <= count; i++) {
       await this.#mouse("mousePressed", x, y, { button, clickCount: i, modifiers });
@@ -697,9 +723,14 @@ export class Browser {
     if (field) await this.#glide(field.x, field.y);
     const chars = [...text];
     const delay = Math.min(45, Math.max(8, SHOWN_TYPING_MAX_MS / chars.length));
+    let gap = () => delay * (0.7 + Math.random() * 0.6);
+    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+      const { keyGap } = await import("./human-input.js");
+      gap = () => keyGap(chars.length);
+    }
     for (const ch of chars) {
       await this.send("Input.insertText", { text: ch });
-      await sleep(delay * (0.7 + Math.random() * 0.6));
+      await sleep(gap());
     }
   }
 
@@ -720,7 +751,7 @@ export class Browser {
       return null;
     }
     const value = String(input.value);
-    await this.#click(center.x, center.y);
+    await this.#click(center.x, center.y, { w: center.w, h: center.h });
     await this.callInPage(formInputScript, input.ref, "");
     await this.#typeShown(value);
     const now = await this.evaluate("document.activeElement?.isContentEditable ? document.activeElement.textContent : document.activeElement?.value").catch(() => null);
@@ -793,7 +824,7 @@ export class Browser {
         const p = await this.#point(input);
         const button = input.action === "right_click" ? "right" : "left";
         const count = { double_click: 2, triple_click: 3 }[input.action] || 1;
-        await this.#click(p.x, p.y, { button, count, modifiers: parseModifiers(input.modifiers) });
+        await this.#click(p.x, p.y, { button, count, modifiers: parseModifiers(input.modifiers), w: p.w, h: p.h });
         await this.#settle();
         return `${input.action} at ${input.ref || JSON.stringify(input.coordinate)}`;
       }
@@ -805,6 +836,12 @@ export class Browser {
       case "left_click_drag": {
         const from = await this.#point(input, "start_coordinate");
         const to = await this.#point(input);
+        if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+          const { drag } = await import("./human-input.js");
+          await drag(this.#io(), this.pointers.get(this.currentId) ?? { x: from.x - 120, y: from.y + 90 }, from, to);
+          this.pointers.set(this.currentId, to);
+          return "Dragged";
+        }
         await this.#glide(from.x, from.y);
         await this.#mouse("mousePressed", from.x, from.y, { button: "left", clickCount: 1 });
         await this.#glide(to.x, to.y, { drag: true });
@@ -813,7 +850,7 @@ export class Browser {
       }
       case "type": {
         if (typeof input.text !== "string") throw new Error("text is required for type");
-        if (this.showActions) await this.#typeShown(input.text);
+        if (this.showActions || (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput)) await this.#typeShown(input.text);
         else await this.send("Input.insertText", { text: input.text });
         return `Typed ${input.text.length} characters`;
       }
@@ -830,11 +867,13 @@ export class Browser {
         // would otherwise scroll down while the result says up.
         const delta = Math.abs(input.scroll_amount ?? 3) * 100;
         const dir = input.scroll_direction || "down";
-        if (this.showActions) await this.#glide(p.x, p.y);
-        await this.#mouse("mouseWheel", p.x, p.y, {
-          deltaX: dir === "left" ? -delta : dir === "right" ? delta : 0,
-          deltaY: dir === "up" ? -delta : dir === "down" ? delta : 0,
-        });
+        if (this.showActions || (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput)) await this.#glide(p.x, p.y);
+        const deltaX = dir === "left" ? -delta : dir === "right" ? delta : 0;
+        const deltaY = dir === "up" ? -delta : dir === "down" ? delta : 0;
+        if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+          const { scroll } = await import("./human-input.js");
+          await scroll(this.#io(), p.x, p.y, deltaX, deltaY);
+        } else await this.#mouse("mouseWheel", p.x, p.y, { deltaX, deltaY });
         await sleep(250);
         return `Scrolled ${dir}`;
       }

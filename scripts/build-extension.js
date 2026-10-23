@@ -17,6 +17,9 @@ const OUT = join(ROOT, "dist", "extension.tmp");
 const ZIP_DEST = join(ROOT, "dist", "browser-agent-extension.zip");
 const ZIP = join(ROOT, "dist", "browser-agent-extension.tmp.zip");
 const { version } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+// Human-like mouse and typing (src/human-input.js, ghost-cursor) are for internal builds only:
+// BROWSBY_HUMAN_INPUT=1 npm run build:extension. Such a build makes no store zip.
+const HUMAN_INPUT = process.env.BROWSBY_HUMAN_INPUT === "1";
 
 // Model provider APIs the extension calls with the user's key, and Local servers on this computer.
 const PROVIDER_HOSTS = [
@@ -78,9 +81,14 @@ const result = await build({
   platform: "browser",
   target: "chrome120",
   legalComments: "none",
+  define: { "globalThis.BROWSBY_HUMAN_INPUT": String(HUMAN_INPUT) },
   metafile: true,
   logLevel: "warning",
 });
+
+if (!HUMAN_INPUT && Object.keys(result.metafile.inputs).some((f) => /human-input|internal-settings|ghost-cursor|bezier-js/.test(f))) {
+  throw new Error("Human-like input reached the store build; it is for internal builds only");
+}
 
 // The bundle drops the packages' own license comments, so their notices ship in one file:
 // every npm package esbuild bundled, with its LICENSE and NOTICE files as published.
@@ -126,9 +134,12 @@ for (const size of [16, 32, 48, 128]) {
 }
 
 rmSync(ZIP, { force: true });
-execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
+if (!HUMAN_INPUT) execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));
 rmSync(DEST, { recursive: true, force: true });
 renameSync(OUT, DEST);
-renameSync(ZIP, ZIP_DEST);
-console.log(`Built ${DEST}\nPacked ${ZIP_DEST}`);
+if (HUMAN_INPUT) console.log(`Built ${DEST} (internal: human-like input, no store zip)`);
+else {
+  renameSync(ZIP, ZIP_DEST);
+  console.log(`Built ${DEST}\nPacked ${ZIP_DEST}`);
+}
