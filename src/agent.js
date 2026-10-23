@@ -9,6 +9,7 @@ import { CURRENT_TAB_TAG, currentTabTag } from "./session-format.js";
 import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
 import { TaskMetrics } from "./metrics.js";
+import { NOTES_TOOL_DEF, applyNotes } from "./notes.js";
 
 const formatTokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 
@@ -142,6 +143,8 @@ export class Agent {
     // Called whenever the history changes, so the conversation can be saved.
     this.onHistory = onHistory;
     this.messages = [];
+    // The session notepad (notes.js), kept outside the history.
+    this.notes = "";
     this.sessionOrigins = new Set();
     // Safety checks bill the same account, so their tokens count toward the limits too.
     this.guard = new Guard({ onUsage: (tokens) => this.#countTokens(tokens) });
@@ -210,6 +213,7 @@ export class Agent {
   reset() {
     this.stop();
     this.messages = [];
+    this.notes = "";
     this.sessionOrigins.clear();
     this.guard.reset();
     this.usage = { input: 0, cachedInput: 0, output: 0 };
@@ -243,8 +247,9 @@ export class Agent {
   // fresh, scanned copy. The user's requests and the replies are kept. The replies lose
   // their provider-native copies: thinking replayed after the stubbed results would no
   // longer match the history it was written after.
-  restore({ messages, usage }) {
+  restore({ messages, usage, notes }) {
     this.reset();
+    this.notes = typeof notes === "string" ? notes : "";
     const stub = [{ type: "text", text: RESTORED_RESULT }];
     this.messages = messages.map((m) =>
       m.role === "user" ? { ...m, content: m.content.map((b) => (b.type === "tool_result" ? { ...b, content: stub } : b)) } : { ...m, raw: null },
@@ -346,7 +351,7 @@ export class Agent {
       throw err;
     }
 
-    const tools = [...BROWSER_TOOL_DEFS.filter((t) => config.canvasTool || t.name !== "canvas"), ...(this.mcp?.toolDefs() ?? [])];
+    const tools = [...BROWSER_TOOL_DEFS.filter((t) => config.canvasTool || t.name !== "canvas"), NOTES_TOOL_DEF, ...(this.mcp?.toolDefs() ?? [])];
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.taskMetrics = metrics;
@@ -582,6 +587,23 @@ export class Agent {
       // password field. The next save of the history then hides it too.
       if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
       this.#emit(signal, { type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
+      // The notepad touches nothing outside the agent, so it needs no checks.
+      if (call.name === "notes") {
+        let result;
+        try {
+          const { notes, output } = applyNotes(this.notes, call.input);
+          if (notes !== this.notes) {
+            this.notes = notes;
+            this.#emit(signal, { type: "notes", text: notes });
+          }
+          result = { ...base, content: [{ type: "text", text: output }] };
+        } catch (err) {
+          result = { ...base, isError: true, content: [{ type: "text", text: err.message }] };
+        }
+        this.#emit(signal, { type: "tool_result", id: call.id, isError: result.isError, content: result.content });
+        results.push(result);
+        continue;
+      }
       // Declined or blocked actions are the user's and the safety check's decisions, not loops;
       // only the same call blocked again counts (see LoopGuard.recordBlock).
       let authorizing = false;

@@ -50,6 +50,8 @@ const host = {
     agent.browser = new Browser(transport);
   },
 };
+// Internal builds keep a debug log of every saved conversation; the store build drops this.
+if (globalThis.BROWSBY_INTERNAL) host.debugLog = (await import("./debug-log.js")).debugLog;
 const controller = createController(host);
 
 // Discord remote control. Every non-incognito panel is a session that Discord can send

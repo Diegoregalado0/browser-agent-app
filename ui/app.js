@@ -1,5 +1,6 @@
 import { createSettings } from "./settings.js";
 import { createMcpPanel } from "./mcp.js";
+import { createNotesPanel } from "./notes.js";
 import { createWizard } from "./wizard.js";
 import { createModelSwitcher } from "./models.js";
 import { createRemoteWizard } from "./remote-wizard.js";
@@ -44,6 +45,7 @@ const ICONS = {
   down: '<path d="m7 10 5 5 5-5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
+  notes: '<path d="M7 3.5h8.5L19 7v13.5H7Z"/><path d="M15.5 3.5V7H19M10 11h6M10 14.5h6M10 18h3.5"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0Z"/><path d="M12 17v4"/>',
   phone: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/>',
   bug: '<rect x="7" y="7" width="10" height="13" rx="5"/><path d="M12 11v9M7 12H3M21 12h-4M7 17H4M20 17h-3M9 7l-2-3M15 7l2-3"/>',
@@ -73,6 +75,7 @@ const settings = createSettings({
   openRemoteSetup: () => remoteWizard.open(),
 });
 const mcpPanel = createMcpPanel({ $, el, send, setInertBehind, toast: (text, kind) => settings.toast(text, kind) });
+const notesPanel = createNotesPanel({ $, el, setInertBehind, renderMarkdown, toast: (text) => settings.toast(text) });
 const switcher = createModelSwitcher({
   $,
   el,
@@ -159,6 +162,7 @@ function summarize(name, input) {
   }
   if (name === "navigate") return `${input.url}${input.new_tab ? " (new tab)" : ""}`;
   if (name === "find") return input.query;
+  if (name === "notes") return input.action === "read" ? "read" : `${input.action} "${String(input.text ?? "").slice(0, 40)}"`;
   if (name === "form_input") return `${input.ref} = ${JSON.stringify(input.value)}`.slice(0, 60);
   if (name === "tabs") return [input.action, input.tab_id, input.url].filter(Boolean).join(" ");
   if (name === "read_page") return input.filter || "all";
@@ -325,6 +329,7 @@ const randomVerb = () => `${VERBS[Math.floor(Math.random() * VERBS.length)]}…`
 
 function describeAction(name, input) {
   const target = input.ref ? ` ${input.ref}` : "";
+  if (name === "notes") return input.action === "read" ? "Reading notes…" : "Updating notes…";
   if (name === "navigate") {
     if (input.url === "back" || input.url === "forward") return `Going ${input.url}…`;
     try {
@@ -618,7 +623,7 @@ function announceReply() {
 }
 
 function receive(msg) {
-  for (const group of [handlers, settings.handlers, mcpPanel.handlers, wizard.handlers, switcher.handlers, remoteWizard.handlers]) group[msg.type]?.(msg);
+  for (const group of [handlers, settings.handlers, mcpPanel.handlers, notesPanel.handlers, wizard.handlers, switcher.handlers, remoteWizard.handlers]) group[msg.type]?.(msg);
 }
 
 function connect() {
@@ -700,6 +705,7 @@ document.addEventListener("keydown", (e) => {
   if (!$("menu").hidden) closeMenu();
   else if (settings.isOpen) settings.close();
   else if (mcpPanel.isOpen) mcpPanel.close();
+  else if (notesPanel.isOpen) notesPanel.close();
 });
 
 function openMcp() {
@@ -710,6 +716,13 @@ function openMcp() {
 $("open-mcp").onclick = openMcp;
 $("menu-open-mcp").onclick = openMcp;
 $("close-mcp").onclick = () => mcpPanel.close();
+$("open-notes").onclick = () => {
+  closeMenu();
+  settings.close();
+  mcpPanel.close();
+  notesPanel.open();
+};
+$("close-notes").onclick = () => notesPanel.close();
 
 $("close-settings").onclick = () => settings.close();
 $("run-setup").onclick = () => {

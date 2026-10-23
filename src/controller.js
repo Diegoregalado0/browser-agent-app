@@ -10,6 +10,9 @@ const CONNECTION_TEST_TIMEOUT_MS = 15000;
 const MODEL_TEST_TIMEOUT_MS = 60000;
 // The longest task request accepted, from the prompt box or a remote client.
 const PROMPT_MAX_CHARS = 50000;
+// The events an internal build's debug log keeps (see logEvent), and how much of each text.
+const LOGGED_EVENTS = new Set(["request", "status", "notice", "error", "debug", "tool_call", "tool_result", "reply", "speed", "usage", "task_stats", "permission_request", "permission_closed", "notes", "session"]);
+const LOG_TEXT_MAX_CHARS = 4000;
 const hasProvider = (id) => typeof id === "string" && Object.hasOwn(providers, id);
 
 // Rejects with `message` when the promise has not settled within ms.
@@ -85,6 +88,7 @@ export const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 //   ensureBrowser(agent)  connects agent.browser
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
 //   outlook               Outlook on Microsoft Graph (extension; see outlook-graph.js), optional
+//   debugLog              { append(sessionId, lines) }, internal builds only (extension/debug-log.js)
 export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
@@ -116,7 +120,20 @@ export function createController(host) {
     ghostLocked: ghostLocked(),
   });
 
+  // Internal builds (host.debugLog): every event of a saved conversation, for `browser-agent
+  // session-logs`. Streamed text is left out (replies arrive whole), images become a marker and
+  // long text is cut. Events before the conversation's first save wait in pendingLog.
+  let pendingLog = [];
+  const forLog = (blocks) =>
+    blocks?.map((b) => (b.type === "image" ? { type: "image" } : b.type === "text" && b.text.length > LOG_TEXT_MAX_CHARS ? { ...b, text: `${b.text.slice(0, LOG_TEXT_MAX_CHARS)} [cut]` } : b));
+  function logEvent(event) {
+    if (!host.debugLog || !LOGGED_EVENTS.has(event.type) || unsaved()) return;
+    pendingLog.push({ ts: new Date().toISOString(), ...event, ...(event.content ? { content: forLog(event.content) } : {}) });
+    if (session) host.debugLog.append(session.id, pendingLog.splice(0)).catch(() => {});
+  }
+
   const broadcast = (event) => {
+    logEvent(event);
     for (const client of clients) client.send(event);
   };
 
@@ -145,7 +162,7 @@ export function createController(host) {
     const created = !session;
     if (created) session = { id: newSessionId(), title: titleFor(agent.messages), created: new Date().toISOString() };
     try {
-      await host.sessions.save({ ...session, messages: agent.shownMessages(), usage: agent.usage });
+      await host.sessions.save({ ...session, messages: agent.shownMessages(), usage: agent.usage, notes: agent.notes });
     } catch (err) {
       console.error(`Could not save the session: ${err.message}`);
       return;
@@ -158,6 +175,7 @@ export function createController(host) {
     agent.reset();
     resolvePermission("deny");
     session = null;
+    pendingLog = [];
     conversationGhost = ghostActive();
     broadcast({ type: "cleared" });
   }
@@ -227,7 +245,7 @@ export function createController(host) {
         if (pendingPermission) reply(permissionRequest());
         if (host.outlook) reply(await host.outlook.status());
         if (agent.messages.length) {
-          reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.shownMessages()) });
+          reply({ type: "conversation", id: session?.id ?? null, title: session?.title ?? null, transcript: transcriptOf(agent.shownMessages()), notes: agent.notes });
         }
         return;
       }
@@ -240,6 +258,7 @@ export function createController(host) {
         }
         try {
           const config = await host.loadConfig();
+          logEvent({ type: "request", text, provider: config.provider, model: config.models[config.provider], localKind: config.localKind, permissionMode: config.permissionMode });
           if (config.provider === "ollama") checkBusy(config);
           await host.ensureBrowser(agent);
           await agent.run(text, config);
@@ -326,7 +345,7 @@ export function createController(host) {
         resolvePermission("deny");
         session = { id: saved.id, title: saved.title, created: saved.created };
         conversationGhost = ghostActive();
-        broadcast({ type: "conversation", id: saved.id, title: saved.title, transcript: transcriptOf(saved.messages) });
+        broadcast({ type: "conversation", id: saved.id, title: saved.title, transcript: transcriptOf(saved.messages), notes: agent.notes });
         return;
       }
       case "delete_session":

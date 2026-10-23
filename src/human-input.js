@@ -1,4 +1,4 @@
-// Human-like mouse and typing, for internal builds only (BROWSBY_HUMAN_INPUT=1 npm run
+// Human-like mouse and typing, for internal builds only (BROWSBY_INTERNAL=1 npm run
 // build:extension); the store build leaves this module and ghost-cursor out.
 //
 // The path's shape and the overshoot on long moves are ghost-cursor's (ISC,

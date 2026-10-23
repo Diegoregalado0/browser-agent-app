@@ -10,8 +10,8 @@ const WIDE = window.matchMedia("(min-width: 640px)");
 // page was shown. openRemoteSetup(): opens the remote control setup flow.
 export function createSettings({ $, el, icon, send, setInertBehind, getDebugLines = () => [], onPage = () => {}, openRemoteSetup = () => {} }) {
   const sheet = $("settings");
-  // Internal builds only (BROWSBY_HUMAN_INPUT=1); the store build drops this and the module.
-  if (globalThis.BROWSBY_HUMAN_INPUT) import("./internal-settings.js").then((m) => m.addHumanInputSetting(sheet, save, () => config));
+  // Internal builds only (BROWSBY_INTERNAL=1); the store build drops this and the module.
+  if (globalThis.BROWSBY_INTERNAL) import("./internal-settings.js").then((m) => m.addHumanInputSetting(sheet, save, () => config));
   // Where focus goes back to when the sheet closes.
   let opener = null;
   let config = null;

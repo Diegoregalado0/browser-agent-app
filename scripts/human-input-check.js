@@ -86,7 +86,7 @@ console.log("human-input-check: ok");
   const browser = new Browser(transport);
   const clickAt = (b) => b.run("browser", { action: "left_click", coordinate: [200, 150] }).catch(() => {});
   for (const [build, setting, human] of [[false, true, false], [true, false, false], [true, true, true]]) {
-    globalThis.BROWSBY_HUMAN_INPUT = build;
+    globalThis.BROWSBY_INTERNAL = build;
     browser.humanInput = setting;
     browser.pointers.clear();
     sent.length = 0;
@@ -94,6 +94,6 @@ console.log("human-input-check: ok");
     const moves = sent.filter((e) => e.method === "Input.dispatchMouseEvent" && e.type === "mouseMoved").length;
     assert.equal(moves > 3, human, `build ${build}, setting ${setting}: ${moves} mouse moves`);
   }
-  delete globalThis.BROWSBY_HUMAN_INPUT;
+  delete globalThis.BROWSBY_INTERNAL;
 }
 console.log("human-input setting check: ok");

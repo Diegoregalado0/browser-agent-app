@@ -11,6 +11,7 @@
     <span class="dot" id="dot" role="img" aria-label="Connecting"></span>
     <button id="model" class="model-chip" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="model-menu">connecting…</button>
     <span class="spacer"></span>
+    <button id="open-notes" class="icon-btn" data-icon="notes" title="Notes" aria-label="Notes" aria-haspopup="dialog"></button>
     <button id="toggle-ghost" class="icon-btn" data-icon="ghost" aria-pressed="false" title="Ghost mode" aria-label="Ghost mode"></button>
     <button id="open-mcp" class="icon-btn" data-icon="plug" title="Connections" aria-label="Connections"></button>
     <button id="open-menu" class="icon-btn" data-icon="menu" title="Menu" aria-label="Menu" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu"></button>
@@ -424,6 +425,15 @@
       <div class="setting-group" id="mcp-integrations"></div>
 
     </div>
+  </aside>
+
+  <aside id="notes-panel" class="settings mcp-panel" hidden role="dialog" aria-modal="true" aria-labelledby="notes-title">
+    <div class="settings-head">
+      <h2 id="notes-title" tabindex="-1">Notes</h2>
+      <button id="copy-notes" class="link" type="button">Copy</button>
+      <button id="close-notes" class="icon-btn" data-icon="close" title="Close" aria-label="Close notes"></button>
+    </div>
+    <div class="mcp-body" id="notes-body" aria-live="polite"></div>
   </aside>
 
   <dialog id="connect-flow" class="wizard" aria-labelledby="connect-title">

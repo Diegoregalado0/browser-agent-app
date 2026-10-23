@@ -17,9 +17,10 @@ const OUT = join(ROOT, "dist", "extension.tmp");
 const ZIP_DEST = join(ROOT, "dist", "browser-agent-extension.zip");
 const ZIP = join(ROOT, "dist", "browser-agent-extension.tmp.zip");
 const { version } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-// Human-like mouse and typing (src/human-input.js, ghost-cursor) are for internal builds only:
-// BROWSBY_HUMAN_INPUT=1 npm run build:extension. Such a build makes no store zip.
-const HUMAN_INPUT = process.env.BROWSBY_HUMAN_INPUT === "1";
+// Internal builds (BROWSBY_INTERNAL=1 npm run build:extension) add the human-like mouse
+// (src/human-input.js, ghost-cursor) and per-session debug logs (src/debug-log.js). Such a
+// build makes no store zip, and a store build fails if any of that code reaches it.
+const INTERNAL = process.env.BROWSBY_INTERNAL === "1";
 
 // Model provider APIs the extension calls with the user's key, and Local servers on this computer.
 const PROVIDER_HOSTS = [
@@ -81,13 +82,13 @@ const result = await build({
   platform: "browser",
   target: "chrome120",
   legalComments: "none",
-  define: { "globalThis.BROWSBY_HUMAN_INPUT": String(HUMAN_INPUT) },
+  define: { "globalThis.BROWSBY_INTERNAL": String(INTERNAL) },
   metafile: true,
   logLevel: "warning",
 });
 
-if (!HUMAN_INPUT && Object.keys(result.metafile.inputs).some((f) => /human-input|internal-settings|ghost-cursor|bezier-js/.test(f))) {
-  throw new Error("Human-like input reached the store build; it is for internal builds only");
+if (!INTERNAL && Object.keys(result.metafile.inputs).some((f) => /human-input|internal-settings|debug-log|ghost-cursor|bezier-js/.test(f))) {
+  throw new Error("Internal-build code reached the store build");
 }
 
 // The bundle drops the packages' own license comments, so their notices ship in one file:
@@ -134,13 +135,13 @@ for (const size of [16, 32, 48, 128]) {
 }
 
 rmSync(ZIP, { force: true });
-if (!HUMAN_INPUT) execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
+if (!INTERNAL) execFileSync("zip", ["-qr", ZIP, "."], { cwd: OUT });
 writeFileSync(join(OUT, "manifest.json"), JSON.stringify({ ...manifest, key: EXTENSION_KEY }, null, 2));
 // Marks an internal build, so the sandbox app rebuilds when the kind it wants differs.
-if (HUMAN_INPUT) writeFileSync(join(OUT, "internal-build"), "BROWSBY_HUMAN_INPUT=1\n");
+if (INTERNAL) writeFileSync(join(OUT, "internal-build"), "BROWSBY_INTERNAL=1\n");
 rmSync(DEST, { recursive: true, force: true });
 renameSync(OUT, DEST);
-if (HUMAN_INPUT) console.log(`Built ${DEST} (internal: human-like input, no store zip)`);
+if (INTERNAL) console.log(`Built ${DEST} (internal build, no store zip)`);
 else {
   renameSync(ZIP, ZIP_DEST);
   console.log(`Built ${DEST}\nPacked ${ZIP_DEST}`);

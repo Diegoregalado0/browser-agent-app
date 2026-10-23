@@ -2303,3 +2303,62 @@ console.log("safety shortcut checks passed");
   assert.match(currentTabTag({ id: "t1", title: "T", url: "https://a.org/" }, new Date(2026, 9, 15)), / today="2026-10-15 Thursday" time_zone="/, "the request did not carry today's date");
   console.log("named site and date checks passed");
 }
+
+// The notepad: the model writes and reads it with the notes tool, every UI gets the new text,
+// it is saved with the session and comes back with it, and a new conversation starts empty.
+// Internal builds (host.debugLog) log each saved conversation's events, images as markers.
+{
+  const { applyNotes, NOTES_MAX_CHARS } = await import("../src/notes.js");
+  assert.equal(applyNotes("a", { action: "append", text: " b " }).notes, "a\nb");
+  assert.equal(applyNotes("a", { action: "write", text: "c" }).notes, "c");
+  assert.match(applyNotes("", { action: "read" }).output, /empty/);
+  assert.throws(() => applyNotes("", { action: "append", text: " " }), /text is required/);
+  assert.throws(() => applyNotes("", { action: "write", text: "x".repeat(NOTES_MAX_CHARS + 1) }), /would pass/);
+  assert.throws(() => applyNotes("", { action: "erase" }), /action must be/);
+
+  const turnBefore = providers.openai.turn;
+  let queue = [];
+  providers.openai.turn = async () => queue.shift();
+  let stored = null;
+  const logged = [];
+  const notesController = createController({
+    loadConfig: async () => structuredClone(loopConfig),
+    saveConfig: async () => {},
+    loadUsage: async () => null,
+    saveUsage: async () => {},
+    sessions: { save: async (s) => (stored = structuredClone(s)), list: async () => [], load: async () => structuredClone(stored), remove: async () => {}, removeAll: async () => {} },
+    ensureBrowser: async (a) => {
+      a.browser ??= { ...agent.browser, run: async () => [{ type: "image", mediaType: "image/jpeg", data: "AAAA" }, { type: "text", text: "Browser screenshot" }] };
+    },
+    debugLog: { append: async (sid, lines) => logged.push(...lines.map((l) => ({ ...l, sid }))) },
+  });
+  const events = [];
+  const ui = notesController.connect({ send: (e) => events.push(e) });
+  const step = (block) => ({ content: [block], raw: null, stop: block.type === "text" ? "end" : "tool_use", usage: { input: 1, output: 1 } });
+  queue = [
+    step({ type: "tool_call", id: "n1", name: "notes", input: { action: "append", text: "Lamp: 42 EUR" } }),
+    step({ type: "tool_call", id: "s1", name: "browser", input: { action: "screenshot" } }),
+    step({ type: "tool_call", id: "n2", name: "notes", input: { action: "read" } }),
+    step({ type: "text", text: "The lamp is 42 EUR." }),
+  ];
+  await ui({ type: "run", text: "Price of the lamp?" });
+  assert.ok(events.some((e) => e.type === "notes" && e.text === "Lamp: 42 EUR"), "the UI was not sent the new notes");
+  assert.match(events.find((e) => e.type === "tool_result" && e.id === "n2").content[0].text, /Lamp: 42 EUR/, "reading the notes did not return them");
+  assert.equal(stored.notes, "Lamp: 42 EUR", "the notes were not saved with the session");
+
+  assert.equal(logged[0].type, "request", "the log does not start with the user's request");
+  assert.equal(logged[0].text, "Price of the lamp?");
+  assert.ok(logged.every((l) => l.sid === stored.id), "log lines went to another session");
+  const shot = logged.find((l) => l.type === "tool_result" && l.content?.some((b) => b.type === "image"));
+  assert.ok(shot && !JSON.stringify(shot).includes("AAAA"), "a screenshot was logged with its pixels");
+  assert.ok(logged.some((l) => l.type === "reply" && /42 EUR/.test(l.text)), "the reply was not logged");
+
+  await ui({ type: "reset" });
+  assert.equal(notesController.agent.notes, "", "a new conversation kept the old notes");
+  events.length = 0;
+  await ui({ type: "open_session", id: stored.id });
+  assert.equal(events.find((e) => e.type === "conversation")?.notes, "Lamp: 42 EUR", "a reopened session lost its notes");
+  assert.equal(notesController.agent.notes, "Lamp: 42 EUR");
+  providers.openai.turn = turnBefore;
+  console.log("notes and debug log checks passed");
+}

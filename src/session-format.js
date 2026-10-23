@@ -53,11 +53,12 @@ export function metaOf(session) {
 }
 
 // A stored copy of a conversation: history without screenshots, plus metadata.
-export function sessionRecord({ id, title, created, messages, usage }) {
+export function sessionRecord({ id, title, created, messages, usage, notes = "" }) {
   return {
     id,
     title,
     created,
+    notes,
     updated: new Date().toISOString(),
     usage,
     messages: messages.map((m) => (m.role === "user" ? { ...m, content: withoutImages(m.content) } : m)),

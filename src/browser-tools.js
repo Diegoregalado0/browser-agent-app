@@ -632,8 +632,8 @@ export class Browser {
   }
 
   // Mouse input and the visible pointer, for src/human-input.js. Human-like input runs when the
-  // humanInput setting is on in an internal build (BROWSBY_HUMAN_INPUT=1 npm run
-  // build:extension); the store build defines globalThis.BROWSBY_HUMAN_INPUT as false, which
+  // humanInput setting is on in an internal build (BROWSBY_INTERNAL=1 npm run
+  // build:extension); the store build defines globalThis.BROWSBY_INTERNAL as false, which
   // drops every branch on it.
   #io() {
     return {
@@ -651,7 +651,7 @@ export class Browser {
   // the real mouse follows the same eased path, so hover effects appear along the way.
   // drag holds the left button during the move.
   async #glide(x, y, { click = false, drag = false, modifiers = 0 } = {}) {
-    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+    if (globalThis.BROWSBY_INTERNAL && this.humanInput) {
       const { move } = await import("./human-input.js");
       await move(this.#io(), this.pointers.get(this.currentId) ?? { x: x - 120, y: y + 90 }, { x, y }, { drag, modifiers, click });
       this.pointers.set(this.currentId, { x, y });
@@ -683,7 +683,7 @@ export class Browser {
 
   // w and h are the target's size when known; human-like input clicks somewhere inside it.
   async #click(x, y, { button = "left", count = 1, modifiers = 0, w, h } = {}) {
-    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+    if (globalThis.BROWSBY_INTERNAL && this.humanInput) {
       const human = await import("./human-input.js");
       const from = this.pointers.get(this.currentId) ?? { x: x - 120, y: y + 90 };
       this.pointers.set(this.currentId, await human.click(this.#io(), from, { x, y, w, h }, { button, count, modifiers }));
@@ -724,7 +724,7 @@ export class Browser {
     const chars = [...text];
     const delay = Math.min(45, Math.max(8, SHOWN_TYPING_MAX_MS / chars.length));
     let gap = () => delay * (0.7 + Math.random() * 0.6);
-    if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+    if (globalThis.BROWSBY_INTERNAL && this.humanInput) {
       const { keyGap } = await import("./human-input.js");
       gap = () => keyGap(chars.length);
     }
@@ -836,7 +836,7 @@ export class Browser {
       case "left_click_drag": {
         const from = await this.#point(input, "start_coordinate");
         const to = await this.#point(input);
-        if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+        if (globalThis.BROWSBY_INTERNAL && this.humanInput) {
           const { drag } = await import("./human-input.js");
           await drag(this.#io(), this.pointers.get(this.currentId) ?? { x: from.x - 120, y: from.y + 90 }, from, to);
           this.pointers.set(this.currentId, to);
@@ -850,7 +850,7 @@ export class Browser {
       }
       case "type": {
         if (typeof input.text !== "string") throw new Error("text is required for type");
-        if (this.showActions || (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput)) await this.#typeShown(input.text);
+        if (this.showActions || (globalThis.BROWSBY_INTERNAL && this.humanInput)) await this.#typeShown(input.text);
         else await this.send("Input.insertText", { text: input.text });
         return `Typed ${input.text.length} characters`;
       }
@@ -867,10 +867,10 @@ export class Browser {
         // would otherwise scroll down while the result says up.
         const delta = Math.abs(input.scroll_amount ?? 3) * 100;
         const dir = input.scroll_direction || "down";
-        if (this.showActions || (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput)) await this.#glide(p.x, p.y);
+        if (this.showActions || (globalThis.BROWSBY_INTERNAL && this.humanInput)) await this.#glide(p.x, p.y);
         const deltaX = dir === "left" ? -delta : dir === "right" ? delta : 0;
         const deltaY = dir === "up" ? -delta : dir === "down" ? delta : 0;
-        if (globalThis.BROWSBY_HUMAN_INPUT && this.humanInput) {
+        if (globalThis.BROWSBY_INTERNAL && this.humanInput) {
           const { scroll } = await import("./human-input.js");
           await scroll(this.#io(), p.x, p.y, deltaX, deltaY);
         } else await this.#mouse("mouseWheel", p.x, p.y, { deltaX, deltaY });

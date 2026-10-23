@@ -1,4 +1,4 @@
-// Settings offered only by internal builds (BROWSBY_HUMAN_INPUT=1 npm run build:extension);
+// Settings offered only by internal builds (BROWSBY_INTERNAL=1 npm run build:extension);
 // the store build never loads this module.
 
 // The human-like mouse switch, under "Show the agent's actions". It saves itself here since it
