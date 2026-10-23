@@ -64,7 +64,15 @@ async function stroke(io, from, to, width, extra, spread, slow = 1) {
 // Moves from `from` to `to`; a long move lands near the target, then corrects onto it.
 export async function move(io, from, to, { width = 40, drag = false, modifiers = 0, click = false, slow = 1 } = {}) {
   const extra = { modifiers, ...(drag ? { button: "left", buttons: 1 } : {}) };
-  if (Math.hypot(to.x - from.x, to.y - from.y) > OVERSHOOT_THRESHOLD) {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  // Already there (a second scroll at the page's center): ghost-cursor's curve divides by the
+  // distance and returns null points, which Chrome rejects ("params.x ... missing").
+  if (distance < 2) {
+    await io.mouse("mouseMoved", to.x, to.y, extra);
+    if (click && io.show) await io.show(to, to, 0, true);
+    return;
+  }
+  if (distance > OVERSHOOT_THRESHOLD) {
     const near = overshoot(to, OVERSHOOT_RADIUS);
     await stroke(io, from, near, width, extra, undefined, slow);
     await stroke(io, near, to, width, extra, OVERSHOOT_SPREAD, slow);

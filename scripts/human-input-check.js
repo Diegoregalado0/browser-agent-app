@@ -22,6 +22,14 @@ for (const [from, to] of [[{ x: 10, y: 10 }, { x: 300, y: 200 }], [{ x: 50, y: 7
   assert.ok(events.some((p) => off(p) > 2), "the path bends");
 }
 
+{
+  // A move to where the pointer already is (two scrolls at the page's center) sends valid numbers.
+  const { events, io } = recorder();
+  await move(io, { x: 400, y: 300 }, { x: 400, y: 300 });
+  await move(io, { x: 400, y: 300 }, { x: 401, y: 300 });
+  assert.ok(events.length && events.every((e) => Number.isFinite(e.x) && Number.isFinite(e.y)), "a zero-distance move sent a non-number");
+}
+
 for (let i = 0; i < 2000; i++) {
   const p = boxPoint({ x: 100, y: 50, w: 80, h: 20 });
   assert.ok(Math.abs(p.x - 100) <= 32 && Math.abs(p.y - 50) <= 8, "click points stay inside the box");
@@ -80,6 +88,7 @@ console.log("human-input-check: ok");
   for (const [build, setting, human] of [[false, true, false], [true, false, false], [true, true, true]]) {
     globalThis.BROWSBY_HUMAN_INPUT = build;
     browser.humanInput = setting;
+    browser.pointers.clear();
     sent.length = 0;
     await clickAt(browser);
     const moves = sent.filter((e) => e.method === "Input.dispatchMouseEvent" && e.type === "mouseMoved").length;
