@@ -23,7 +23,9 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //   clickTarget  a click at a coordinate reports the element it landed on
 //   staleRefs    a ref that a re-render replaced is found again by its role and name
 //   verifyDone   a reply that ends a risky task is checked against the page once (see agent.js)
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone"];
+//   progress     each request ends with a task state the agent keeps (request, steps, page,
+//                recent outcomes, obstacles, notes), sent but never stored in the history
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress"];
 
 export const DEFAULTS = {
   provider: "openai",

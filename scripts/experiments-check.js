@@ -119,4 +119,48 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   await agent.run("Submit the order form for Sam", config);
   assert.equal(sent.length, 2, "off: no check");
 }
+// progress: every request ends with the task state; it is never stored, and the messages
+// before the newest stay the same from one request to the next (cache-friendly).
+{
+  const sent = [];
+  let replies = [];
+  providers.openai = { describeError: () => null, turn: async ({ messages }) => (sent.push(structuredClone(messages)), replies.shift()) };
+  const step = (block) => ({ content: [block], raw: null, stop: block.type === "text" ? "end" : "tool_use", usage: { input: 1, output: 1 } });
+  const agent = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  let fail = false;
+  agent.browser = {
+    startTask: async () => {},
+    endTask: async () => {},
+    currentPage: async () => ({ id: "t1", title: "Cart", url: "https://shop.test/cart" }),
+    currentUrl: async () => "https://shop.test/cart",
+    describeTarget: async () => null,
+    targetFrame: async () => null,
+    callInPage: async () => false,
+    run: async () => {
+      if (fail) throw new Error("ref_7 is covered by another element (iframe#ad)");
+      return "Loaded: Cart | https://shop.test/cart";
+    },
+  };
+  const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" }, permissionMode: "auto", experiments: { progress: true } };
+  replies = [
+    step({ type: "tool_call", id: "n1", name: "navigate", input: { url: "https://shop.test/cart" } }),
+    step({ type: "tool_call", id: "c1", name: "browser", input: { action: "left_click", ref: "ref_7" } }),
+    step({ type: "text", text: "The checkout button is covered by an ad." }),
+  ];
+  agent.browser.run = async (name) => {
+    if (name === "browser") throw new Error("ref_7 is covered by another element (iframe#ad)");
+    return "Loaded: Cart | https://shop.test/cart";
+  };
+  await agent.run("Check out my cart", config);
+  const state = (messages) => messages.at(-1).content.at(-1).text;
+  assert.match(state(sent[0]), /^\[Agent\] Task state, kept by the agent for you:\n- Request: "Check out my cart"\n- Step 1 of at most 80\. Current page: Cart \| https:\/\/shop\.test\/cart\.\n- No actions yet\./);
+  assert.match(state(sent[2]), /- navigate to https:\/\/shop\.test\/cart → ok: Loaded: Cart/);
+  assert.match(state(sent[2]), /- browser left_click → FAILED: ref_7 is covered by another element/);
+  assert.match(state(sent[2]), /- Obstacles: 1 failed action so far\./);
+  assert.ok(!agent.messages.some((m) => m.content.some((b) => /Task state/.test(b.text ?? ""))), "the task state was stored in the history");
+  assert.deepEqual(sent[2].slice(0, sent[1].length - 1), sent[1].slice(0, -1), "earlier messages changed between requests");
+  // The newest message of one request, without its task state, is unchanged in the next.
+  const withoutState = (m) => ({ ...m, content: m.content.slice(0, -1) });
+  assert.deepEqual(sent[2][2], withoutState(sent[1][2]), "the previous request's last message changed");
+}
 console.log("experiments checks passed");

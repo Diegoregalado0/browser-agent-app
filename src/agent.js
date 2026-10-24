@@ -44,6 +44,10 @@ const CLAIMS_DONE = /\b(done|complete[d]?|finished|success(ful(ly)?)?|submitted|
 // Text the agent adds to user messages (its prompts, the completion check's page excerpt and a
 // scan's safety notice), which never counts as the user's words.
 const AGENT_ADDED = /^(\[Agent\]|<page_excerpt>|\[Safety notice\])/;
+// The task state (the progress experiment) lists this many of the latest actions, and this
+// much of the notepad.
+const TASK_STATE_ACTIONS = 8;
+const TASK_STATE_NOTES_CHARS = 1500;
 // How much of the page's text the completion check shows the model.
 const COMPLETION_EXCERPT_CHARS = 2500;
 // An address as prompts show it: whole up to ADDRESS_MAX characters (data can ride in it),
@@ -455,6 +459,8 @@ export class Agent {
       // Where this task's history begins, for the completion check (verifyDone).
       task.firstMessage = this.messages.length - 1;
       task.request = userText;
+      // The page the task state reports (the progress experiment), until a page tool moves on.
+      this.lastPage = page;
     } catch (err) {
       if (this.task === task) this.task = null;
       if (signal.aborted) return;
@@ -509,7 +515,7 @@ export class Agent {
                 config,
                 system: systemPrompt(config),
                 tools,
-                messages: this.#forModel(),
+                messages: config.experiments?.progress ? this.#withTaskState(this.#forModel(), task, step, config) : this.#forModel(),
                 signal,
                 onText: (delta) => (firstToken(), this.#emit(signal, { type: "text", delta })),
                 onThinking: (delta) => (firstToken(), this.#emit(signal, { type: "thinking", delta })),
@@ -785,6 +791,7 @@ export class Agent {
         if (signal.aborted) throw new Error("Cancelled by the user.");
         const text = output.filter((b) => b.type === "text").map((b) => b.text).join("\n");
         const note = this.loopGuard.record(call.name, call.input, false, text);
+        if (pageTool && config.experiments?.progress) this.lastPage = await this.browser.currentPage().catch(() => this.lastPage);
         if (note) output = [...output, ...(await this.#autoScreenshot(output, "of the loop check", signal)), { type: "text", text: note }];
         else if (pageTool && originBefore !== (await this.#origin())) {
           output = [...output, ...(await this.#autoScreenshot(output, "the page is on a different site now", signal))];
@@ -819,6 +826,47 @@ export class Agent {
     } catch {
       return "";
     }
+  }
+
+  // The history with the task's state at the end of its last message (the progress
+  // experiment): the request word for word, steps used, the current page, the outcome of the
+  // latest actions, obstacles, and the notepad. It is rebuilt for every request and never
+  // stored, so it costs one short block per request, survives trimming, and the history
+  // before it stays the same from request to request (prompt caches keep hitting).
+  #withTaskState(messages, task, step, config) {
+    const history = this.messages.slice(task.firstMessage);
+    const results = new Map(history.flatMap((m) => (m.role === "user" ? m.content.filter((b) => b.type === "tool_result").map((r) => [r.id, r]) : [])));
+    const calls = history.flatMap((m) => (m.role === "assistant" ? m.content.filter((b) => b.type === "tool_call") : []));
+    const firstLine = (r) => (r?.content ?? []).filter((b) => b.type === "text").map((b) => b.text).join(" ").replace(/\s+/g, " ").trim().slice(0, 90);
+    const outcome = (c) => {
+      const r = results.get(c.id);
+      if (!r) return "pending";
+      return r.isError ? `FAILED: ${firstLine(r)}` : `ok${c.name === "navigate" ? `: ${firstLine(r)}` : ""}`;
+    };
+    const recent = calls.slice(-TASK_STATE_ACTIONS).map((c) => `  - ${c.name} ${describeInput(c.name, c.input, this.secretCalls.has(c))}`.trimEnd() + ` → ${outcome(c)}`);
+    const failures = calls.filter((c) => results.get(c.id)?.isError).length;
+    const loops = [...results.values()].filter((r) => r.content.some((b) => b.type === "text" && b.text.includes("[Loop check]"))).length;
+    const obstacles = [
+      failures && `${failures} failed action${failures === 1 ? "" : "s"} so far`,
+      loops && `${loops} loop check${loops === 1 ? "" : "s"}`,
+      this.blockedCalls.size && `${this.blockedCalls.size} action(s) blocked by the safety check`,
+      this.declinedCalls.size && `${this.declinedCalls.size} action(s) the user declined`,
+    ].filter(Boolean);
+    const page = this.lastPage ? `${clipAddress(String(this.lastPage.title || ""))} | ${clipAddress(String(this.lastPage.url || ""))}` : "not known yet";
+    const notes = this.notes ? this.notes.slice(0, TASK_STATE_NOTES_CHARS) + (this.notes.length > TASK_STATE_NOTES_CHARS ? " […]" : "") : "(empty; for a task with several parts, keep a checklist there and tick items off)";
+    const text = [
+      "[Agent] Task state, kept by the agent for you:",
+      `- Request: "${String(task.request).slice(0, 1500)}"`,
+      `- Step ${step + 1} of at most ${config.maxSteps}. Current page: ${page}.`,
+      recent.length ? `- Latest actions (oldest first):\n${recent.join("\n")}` : "- No actions yet.",
+      obstacles.length ? `- Obstacles: ${obstacles.join("; ")}.` : null,
+      `- Your notes: ${notes}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const last = messages.at(-1);
+    if (last?.role !== "user") return messages;
+    return [...messages.slice(0, -1), { ...last, content: [...last.content, { type: "text", text }] }];
   }
 
   // Why a reply that ends the task may claim more than was done, from this task's history:
