@@ -314,6 +314,13 @@ export class Browser {
     this.pointers = new Map();
     // The controls in view per tab, as last reported to the model: { url, title, items }.
     this.views = new Map();
+    // Experiments switched on for the running task (config.experiments, see EXPERIMENTS).
+    this.experiments = {};
+    // Per tab, each ref's outline line as last reported, so a ref a re-render replaced can be
+    // found again by its role and name (the staleRefs experiment).
+    this.refLines = new Map();
+    // Notes about the running action (a ref found again), added to its result.
+    this.stepNotes = [];
     this.callTimeoutMs = BROWSER_CALL_TIMEOUT_MS;
     this.actionTimeoutMs = ACTION_TIMEOUT_MS;
     // When the running action's time is up (see run), or null between actions.
@@ -605,13 +612,20 @@ export class Browser {
 
   async #point(input, key = "coordinate") {
     if (input.ref && key === "coordinate") {
-      const res = await this.callInPage(refCenterScript, input.ref);
-      if (res.error) throw new Error(res.error);
+      let ref = input.ref;
+      let res = await this.callInPage(refCenterScript, ref);
+      if (res.error) {
+        const fresh = / not found/.test(res.error) ? await this.#refound(ref) : null;
+        if (!fresh) throw new Error(res.error);
+        ref = fresh;
+        res = await this.callInPage(refCenterScript, ref);
+        if (res.error) throw new Error(res.error);
+      }
       if (["left_click", "right_click", "double_click", "triple_click"].includes(input.action)) {
-        const cover = await this.callInPage(hitTestScript, input.ref);
+        const cover = await this.callInPage(hitTestScript, ref);
         if (cover) {
           throw new Error(
-            `${input.ref} is covered by another element (${cover}), probably an ad or popup overlay. ` +
+            `${ref} is covered by another element (${cover}), probably an ad or popup overlay. ` +
               "Take a screenshot, close or dismiss the overlay, then retry.",
           );
         }
@@ -762,7 +776,38 @@ export class Browser {
   async #view() {
     const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH);
     this.views.set(this.currentId, res);
+    this.#rememberRefs(res.tree);
     return res;
+  }
+
+  // Records the line of every ref in an outline the model was shown.
+  #rememberRefs(tree) {
+    const lines = this.refLines.get(this.currentId) ?? new Map();
+    for (const line of String(tree || "").split("\n")) {
+      const ref = /\[(ref_\d+)\]/.exec(line)?.[1];
+      if (ref) lines.set(ref, line.trim());
+    }
+    this.refLines.set(this.currentId, lines);
+  }
+
+  // A ref the page no longer has, found again: the one control in the page's outline with the
+  // same role and name as the ref's last reported line. Null when the experiment is off, the
+  // ref was never shown, or no single control matches.
+  async #refound(ref) {
+    if (!this.experiments.staleRefs) return null;
+    const old = this.refLines.get(this.currentId)?.get(ref);
+    if (!old) return null;
+    const key = (line) => /^(\S+)( "[^"]*")?/.exec(line.trim())?.[0];
+    const res = await this.callInPage(readPageScript, true, PAGE_OUTLINE_MAX_CHARS);
+    this.#rememberRefs(res.tree);
+    const matches = res.tree
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.includes("[ref_") && !line.includes(`[${ref}]`) && key(line) === key(old));
+    if (matches.length !== 1) return null;
+    const fresh = /\[(ref_\d+)\]/.exec(matches[0])[1];
+    this.stepNotes.push(`${ref} was replaced when the page updated; used ${fresh}, the same ${key(old)}.`);
+    return fresh;
   }
 
   // What an action changed among the controls in view: the new address and the controls
@@ -805,7 +850,11 @@ export class Browser {
 
   async #pageAction(input) {
     const result = await this.#pageStep(input);
-    return input.action === "screenshot" ? result : result + (await this.#changes());
+    return input.action === "screenshot" ? result : result + this.#takeNotes() + (await this.#changes());
+  }
+
+  #takeNotes() {
+    return this.stepNotes.length ? `\n${this.stepNotes.splice(0).join("\n")}` : "";
   }
 
   async #pageStep(input) {
@@ -824,9 +873,15 @@ export class Browser {
         const p = await this.#point(input);
         const button = input.action === "right_click" ? "right" : "left";
         const count = { double_click: 2, triple_click: 3 }[input.action] || 1;
+        // What a click at a coordinate lands on, named before it happens, so a click caught by
+        // an overlay or an embedded frame is not mistaken for a click that did nothing.
+        const hit = !input.ref && this.experiments.clickTarget ? await this.callInPage(describeTargetScript, null, p.x, p.y).catch(() => null) : null;
         await this.#click(p.x, p.y, { button, count, modifiers: parseModifiers(input.modifiers), w: p.w, h: p.h });
         await this.#settle();
-        return `${input.action} at ${input.ref || JSON.stringify(input.coordinate)}`;
+        const frame = hit && /^(iframe|frame) /.test(hit)
+          ? " This point is inside an embedded frame; if that is not what you meant to click, it may be an ad or popup covering the page: close it (Escape often works) or click by ref."
+          : "";
+        return `${input.action} at ${input.ref || JSON.stringify(input.coordinate)}${hit ? ` on ${hit}.${frame}` : ""}`;
       }
       case "hover": {
         const p = await this.#point(input);
@@ -985,6 +1040,7 @@ export class Browser {
   async run(name, input) {
     this.deadline = Date.now() + this.actionTimeoutMs * (LOADING_TOOLS.has(name) ? 2 : 1);
     this.reportedDialogs = [];
+    this.stepNotes = [];
     try {
       const output = await this.#run(name, input);
       await this.highlightQueue;
@@ -1051,6 +1107,7 @@ export class Browser {
       case "read_page": {
         const whole = input.filter === "all" || input.filter === "interactive";
         const res = whole ? await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS) : await this.#view();
+        if (whole) this.#rememberRefs(res.tree);
         const text = `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nViewport: ${res.viewport}, scroll ${res.scroll}\n\n${res.tree}`;
         if (!res.visual) return whole ? text : `${text}\n[Controls in view only; filter "all" outlines the whole page.]`;
         // Content the outline cannot show comes with a screenshot.
@@ -1059,6 +1116,7 @@ export class Browser {
       }
       case "find": {
         const res = await this.callInPage(readPageScript, false, 200000);
+        this.#rememberRefs(res.tree);
         const words = input.query.toLowerCase().split(/\s+/).filter(Boolean);
         const matches = res.tree
           .split("\n")
@@ -1076,9 +1134,13 @@ export class Browser {
           const shown = await this.#formInputShown(input);
           if (shown) return shown + (await this.#changes());
         }
-        const res = await this.callInPage(formInputScript, input.ref, input.value);
+        let res = await this.callInPage(formInputScript, input.ref, input.value);
+        if (res.error && / not found/.test(res.error)) {
+          const fresh = await this.#refound(input.ref);
+          if (fresh) res = await this.callInPage(formInputScript, fresh, input.value);
+        }
         if (res.error) throw new Error(res.error);
-        return res.ok + (await this.#changes());
+        return res.ok + this.#takeNotes() + (await this.#changes());
       }
       case "get_page_text": {
         const res = await this.callInPage(pageTextScript, PAGE_TEXT_MAX_CHARS);

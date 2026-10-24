@@ -284,8 +284,16 @@ export function describeTargetScript(ref, x, y) {
   const tag = target.tagName.toLowerCase();
   const role = target.getAttribute("role") || (tag === "input" ? `input[type=${target.type}]` : tag);
   const form = target.form?.getAttribute("action");
+  // An embedded frame (often an ad or a third-party widget) is known by its address.
+  let src = "";
+  if (tag === "iframe" || tag === "frame") {
+    try {
+      src = new URL(target.src, location.href).host;
+    } catch {}
+  }
   return [
     `${role} "${clean(name)}"`,
+    src && `src=${src}`,
     target.getAttribute("href") && `href=${clean(target.getAttribute("href"))}`,
     form && `form action=${clean(form)}`,
   ]

@@ -16,6 +16,7 @@
 // Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
 //        --port (DevTools port; 0 = any free one) --thinking on|off --taskfile <file>
 //        --canvas-tool on|off (the read-only canvas tool; default on)
+//        --experiments a,b (agent experiments to switch on, see EXPERIMENTS in src/config-core.js)
 //        --split dev|heldout (tasks whose split matches; held-out tasks are kept for judging
 //        changes, not for tuning them)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
@@ -80,7 +81,7 @@ if (!selectedTasks.length) {
 // done (run+task pairs), which are skipped; its runId is reused so the same two files get
 // overwritten in place rather than starting a new pair.
 let resumedRows = [];
-let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}${canvasToolArg === "off" ? "-nocanvastool" : ""}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}${canvasToolArg === "off" ? "-nocanvastool" : ""}${args.experiments ? `-x-${args.experiments.replace(/,/g, "+")}` : ""}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 if (args.resume) {
   const { readFileSync } = await import("node:fs");
   const prior = JSON.parse(readFileSync(args.resume, "utf8"));
@@ -94,6 +95,7 @@ const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
 // instead of hand-rolling a config shape.
 function buildConfig() {
   const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking, canvasTool: canvasToolArg === "on" };
+  if (args.experiments) overrides.experiments = Object.fromEntries(args.experiments.split(",").map((name) => [name.trim(), true]));
   overrides.models[args.provider] = args.model;
   if (args.provider === "local") {
     // The Local provider as an OpenAI-compatible server, so any model on the server can be

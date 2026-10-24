@@ -19,6 +19,11 @@ export const DEFAULT_GUARD_MODELS = {
 //   ollama  Ollama's native API at ollamaHost
 export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 
+// Agent changes that can be switched on one at a time to measure them (docs/reliability):
+//   clickTarget  a click at a coordinate reports the element it landed on
+//   staleRefs    a ref that a re-render replaced is found again by its role and name
+export const EXPERIMENTS = ["clickTarget", "staleRefs"];
+
 export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
@@ -49,6 +54,9 @@ export const DEFAULTS = {
   showActions: false,
   // Only internal builds offer it (src/human-input.js).
   humanInput: false,
+  // Agent changes under evaluation, each off unless named here ({ name: true }); see
+  // EXPERIMENTS. Set by the benchmark (--experiments) and not shown in Settings.
+  experiments: {},
   customInstructions: "",
   autoConfirmAge: false,
   approvedOrigins: [],
@@ -236,6 +244,13 @@ export function cleanSetting(key, value) {
       } catch {}
       return site.length <= 253 && HOSTNAME.test(site) ? site : fail("Enter sensitive sites as hostnames like mybank.example, one per line.");
     });
+  }
+  if (key === "experiments") {
+    if (!isObject(value)) fail("Experiments must be a set of switches.");
+    for (const [name, on] of Object.entries(value)) {
+      if (!EXPERIMENTS.includes(name) || typeof on !== "boolean") fail(`Unknown experiment ${String(name).slice(0, 40)}.`);
+    }
+    return value;
   }
   if (key === "approvedOrigins") {
     if (!Array.isArray(value) || value.length > LIST_MAX) fail("Approved sites must be a list.");

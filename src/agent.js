@@ -430,6 +430,7 @@ export class Agent {
       if (signal.aborted) return;
       this.browser.showActions = config.showActions;
       this.browser.humanInput = config.humanInput;
+      this.browser.experiments = config.experiments ?? {};
       await this.browser.startTask({ highlight: config.highlightTab });
       const page = await this.browser.currentPage();
       if (signal.aborted) return;
