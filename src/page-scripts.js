@@ -315,6 +315,35 @@ export function domQuietScript() {
   return { quietMs: Math.round(performance.now() - state.last), ready: document.readyState };
 }
 
+// Draws (on) or removes (off) a numbered label at the top-left corner of every control in the
+// top page that has a ref and is in view, for a screenshot: label N is ref_N. The labels sit
+// in their own layer that takes no clicks. Returns how many were drawn.
+export function markRefsScript(on) {
+  document.getElementById("__agent_marks")?.remove();
+  if (!on) return 0;
+  const store = window.__agentRefStore;
+  if (!store) return 0;
+  const host = document.createElement("div");
+  host.id = "__agent_marks";
+  host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+  let count = 0;
+  for (const [ref, weak] of store.map) {
+    const el = weak.deref();
+    if (!el?.isConnected || el.ownerDocument !== document) continue;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
+    const label = document.createElement("div");
+    label.textContent = ref.replace("ref_", "");
+    label.style.cssText =
+      `position:fixed;left:${Math.max(0, r.left)}px;top:${Math.max(0, r.top)}px;font:bold 11px/13px monospace;` +
+      "color:#fff;background:rgba(200,0,90,.85);padding:0 2px;border-radius:2px";
+    host.append(label);
+    count++;
+  }
+  document.documentElement.append(host);
+  return count;
+}
+
 export function hitTestScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el) return null;

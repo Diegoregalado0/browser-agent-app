@@ -8,6 +8,7 @@ import {
   hitTestScript,
   agentCursorScript,
   domQuietScript,
+  markRefsScript,
 } from "./page-scripts.js";
 import { sleep } from "./limits.js";
 import { CANVAS_TOOL_DEF, MAX_PAGES, allowedPath, nextPath, responseProblem, runCanvas, stripGuard } from "./canvas.js";
@@ -628,16 +629,28 @@ export class Browser {
     const width = Math.min(vp.w, SCREENSHOT_MAX_WIDTH);
     // The model sees the page without the agent's pointer drawn over it.
     await this.#cursorVisible(false);
-    const { data } = await this.send("Page.captureScreenshot", {
-      format: "jpeg",
-      quality: 75,
-      // The output is also multiplied by devicePixelRatio, so divide it back out.
-      clip: { x: vp.x, y: vp.y, width: vp.w, height: vp.h, scale: width / vp.w / vp.dpr },
-    });
+    // The marks experiment labels each control in view with its ref number; the controls are
+    // read first so every one in view has a ref.
+    let marked = 0;
+    if (this.experiments.marks) {
+      await this.#view().catch(() => {});
+      marked = await this.callInPage(markRefsScript, true).catch(() => 0);
+    }
+    let data;
+    try {
+      ({ data } = await this.send("Page.captureScreenshot", {
+        format: "jpeg",
+        quality: 75,
+        // The output is also multiplied by devicePixelRatio, so divide it back out.
+        clip: { x: vp.x, y: vp.y, width: vp.w, height: vp.h, scale: width / vp.w / vp.dpr },
+      }));
+    } finally {
+      if (marked) await this.callInPage(markRefsScript, false).catch(() => {});
+    }
     await this.#cursorVisible(true);
     const size = jpegSize(data) || { width, height: Math.round((vp.h * width) / vp.w) };
     this.cssPerPixel = vp.w / size.width;
-    return { data, ...size };
+    return { data, ...size, marked };
   }
 
   async #point(input, key = "coordinate") {
@@ -893,7 +906,10 @@ export class Browser {
         const shot = await this.screenshot();
         return [
           { type: "image", mediaType: "image/jpeg", data: shot.data },
-          { type: "text", text: `Browser screenshot ${shot.width}x${shot.height}` },
+          {
+            type: "text",
+            text: `Browser screenshot ${shot.width}x${shot.height}${shot.marked ? `. A numbered label marks each of ${shot.marked} controls in view: label N is ref_N, so click it with that ref.` : ""}`,
+          },
         ];
       }
       case "left_click":

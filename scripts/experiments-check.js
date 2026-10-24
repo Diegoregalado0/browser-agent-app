@@ -22,6 +22,7 @@ function scriptedPage(handlers) {
     activate: async () => {},
     send: async (id, method, params) => {
       sent.push({ method, ...params });
+      if (method === "Page.captureScreenshot") return { data: "" };
       if (method !== "Runtime.evaluate") return {};
       const name = /^\(function (\w+)/.exec(params.expression)?.[1];
       const args = name ? JSON.parse(/\)\(\.\.\.(\[.*\])\)$/s.exec(params.expression)[1]) : [];
@@ -189,5 +190,25 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   browser.networkLogs.set("t1", { entries: [{ type: "Fetch", done: false, time: Date.now() - 60000 }] });
   await browser.run("browser", { action: "key", text: "Enter" });
   assert.equal(polls, 1, "a long-poll request did not hold the settle");
+}
+// marks: a screenshot draws the ref labels just before the capture and removes them after,
+// and says what the labels mean; off, the page is not touched.
+{
+  const order = [];
+  const page = scriptedPage({
+    readPageScript: () => outline('button "Buy" [ref_4]'),
+    markRefsScript: (on) => (order.push(on ? "draw" : "remove"), on ? 3 : 0),
+  });
+  const send = page.transport.send;
+  page.transport.send = async (id, method, params) => (method === "Page.captureScreenshot" && order.push("capture"), send(id, method, params));
+  const browser = new Browser(page.transport);
+  const off = await browser.run("browser", { action: "screenshot" });
+  assert.deepEqual(order, ["capture"], "off: no labels drawn");
+  assert.doesNotMatch(off.at(-1).text, /label/);
+  order.length = 0;
+  browser.experiments = { marks: true };
+  const on = await browser.run("browser", { action: "screenshot" });
+  assert.deepEqual(order, ["draw", "capture", "remove"]);
+  assert.match(on.at(-1).text, /A numbered label marks each of 3 controls in view: label N is ref_N/);
 }
 console.log("experiments checks passed");

@@ -27,7 +27,8 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //                recent outcomes, obstacles, notes), sent but never stored in the history
 //   settle       after an action, wait until the page has stopped changing and loading data
 //                (up to 2 s) instead of a fixed 300 ms
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle"];
+//   marks        screenshots carry a numbered label on each control in view (label N is ref_N)
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks"];
 
 export const DEFAULTS = {
   provider: "openai",
