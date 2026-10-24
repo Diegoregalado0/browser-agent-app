@@ -459,9 +459,9 @@ const handlers = {
       : `${where} was just used by another user.`;
   },
   config(msg) {
-    const wasLocal = onLocalServer() && `${config.localKind} ${config.gpuBaseUrl} ${config.serverBaseUrl}`;
+    const wasLocal = onLocalServer() && `${config.localKind} ${config.keyInfo?.gpu?.mask} ${config.serverBaseUrl}`;
     config = msg.config;
-    const nowLocal = onLocalServer() && `${config.localKind} ${config.gpuBaseUrl} ${config.serverBaseUrl}`;
+    const nowLocal = onLocalServer() && `${config.localKind} ${config.keyInfo?.gpu?.mask} ${config.serverBaseUrl}`;
     if (nowLocal !== wasLocal) nowLocal ? send({ type: "busy_check" }) : ($("busy-note").hidden = true);
     renderHeader();
     switcher.render(config);

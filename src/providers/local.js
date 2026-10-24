@@ -3,7 +3,7 @@
 // path, which carries the thinking setting as chat_template_kwargs (Ollama: think). See
 // LOCAL_KINDS.
 
-import { gpuHeaders } from "../config-core.js";
+import { gpuBase, gpuHeaders } from "../config-core.js";
 
 // The OpenAI SDK requires a key; a server that needs none gets this stand-in.
 const NO_KEY = "local";
@@ -25,7 +25,7 @@ let server = false;
 let gpu = false;
 
 // The server a request goes to, for the warm set.
-const serverOf = (config) => (config.localKind === "ollama" ? config.ollamaHost : config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl);
+const serverOf = (config) => (config.localKind === "ollama" ? config.ollamaHost : config.localKind === "gpu" ? gpuBase(config) : config.serverBaseUrl);
 
 // Local's own thinking setting (localThinking) stands for the shared one. Returns the
 // module, its options, and the warm-set key of the request.
@@ -56,7 +56,7 @@ async function adapter(opts, method) {
 export async function busyStatus(config) {
   if (config.localKind === "ollama" || !config.clientId) return null;
   try {
-    const origin = new URL(config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl).origin;
+    const origin = new URL(serverOf(config)).origin;
     const res = await fetch(`${origin}/browsby/busy`, { headers: gpuHeaders(config, origin), signal: AbortSignal.timeout(5000) });
     const body = res.ok ? await res.json() : null;
     if (typeof body?.busy !== "boolean") return null;
@@ -73,7 +73,8 @@ export async function busyStatus(config) {
 // server cannot be reached or sends no catalog.
 const CATALOG_ID = /^[\w.:/@+-]{1,200}$/;
 export async function serverCatalog(config) {
-  const origin = new URL(config.gpuBaseUrl).origin;
+  if (!gpuBase(config)) throw new Error(NO_ACCESS_KEY);
+  const origin = new URL(gpuBase(config)).origin;
   const res = await fetch(`${origin}/browsby/models`, { headers: gpuHeaders(config, origin), signal: AbortSignal.timeout(5000) });
   if (!res.ok) throw new Error(accessProblem(res.status) ?? `The GPU server sent no model list (${res.status}).`);
   const body = await res.json();
@@ -123,6 +124,8 @@ export async function canChat(opts) {
   const [module, mapped] = await adapter(opts, "canChat");
   return module.canChat?.(mapped) ?? null;
 }
+
+export const NO_ACCESS_KEY = "Paste your access key for the Browsby GPU server in Settings > Models.";
 
 // What a refusal from a shared GPU server (its gate or Cloudflare Access) means, or null.
 function accessProblem(status) {

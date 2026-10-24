@@ -13,12 +13,11 @@ export const DEFAULT_GUARD_MODELS = {
 };
 
 // The Local provider (id "ollama", from when Ollama was its only kind) reaches one of:
-//   gpu     the Browsby GPU server, an OpenAI-compatible endpoint at gpuBaseUrl, no key
+//   gpu     the Browsby GPU server, reached with an access key (keys.gpu) that holds its address
 //   server  any OpenAI-compatible server (llama.cpp, LM Studio, vLLM) at serverBaseUrl,
 //           with keys.ollama when it wants one
 //   ollama  Ollama's native API at ollamaHost
 export const LOCAL_KINDS = ["gpu", "server", "ollama"];
-export const GPU_BASE_URL = "http://localhost:8081/v1";
 
 export const DEFAULTS = {
   provider: "openai",
@@ -29,7 +28,6 @@ export const DEFAULTS = {
   // with kind (LOCAL_KINDS) on Local entries, so picking one also picks its connection.
   modelHistory: [],
   localKind: "ollama",
-  gpuBaseUrl: GPU_BASE_URL,
   serverBaseUrl: "",
   ollamaHost: "http://127.0.0.1:11434",
   ollamaContext: 32768,
@@ -105,12 +103,20 @@ export function accessKeyParts(key) {
     const raw = atob(key.slice(5).replace(/-/g, "+").replace(/_/g, "/"));
     const { u, cid, cs, k } = JSON.parse(raw);
     const url = new URL(u);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
+    // https, or http to this computer (a gate under test).
+    const local = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    if ((url.protocol !== "https:" && !local) || url.username || url.password) return null;
     if (![cid, cs, k].every((v) => typeof v === "string" && /^[\x21-\x7e]{8,200}$/.test(v)) || !/^bgk_[a-z2-7]{8}_[A-Za-z0-9_-]{43}$/.test(k)) return null;
     return { origin: url.origin, headers: { "CF-Access-Client-Id": cid, "CF-Access-Client-Secret": cs, "X-Browsby-Key": k } };
   } catch {
     return null;
   }
+}
+
+// The Browsby GPU server's OpenAI-compatible base URL, from the access key, or "" without one.
+export function gpuBase(config) {
+  const access = accessKeyParts(config.keys?.gpu);
+  return access ? `${access.origin}/v1` : "";
 }
 
 // Headers for a request from the Local provider to url: the install id, and on the Browsby GPU
@@ -214,7 +220,6 @@ export function cleanSetting(key, value) {
         : fail("Each model in the history is a provider and a model id."),
     );
   }
-  if (key === "gpuBaseUrl") return httpUrl(value, "The base URL");
   if (key === "serverBaseUrl") return value === "" ? value : httpUrl(value, "The base URL");
   if (key === "ollamaHost") return httpUrl(value, "The Ollama host");
   if (key === "customInstructions") {
@@ -315,7 +320,7 @@ function migrateBaseUrl(stored) {
   }
   const { openaiBaseUrl: _url, ...next } = stored;
   const kind = /^http:\/\/(localhost|127\.0\.0\.1):8081\/v1\/?$/.test(url) ? "gpu" : "server";
-  next[kind === "gpu" ? "gpuBaseUrl" : "serverBaseUrl"] = url;
+  if (kind === "server") next.serverBaseUrl = url;
   const models = { ...stored.models };
   const guardModels = { ...stored.guardModels };
   const keys = { ...stored.keys };

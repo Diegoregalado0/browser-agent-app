@@ -553,8 +553,6 @@ for (const patch of [
   { ollamaHost: "file:///etc/passwd" },
   { ollamaHost: "javascript:alert(1)" },
   { serverBaseUrl: "https://user:pass@evil.example/v1" },
-  { gpuBaseUrl: "javascript:alert(1)" },
-  { gpuBaseUrl: "" },
   { localKind: "cloud" },
   { approvedOrigins: "https://bank.example https://a.test" },
   { approvedOrigins: ["javascript:alert(1)"] },
@@ -1448,7 +1446,7 @@ const localServer = createServer((req, res) => {
   req.on("data", (c) => (body += c));
   req.on("end", () => {
     const json = (value) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value));
-    localRequests.push({ path: req.url, auth: req.headers.authorization, client: req.headers["x-browsby-client"], body: body && JSON.parse(body) });
+    localRequests.push({ path: req.url, auth: req.headers.authorization, client: req.headers["x-browsby-client"], gateKey: req.headers["x-browsby-key"], body: body && JSON.parse(body) });
     if (req.url === "/browsby/busy") return json(req.headers["x-browsby-client"] === "11111111-2222-4333-8444-555555555555" ? { busy: true, running: false, freeInSeconds: 150 } : { busy: false });
     if (req.url === "/v1/models") return json({ object: "list", data: [{ id: "Browsby-Steady" }, { id: "Browsby-Swift" }, { id: "nomic-embed-text" }] });
     if (req.url === "/browsby/models") return json({ default: "Browsby-Steady", models: [{ id: "Browsby-Steady", name: "Browsby Steady" }, { id: "Browsby-Swift", name: "Browsby Swift" }] });
@@ -1466,9 +1464,11 @@ const localList = async () => {
   await fromLocal({ type: "list_models", provider: "ollama" });
   return localEvents.find((e) => e.type === "models");
 };
+// An access key for a Browsby GPU server at url (made on the server by browsby-keys).
+const packKey = (u) => "bzk1_" + Buffer.from(JSON.stringify({ u, cid: "client-id.access", cs: "client-secret-value", k: "bgk_abcdefgh_" + "S".repeat(43) })).toString("base64url");
 Object.assign(hostConfig, { provider: "ollama", localKind: "ollama", clientId: "11111111-2222-4333-8444-555555555555", keys: { ...hostConfig.keys, ollama: "" }, models: { ...hostConfig.models, ollama: "" } });
 for (const [kind, fields, chatPath, listed] of [
-  ["gpu", { baseUrl: `${localUrl}/v1` }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
+  ["gpu", { key: packKey(localUrl) }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
   ["server", { baseUrl: `${localUrl}/v1`, key: "sk-server" }, "/v1/chat/completions", ["Browsby-Steady", "Browsby-Swift"]],
   ["ollama", { host: localUrl }, "/api/chat", ["qwen3:8b"]],
 ]) {
@@ -1479,14 +1479,15 @@ for (const [kind, fields, chatPath, listed] of [
   assert.equal(ping.body.model, listed[0], `Local ${kind} tested the wrong model`);
   if (kind !== "ollama") assert.equal(ping.auth, kind === "server" ? "Bearer sk-server" : "Bearer local", `Local ${kind} sent the wrong key`);
   if (kind !== "ollama") assert.ok(localRequests.every((r) => r.client === hostConfig.clientId), `Local ${kind} left out the install id`);
+  if (kind === "gpu") assert.ok(localRequests.every((r) => r.gateKey === "bgk_abcdefgh_" + "S".repeat(43)), "a GPU server request left out the access key");
   // The test saves nothing; the UI's patch does once it passes, as the card and setup send it.
   const { localPatch } = await import("../ui/models.js");
-  await fromLocal({ type: "save_config", patch: { ...localPatch(hostConfig, { kind, ...fields }), ...(fields.key && { keys: { ollama: fields.key } }) } });
+  await fromLocal({ type: "save_config", patch: { ...localPatch(hostConfig, { kind, ...fields }), ...(fields.key && { keys: { [kind === "gpu" ? "gpu" : "ollama"]: fields.key } }) } });
   assert.equal(hostConfig.localKind, kind);
   const models = await localList();
   assert.deepEqual(models.models, listed.includes("qwen3:8b") ? ["qwen3:8b", "all-minilm"] : listed, `Local ${kind} listed the wrong models`);
 }
-assert.equal(hostConfig.gpuBaseUrl, `${localUrl}/v1`);
+assert.equal(hostConfig.keys.gpu, packKey(localUrl), "the access key was not saved as the GPU server's");
 // The busy notice: the gate at the Local server's origin says whether another install is
 // using it; Ollama and a server without the endpoint say nothing.
 {
@@ -1494,7 +1495,7 @@ assert.equal(hostConfig.gpuBaseUrl, `${localUrl}/v1`);
   const gpu = { ...hostConfig, localKind: "gpu" };
   assert.deepEqual(await busyStatus(gpu), { busy: true, running: false, freeInSeconds: 150 });
   assert.deepEqual(await busyStatus({ ...gpu, clientId: "99999999-2222-4333-8444-555555555555" }), { busy: false, running: false, freeInSeconds: 0 });
-  assert.equal(await busyStatus({ ...gpu, gpuBaseUrl: "http://127.0.0.1:9/v1" }), null, "a missing gate did not fail quietly");
+  assert.equal(await busyStatus({ ...gpu, keys: { ...gpu.keys, gpu: packKey("http://127.0.0.1:9") } }), null, "a missing gate did not fail quietly");
   assert.equal(await busyStatus({ ...gpu, localKind: "ollama" }), null);
   hostConfig.localKind = "gpu";
   localEvents.length = 0;
@@ -1568,7 +1569,6 @@ const migrated = mergeConfig({
 });
 assert.equal(migrated.provider, "ollama");
 assert.equal(migrated.localKind, "gpu");
-assert.equal(migrated.gpuBaseUrl, "http://localhost:8081/v1");
 assert.deepEqual([migrated.models.ollama, migrated.models.openai], ["Browsby-Steady", DEFAULTS.models.openai]);
 assert.deepEqual([migrated.keys.openai, migrated.keys.ollama, migrated.keys.anthropic], ["", "local", "sk-ant"], "the server key stayed under OpenAI");
 assert.deepEqual(migrated.guardModels, { ollama: "Browsby-Swift" });
@@ -2494,7 +2494,7 @@ console.log("safety shortcut checks passed");
     fetched.push(String(url));
     return new Response(JSON.stringify(served), { status: 200, headers: { "Content-Type": "application/json" } });
   };
-  const gpu = { gpuBaseUrl: "http://localhost:8081/v1" };
+  const gpu = { localKind: "gpu", keys: { gpu: packKey("http://localhost:8081") } };
   served = {
     default: "Zigger-1.0",
     models: [
@@ -2521,7 +2521,7 @@ console.log("safety shortcut checks passed");
   const turnBefore = providers.ollama.turn;
   const sentModels = [];
   providers.ollama.turn = async ({ model, config: c }) => (sentModels.push([model, c.summaryAt]), { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
-  let saved = { ...structuredClone(loopConfig), provider: "ollama", localKind: "gpu", gpuBaseUrl: gpu.gpuBaseUrl, models: { ...loopConfig.models, ollama: "qwen3.6-35b-a3b-long" } };
+  let saved = { ...structuredClone(loopConfig), provider: "ollama", localKind: "gpu", keys: { ...loopConfig.keys, gpu: gpu.keys.gpu }, models: { ...loopConfig.models, ollama: "qwen3.6-35b-a3b-long" } };
   const events = [];
   const gpuController = createController({
     loadConfig: async () => structuredClone(saved),
@@ -2556,6 +2556,16 @@ console.log("safety shortcut checks passed");
   await ui({ type: "run", text: "nothing to run on" });
   assert.match(events.find((e) => e.type === "error")?.text ?? "", /offers no models/);
   assert.equal(sentModels.length, calls, "a request ran with no model");
+  // Without an access key nothing is asked of the server: no models, no task.
+  saved = { ...saved, keys: { ...saved.keys, gpu: "" } };
+  fetched.length = 0;
+  events.length = 0;
+  await ui({ type: "list_models", provider: "ollama" });
+  assert.match(events.find((e) => e.type === "models")?.error ?? "", /Paste your access key/);
+  await ui({ type: "run", text: "no key" });
+  assert.match(events.find((e) => e.type === "error")?.text ?? "", /access key/);
+  assert.equal(fetched.length, 0, "the server was asked without a key");
+  assert.equal(sentModels.length, calls, "a task ran without a key");
   providers.ollama.turn = turnBefore;
   globalThis.fetch = fetchBefore;
   console.log("GPU server catalog checks passed");

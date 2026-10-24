@@ -1,4 +1,4 @@
-import { accessKeyParts, keyProblem, MODEL_HISTORY_MAX, GPU_BASE_URL } from "../src/config-core.js";
+import { keyProblem, MODEL_HISTORY_MAX } from "../src/config-core.js";
 
 // Models, in two places. The quick selector: the current model as a button at the top
 // left, opening a menu of the models already used, to switch between them. The main menu
@@ -34,12 +34,14 @@ const kindName = (id) => LOCAL_KINDS.find((k) => k.id === id).name;
 // Whether the agent can run on a provider: a saved key, or for Local an address, which
 // only an OpenAI-compatible server can lack.
 export function usable(config, provider, kind = config.localKind) {
+  if (providerById(provider)?.local && kind === "gpu") return config.keyInfo?.gpu?.source === "saved";
   if (providerById(provider)?.local) return kind !== "server" || Boolean(config.serverBaseUrl);
   return config.keyInfo?.[provider]?.source === "saved";
 }
 
-// The address a Local connection of this kind reaches.
-export const localEndpoint = (config, kind = config.localKind) => ({ gpu: config.gpuBaseUrl, server: config.serverBaseUrl, ollama: config.ollamaHost })[kind];
+// The address a Local connection of this kind reaches; for the GPU server, which the UI only
+// knows by its saved access key, that key's masked form.
+export const localEndpoint = (config, kind = config.localKind) => ({ gpu: config.keyInfo?.gpu?.mask ?? "", server: config.serverBaseUrl, ollama: config.ollamaHost })[kind];
 
 // The models already used whose provider can still run, newest first. The current model
 // leads even before it is in the history (set by first-run setup or an earlier version).
@@ -72,8 +74,7 @@ export function localPatch(config, { kind, baseUrl, host }) {
   const patch = {};
   if (kind !== config.localKind) Object.assign(patch, { localKind: kind, models: { ollama: "" } });
   if (kind === "ollama" && host && host !== config.ollamaHost) patch.ollamaHost = host;
-  const setting = { gpu: "gpuBaseUrl", server: "serverBaseUrl" }[kind];
-  if (setting && baseUrl && baseUrl !== config[setting]) patch[setting] = baseUrl;
+  if (kind === "server" && baseUrl && baseUrl !== config.serverBaseUrl) patch.serverBaseUrl = baseUrl;
   return patch;
 }
 
@@ -321,14 +322,9 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         input.dataset.role = role;
         return input;
       };
-      const gpuBase = url("gpu-base", GPU_BASE_URL);
-      // A shared GPU server's access key; pasting one fills in its address.
+      // The GPU server's access key, which also holds its address.
       const gpuKey = Object.assign(el("input"), { type: "password", spellcheck: false, autocomplete: "off" });
       gpuKey.dataset.role = "gpu-key";
-      gpuKey.addEventListener("input", () => {
-        const access = accessKeyParts(gpuKey.value.trim());
-        if (access) gpuBase.value = `${access.origin}/v1`;
-      });
       const serverBase = url("server-base", "http://localhost:1234/v1");
       const host = Object.assign(el("input"), { spellcheck: false, placeholder: "http://127.0.0.1:11434" });
       host.dataset.role = "host";
@@ -340,11 +336,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         send({ type: "save_config", patch: { ollamaContext: value } });
       });
       body.append(
-        group(
-          "gpu",
-          inputField(card, "Base URL", gpuBase, "The GPU server through its tunnel on this computer, or its address from an access key."),
-          inputField(card, "Access key (optional)", gpuKey, "For a shared Browsby GPU server: paste the bzk1_ key its owner gave you. It goes only to that server."),
-        ),
+        group("gpu", inputField(card, "Access key", gpuKey, "The bzk1_ key you were given. It stays on this device and goes only to the GPU server.")),
         group(
           "server",
           inputField(card, "Base URL", serverBase, "For llama.cpp, LM Studio, vLLM and similar."),
@@ -442,7 +434,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
   // The fields a Local test sends and, once it passes, saves: { kind, baseUrl, host }.
   function localFields(card) {
     const kind = field(card, "kind").value;
-    const baseUrl = kind === "ollama" ? undefined : field(card, `${kind}-base`).value.trim();
+    const baseUrl = kind === "server" ? field(card, "server-base").value.trim() : undefined;
     return { kind, baseUrl, host: kind === "ollama" ? field(card, "host").value.trim() : undefined };
   }
 
@@ -454,6 +446,10 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     const local = providerById(p).local;
     const kind = local && field(card, "kind").value;
     const key = kind === "gpu" ? field(card, "gpu-key").value.trim() : local && kind !== "server" ? "" : field(card, "key").value.trim();
+    if (kind === "gpu" && !key && !usable(config, p, "gpu")) {
+      result(card, "error", "Paste the access key you were given first.");
+      return field(card, "gpu-key").focus();
+    }
     if (!local && !key && !usable(config, p)) {
       result(card, "error", "Paste an API key first.");
       return field(card, "key").focus();
@@ -500,7 +496,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     status.className = `field-note${state.error ? " error" : ""}`;
     status.textContent =
       state.error ??
-      (!state.models.length && !state.loadedFor ? ""
+      (server && !usable(config, p) ? "Paste your access key to see the server's models."
+      : !state.models.length && !state.loadedFor ? ""
       : !state.models.length ? "Loading models…"
       : server && state.models.length === 1 ? ""
       : server && !query ? `${state.models.length} models on the GPU server.`
@@ -540,7 +537,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       if (local) {
         const access = config.keyInfo?.gpu;
         field(card, "gpu-key").placeholder = access?.source === "saved" ? `Paste a new key to replace ${access.mask}` : "None";
-        for (const [role, value] of [["kind", config.localKind], ["gpu-base", config.gpuBaseUrl], ["server-base", config.serverBaseUrl], ["host", config.ollamaHost], ["context", config.ollamaContext]]) {
+        for (const [role, value] of [["kind", config.localKind], ["server-base", config.serverBaseUrl], ["host", config.ollamaHost], ["context", config.ollamaContext]]) {
           const input = field(card, role);
           if (document.activeElement !== input) input.value = value ?? "";
         }

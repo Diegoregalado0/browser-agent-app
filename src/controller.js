@@ -1,7 +1,7 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
-import { busyStatus, pickServerModel, serverCatalog } from "./providers/local.js";
-import { DEFAULTS, accessKeyParts, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
+import { NO_ACCESS_KEY, busyStatus, pickServerModel, serverCatalog } from "./providers/local.js";
+import { DEFAULTS, accessKeyParts, apiKeyFor, gpuBase, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { TITLE_ATTEMPTS } from "./title.js";
 import { today } from "./limits.js";
@@ -155,7 +155,7 @@ export function createController(host) {
   // server cannot be reached (the request then shows why). The entry is null for an empty
   // catalog.
   async function syncServerModels(config) {
-    if (config.provider !== "ollama" || config.localKind !== "gpu") return null;
+    if (config.provider !== "ollama" || config.localKind !== "gpu" || !gpuBase(config)) return null;
     let catalog;
     try {
       catalog = await serverCatalog(config);
@@ -332,6 +332,7 @@ export function createController(host) {
         }
         try {
           let config = await host.loadConfig();
+          if (config.provider === "ollama" && config.localKind === "gpu" && !gpuBase(config)) throw new Error(NO_ACCESS_KEY);
           const synced = await syncServerModels(config);
           if (synced && !synced.entry) throw new Error("The GPU server offers no models right now. Add one on the server with: models add");
           if (synced) config = { ...synced.config, summaryAt: synced.entry.summaryAt };
@@ -499,10 +500,8 @@ export function createController(host) {
               config.models.ollama = "";
             }
             if (msg.host) config.ollamaHost = cleanSetting("ollamaHost", String(msg.host).trim());
-            if (typeof msg.baseUrl === "string") {
-              const setting = config.localKind === "gpu" ? "gpuBaseUrl" : "serverBaseUrl";
-              config[setting] = cleanSetting(setting, msg.baseUrl.trim());
-            }
+            if (typeof msg.baseUrl === "string" && config.localKind === "server") config.serverBaseUrl = cleanSetting("serverBaseUrl", msg.baseUrl.trim());
+            if (config.localKind === "gpu" && !gpuBase(config)) return result(false, "Paste the access key you were given (it starts with bzk1_).");
             if (config.localKind === "server" && !config.serverBaseUrl) return result(false, "Enter the server's base URL first.");
           }
         } catch (err) {
@@ -569,11 +568,14 @@ export function createController(host) {
         }
         // The GPU server offers its catalog only (syncServerModels also tells every UI).
         if (msg.provider === "ollama" && config.localKind === "gpu") {
+          // Nobody sees the server's models without a key it accepts.
+          if (!gpuBase(config)) return reply({ type: "models", provider: msg.provider, models: [], error: "Paste your access key to see the server's models." });
           try {
             reply({ type: "models", provider: msg.provider, models: (await serverCatalog(config)).models.map((m) => m.id) });
             await syncServerModels(config);
           } catch (err) {
-            reply({ type: "models", provider: msg.provider, models: [], error: `Could not load the GPU server's models: ${err.message}` });
+            const text = /failed to fetch|network|timed out|aborted/i.test(err.message) ? "Could not reach the GPU server. Check your internet connection." : err.message;
+            reply({ type: "models", provider: msg.provider, models: [], error: text });
           }
           return;
         }

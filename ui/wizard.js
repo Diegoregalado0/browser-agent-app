@@ -1,5 +1,5 @@
 import { OUTLOOK_LOGO } from "./mcp.js";
-import { GPU_BASE_URL, keyProblem } from "../src/config-core.js";
+import { keyProblem } from "../src/config-core.js";
 import { LOCAL_KINDS, OLLAMA_COMMAND, localEndpoint, localPatch } from "./models.js";
 
 // First-run setup, full screen over the app: welcome, provider, its key (for Local: the kind
@@ -179,16 +179,17 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
       });
     }
     if (id === "gpu") {
-      $("wizard-base").placeholder = GPU_BASE_URL;
-      $("wizard-base-note").textContent = "Reached through the tunnel on this computer. No key needed.";
+      $("wizard-key-label").textContent = "Access key";
+      $("wizard-key").placeholder = config.keyInfo?.gpu?.source === "saved" ? "Leave blank to keep the current key" : "bzk1_…";
+      $("wizard-key-note").textContent = "The key you were given. It stays on this device and goes only to the GPU server.";
       return show("key", {
         title: "Connect the Browsby GPU server",
         lead: "Models run on the GPU server, not on this computer.",
-        parts: ["wizard-base-field"],
+        parts: ["wizard-key-field"],
         centered: true,
         next: ["Connect", test],
         back,
-        focus: $("wizard-next"),
+        focus: $("wizard-key"),
       });
     }
     $("wizard-base").placeholder = "http://localhost:1234/v1";
@@ -235,10 +236,14 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
   }
 
   // The fields a Local test sends and, once it passes, saves (see localPatch).
-  const localFields = () => ({ kind, ...(kind !== "ollama" && { baseUrl: $("wizard-base").value.trim() }) });
+  const localFields = () => ({ kind, ...(kind === "server" && { baseUrl: $("wizard-base").value.trim() }) });
 
   function test() {
-    const key = kind === "server" || !kind ? $("wizard-key").value.trim() : "";
+    const key = kind === "server" || kind === "gpu" || !kind ? $("wizard-key").value.trim() : "";
+    if (kind === "gpu" && !key && config.keyInfo?.gpu?.source !== "saved") {
+      result("error", "Paste the access key you were given first.");
+      return $("wizard-key").focus();
+    }
     if (provider.id !== "ollama" && !key && config.keyInfo?.[provider.id]?.source === "none") {
       result("error", "Paste an API key first.");
       return $("wizard-key").focus();
@@ -330,11 +335,11 @@ export function createWizard({ $, el, icon, send, mcp, openModels }) {
         setButton("wizard-next", { ollama: "Test connection", gpu: "Connect" }[kind] ?? "Test and continue", test);
         if (!msg.ok) {
           result("error", msg.text);
-          return ({ ollama: $("wizard-next"), gpu: $("wizard-base"), server: $("wizard-base") }[kind] ?? $("wizard-key")).focus();
+          return ({ ollama: $("wizard-next"), gpu: $("wizard-key"), server: $("wizard-base") }[kind] ?? $("wizard-key")).focus();
         }
-        const key = !kind || kind === "server" ? $("wizard-key").value.trim() : "";
+        const key = !kind || kind === "server" || kind === "gpu" ? $("wizard-key").value.trim() : "";
         $("wizard-key").value = "";
-        const patch = { provider: msg.provider, ...(key && { keys: { [msg.provider]: key } }), ...(kind && localPatch(config, localFields())) };
+        const patch = { provider: msg.provider, ...(key && { keys: { [kind === "gpu" ? "gpu" : msg.provider]: key } }), ...(kind && localPatch(config, localFields())) };
         // The saved config arrives after this; finish() reads the chosen provider and model from it.
         config = { ...config, provider: msg.provider, models: { ...config.models, ...patch.models } };
         if (!mcp.outlookAvailable) return finish(patch);
