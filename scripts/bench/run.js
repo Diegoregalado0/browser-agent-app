@@ -88,7 +88,13 @@ if (args.resume) {
   runId = args.resume.replace(/\.json$/, "").split("/").pop();
   console.log(`Resuming ${args.resume}: ${resumedRows.length} row(s) already done.`);
 }
+// A task that failed only because the model server could not be reached (a tunnel blip)
+// says nothing about the agent: it is run again, and a resumed run does not count it as done.
+const INFRA_FAILURE = /Could not reach the server|harness error|unreachable|ECONNREFUSED|fetch failed/i;
+resumedRows = resumedRows.filter((r) => r.success || !INFRA_FAILURE.test(r.reason));
 const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
+// How long to wait for an unreachable model server (a tunnel reconnecting) before giving up.
+const REACH_WAIT_MS = 5 * 60000;
 
 // Build the config the panel will read for this run. Reuses the app's own merge/validation
 // instead of hand-rolling a config shape.
@@ -215,7 +221,11 @@ async function runBenchmark() {
       // every remaining task recording a fake 0-step, full-timeout "fail" against a model
       // that was never actually reached. Check first and abort the whole run instead -
       // what is already in rows/on disk stands, and nothing misleading gets added to it.
-      const reachable = await endpointReachable();
+      let reachable = await endpointReachable();
+      for (const until = Date.now() + REACH_WAIT_MS; !reachable.ok && Date.now() < until; reachable = await endpointReachable()) {
+        console.error(`  -> ${reachable.reason}; waiting for it to come back`);
+        await sleep(15000);
+      }
       if (!reachable.ok) {
         // The test browser and its profile are still closed and removed below.
         console.error(`\nAborting: ${reachable.reason}. Results so far are unaffected; rerun with --resume once it answers again.`);
@@ -229,6 +239,12 @@ async function runBenchmark() {
       try {
         openEventLog(task, run);
         result = await runTask(cdp, sessionId, task, Number(args.timeout));
+        if (!result.ok && INFRA_FAILURE.test(result.reason)) {
+          console.error(`  -> ${result.reason}: the model server was unreachable; running the task again`);
+          for (const until = Date.now() + REACH_WAIT_MS; !(await endpointReachable()).ok && Date.now() < until; ) await sleep(15000);
+          openEventLog(task, run);
+          result = await runTask(cdp, sessionId, task, Number(args.timeout));
+        }
       } catch (err) {
         // A dropped connection (tunnel or test browser blip) fails this task instead of
         // the whole run, so the remaining tasks and the report still happen; rerun the
