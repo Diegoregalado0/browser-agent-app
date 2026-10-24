@@ -22,7 +22,8 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 // Agent changes that can be switched on one at a time to measure them (docs/reliability):
 //   clickTarget  a click at a coordinate reports the element it landed on
 //   staleRefs    a ref that a re-render replaced is found again by its role and name
-export const EXPERIMENTS = ["clickTarget", "staleRefs"];
+//   verifyDone   a reply that ends a risky task is checked against the page once (see agent.js)
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone"];
 
 export const DEFAULTS = {
   provider: "openai",
