@@ -163,4 +163,31 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   const withoutState = (m) => ({ ...m, content: m.content.slice(0, -1) });
   assert.deepEqual(sent[2][2], withoutState(sent[1][2]), "the previous request's last message changed");
 }
+// settle: after an action the page is polled until it has been quiet and done loading;
+// off, the old fixed wait runs and the page is never polled for quiet.
+{
+  let quiet = 0;
+  let polls = 0;
+  const page = scriptedPage({
+    readPageScript: () => outline(""),
+    domQuietScript: () => (polls++, { quietMs: (quiet += 150), ready: "complete" }),
+  });
+  const browser = new Browser(page.transport);
+  await browser.run("browser", { action: "key", text: "Enter" });
+  assert.equal(polls, 0, "off: no quiet polling");
+  browser.experiments = { settle: true };
+  await browser.run("browser", { action: "key", text: "Enter" });
+  assert.equal(polls, 2, "on: polled until 300 ms of quiet");
+  // A fetch in flight holds it until it finishes, a request older than the limit does not.
+  polls = 0;
+  quiet = 1000;
+  browser.networkLogs.set("t1", { entries: [{ type: "Fetch", done: false, time: Date.now() }] });
+  setTimeout(() => (browser.networkLogs.get("t1").entries[0].done = true), 350);
+  await browser.run("browser", { action: "key", text: "Enter" });
+  assert.ok(polls >= 3, `a pending fetch held the settle (${polls} polls)`);
+  polls = 0;
+  browser.networkLogs.set("t1", { entries: [{ type: "Fetch", done: false, time: Date.now() - 60000 }] });
+  await browser.run("browser", { action: "key", text: "Enter" });
+  assert.equal(polls, 1, "a long-poll request did not hold the settle");
+}
 console.log("experiments checks passed");

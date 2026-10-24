@@ -304,6 +304,17 @@ export function describeTargetScript(ref, x, y) {
 // Reports what actually sits on top of a ref'd element's center, so a click that would
 // land on an overlay fails loudly instead of hitting the overlay. For an element in an
 // iframe only that iframe's document is tested.
+// How long the page's DOM has gone without changing, in ms, and its load state. The first
+// call installs the observer, so it reports 0 then.
+export function domQuietScript() {
+  const state = (window.__agentQuiet ||= (() => {
+    const st = { last: performance.now() };
+    new MutationObserver(() => (st.last = performance.now())).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    return st;
+  })());
+  return { quietMs: Math.round(performance.now() - state.last), ready: document.readyState };
+}
+
 export function hitTestScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el) return null;

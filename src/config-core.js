@@ -25,7 +25,9 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //   verifyDone   a reply that ends a risky task is checked against the page once (see agent.js)
 //   progress     each request ends with a task state the agent keeps (request, steps, page,
 //                recent outcomes, obstacles, notes), sent but never stored in the history
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress"];
+//   settle       after an action, wait until the page has stopped changing and loading data
+//                (up to 2 s) instead of a fixed 300 ms
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle"];
 
 export const DEFAULTS = {
   provider: "openai",

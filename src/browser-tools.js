@@ -7,6 +7,7 @@ import {
   targetFrameScript,
   hitTestScript,
   agentCursorScript,
+  domQuietScript,
 } from "./page-scripts.js";
 import { sleep } from "./limits.js";
 import { CANVAS_TOOL_DEF, MAX_PAGES, allowedPath, nextPath, responseProblem, runCanvas, stripGuard } from "./canvas.js";
@@ -34,6 +35,11 @@ export const BROWSER_CALL_TIMEOUT_MS = 30000;
 // its step with a tool error.
 export const ACTION_TIMEOUT_MS = 30000;
 const LOADING_TOOLS = new Set(["navigate", "tabs"]);
+// Condition-based settling after an action (the settle experiment): how long the page must
+// stay unchanged, the most it waits, and how old a pending request may be to still count.
+const SETTLE_QUIET_MS = 300;
+const SETTLE_MAX_MS = 2000;
+const SETTLE_REQUEST_MAX_MS = 5000;
 // How long a tab whose last call timed out gets to show it answers again before each call.
 const UNRESPONSIVE_CHECK_MS = 2000;
 // How much of a page dialog's message the model is told.
@@ -577,12 +583,36 @@ export class Browser {
   }
 
   async #settle() {
+    if (this.experiments.settle) return this.#settleQuiet();
     await sleep(300);
     try {
       if ((await this.evaluate("document.readyState")) !== "complete") await this.waitForLoad();
     } catch (err) {
       if (err.timedOut) throw err;
       await this.waitForLoad();
+    }
+  }
+
+  // Waits until the page has gone SETTLE_QUIET_MS without a DOM change or a fetch/XHR in
+  // flight, and has loaded, up to SETTLE_MAX_MS (a page that never stops animating). Requests
+  // older than SETTLE_REQUEST_MAX_MS (long polling, streams) do not hold it up.
+  async #settleQuiet() {
+    const start = Date.now();
+    await sleep(100);
+    while (Date.now() - start < SETTLE_MAX_MS) {
+      let page = null;
+      try {
+        page = await this.callInPage(domQuietScript);
+      } catch (err) {
+        // The execution context is replaced mid-navigation; keep waiting.
+        if (err.timedOut) throw err;
+      }
+      const now = Date.now();
+      const loading = (this.networkLogs.get(this.currentId)?.entries ?? []).some(
+        (e) => !e.done && (e.type === "XHR" || e.type === "Fetch") && now - e.time < SETTLE_REQUEST_MAX_MS,
+      );
+      if (page && page.ready === "complete" && page.quietMs >= SETTLE_QUIET_MS && !loading) return;
+      await sleep(100);
     }
   }
 
