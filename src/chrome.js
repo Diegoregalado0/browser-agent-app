@@ -8,8 +8,9 @@ import { CDP } from "./cdp.js";
 
 const KEEPER = join(dirname(fileURLToPath(import.meta.url)), "chrome-keeper.js");
 const ACTIVE_PORT_FILE = join(PROFILE_DIR, "DevToolsActivePort");
-// The built extension the test browser loads (npm run build:extension).
-export const EXTENSION_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "extension");
+// The built extension the test browser loads (npm run build:extension). BROWSBY_EXTENSION_DIR
+// points a run at its own copy (the benchmark does), so a rebuild cannot change it mid-run.
+export const EXTENSION_DIR = process.env.BROWSBY_EXTENSION_DIR || join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "extension");
 const PROJECT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST = join(EXTENSION_DIR, "manifest.json");
 // What the extension build reads.

@@ -23,7 +23,7 @@
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -173,7 +173,7 @@ async function runBenchmark() {
   process.env.BROWSER_AGENT_HOME = home;
   console.log(`Profile: ${home}`);
 
-  const { connectChrome, browserProcesses, buildOutdated } = await import("../../src/chrome.js");
+  const { connectChrome, browserProcesses, buildOutdated, EXTENSION_DIR } = await import("../../src/chrome.js");
   // The agent under test is the built extension, not src/: a build older than the sources
   // (a checkout moved to another commit) would benchmark the code it was built from.
   if (buildOutdated()) {
@@ -182,6 +182,11 @@ async function runBenchmark() {
     const res = spawnSync(process.execPath, [join(PROJECT_DIR, "scripts", "build-extension.js")], { stdio: "inherit" });
     if (res.status !== 0) throw new Error("Extension build failed.");
   }
+  // The test browser loads its own copy of the build: the Browsby app rebuilds dist/extension
+  // when it opens (as the internal edition), which would take the files from under this run.
+  const snapshot = join(home, "extension");
+  cpSync(EXTENSION_DIR, snapshot, { recursive: true });
+  process.env.BROWSBY_EXTENSION_DIR = snapshot;
 
   const { cdp, sessionId } = await startBrowser(connectChrome, browserProcesses);
 
