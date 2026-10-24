@@ -11,7 +11,7 @@ const MODEL_TEST_TIMEOUT_MS = 60000;
 // The longest task request accepted, from the prompt box or a remote client.
 const PROMPT_MAX_CHARS = 50000;
 // The events an internal build's debug log keeps (see logEvent), and how much of each text.
-const LOGGED_EVENTS = new Set(["request", "status", "notice", "error", "debug", "tool_call", "tool_result", "reply", "speed", "usage", "task_stats", "permission_request", "permission_closed", "notes", "session"]);
+const LOGGED_EVENTS = new Set(["request", "status", "notice", "error", "debug", "tool_call", "tool_result", "reply", "speed", "usage", "task_stats", "permission_request", "permission_closed", "notes", "session", "session_title"]);
 const LOG_TEXT_MAX_CHARS = 4000;
 const hasProvider = (id) => typeof id === "string" && Object.hasOwn(providers, id);
 
@@ -170,6 +170,19 @@ export function createController(host) {
     if (created) broadcast({ type: "session", id: session.id, title: session.title });
   }
 
+  // Once per saved conversation, after a task: the model's title replaces the first words of
+  // the request. The conversation may have been switched or cleared while it was written.
+  async function nameSession(config) {
+    const named = session;
+    if (!named || named.titled || unsaved()) return;
+    named.titled = true;
+    const title = await agent.title(config);
+    if (!title || session !== named) return;
+    named.title = title;
+    await persistSession();
+    broadcast({ type: "session_title", id: named.id, title });
+  }
+
   // Starts a new, empty conversation in every open UI.
   function clearConversation() {
     agent.reset();
@@ -262,6 +275,7 @@ export function createController(host) {
           if (config.provider === "ollama") checkBusy(config);
           await host.ensureBrowser(agent);
           await agent.run(text, config);
+          nameSession(config).catch((err) => console.error(`Could not name the session: ${err.message}`));
         } catch (err) {
           broadcast({ type: "error", text: err.message });
         }
@@ -343,7 +357,7 @@ export function createController(host) {
         const saved = await host.sessions.load(msg.id);
         agent.restore(saved);
         resolvePermission("deny");
-        session = { id: saved.id, title: saved.title, created: saved.created };
+        session = { id: saved.id, title: saved.title, created: saved.created, titled: Boolean(saved.titled) };
         conversationGhost = ghostActive();
         broadcast({ type: "conversation", id: saved.id, title: saved.title, transcript: transcriptOf(saved.messages), notes: agent.notes });
         return;

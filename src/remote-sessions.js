@@ -16,9 +16,9 @@ export function shareSession({ controller, id, channel = new BroadcastChannel(CH
   const client = {
     send(event) {
       if (event.type === "status") state.running = event.running;
-      if (event.type === "session" || event.type === "conversation") state.title = event.title ?? null;
+      if (event.type === "session" || event.type === "conversation" || event.type === "session_title") state.title = event.title ?? null;
       if (event.type === "cleared") state.title = null;
-      if (["status", "session", "conversation", "cleared"].includes(event.type)) announce();
+      if (["status", "session", "session_title", "conversation", "cleared"].includes(event.type)) announce();
       // Notices can quote a page (injection warnings), so only stop notices go out, and a
       // step goes out as its tool and action name only, without its input.
       if (!FORWARDED.has(event.type) || (event.type === "notice" && !/^Stopped/.test(event.text))) return;

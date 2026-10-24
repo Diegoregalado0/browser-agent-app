@@ -479,6 +479,11 @@ const handlers = {
     currentSession = msg.id;
     if (!$("menu").hidden) send({ type: "list_sessions" });
   },
+  session_title(msg) {
+    const named = sessions.find((s) => s.id === msg.id);
+    if (named) named.title = msg.title;
+    renderHistory();
+  },
   sessions(msg) {
     sessions = msg.sessions;
     currentSession = msg.current;

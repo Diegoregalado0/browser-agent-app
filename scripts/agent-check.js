@@ -1800,7 +1800,7 @@ assert.ok(savedSessions.length && pwEvents.some((e) => e.type === "tool_call"));
 assert.ok(!JSON.stringify([savedSessions, pwEvents]).includes("hunter2"), "password text reached the panel or the saved session");
 assert.ok(pwEvents.some((e) => e.type === "tool_call" && e.input.text === "[hidden]"));
 assert.ok(JSON.stringify(savedSessions.at(-1)).includes('"value":"ada"'), "text outside password fields was hidden");
-assert.ok(JSON.stringify(requests.at(-1)).includes("hunter2-secret"), "the provider lost the model's own call");
+assert.ok(requests.some((r) => JSON.stringify(r).includes("hunter2-secret")), "the provider lost the model's own call");
 
 // The frame script finds the frame at a point or with focus, through same-origin frames.
 const { targetFrameScript } = await import("../src/page-scripts.js");
@@ -2340,6 +2340,7 @@ console.log("safety shortcut checks passed");
     step({ type: "tool_call", id: "s1", name: "browser", input: { action: "screenshot" } }),
     step({ type: "tool_call", id: "n2", name: "notes", input: { action: "read" } }),
     step({ type: "text", text: "The lamp is 42 EUR." }),
+    step({ type: "text", text: "Lamp price" }),
   ];
   await ui({ type: "run", text: "Price of the lamp?" });
   assert.ok(events.some((e) => e.type === "notes" && e.text === "Lamp: 42 EUR"), "the UI was not sent the new notes");
@@ -2361,6 +2362,62 @@ console.log("safety shortcut checks passed");
   assert.equal(notesController.agent.notes, "Lamp: 42 EUR");
   providers.openai.turn = turnBefore;
   console.log("notes and debug log checks passed");
+}
+
+// After a conversation's first task the model titles it once, without thinking; the title
+// replaces the request's first words in the saved session and every UI.
+{
+  const { cleanTitle } = await import("../src/agent.js");
+  assert.equal(cleanTitle('<think>hmm</think>\n**Title:** "Compare lamp prices."'), "Compare lamp prices");
+  assert.equal(cleanTitle("<think>never closed"), null);
+  assert.equal(cleanTitle("x".repeat(90)).length, 60);
+
+  const turnBefore = providers.openai.turn;
+  const calls = [];
+  let queue = [];
+  providers.openai.turn = async (opts) => (calls.push(opts), queue.shift());
+  const say = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+  let stored = null;
+  const titleController = createController({
+    loadConfig: async () => structuredClone({ ...loopConfig, thinking: true }),
+    saveConfig: async () => {},
+    loadUsage: async () => null,
+    saveUsage: async () => {},
+    sessions: { save: async (s) => (stored = structuredClone(s)), list: async () => [], load: async () => structuredClone(stored), remove: async () => {}, removeAll: async () => {} },
+    ensureBrowser: async (a) => {
+      a.browser ??= agent.browser;
+    },
+  });
+  const events = [];
+  const ui = titleController.connect({ send: (e) => events.push(e) });
+  const settled = async () => {
+    for (let i = 0; i < 50 && calls.length > 0 && queue.length > 0; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
+  };
+  queue = [say("The lamp is 42 EUR."), say("Lamp price check")];
+  await ui({ type: "run", text: "What does the lamp cost on shop.test?" });
+  await settled();
+  assert.equal(calls.length, 2, "no title was asked for");
+  assert.match(calls[1].messages[0].content[0].text, /What does the lamp cost[\s\S]*42 EUR/, "the title request lacks the request or reply");
+  assert.equal(calls[1].config.thinking, false, "the title request thought");
+  assert.equal(stored.title, "Lamp price check", "the title was not saved");
+  assert.equal(stored.titled, true);
+  assert.ok(events.some((e) => e.type === "session_title" && e.title === "Lamp price check"), "the UI was not sent the title");
+
+  queue = [say("The chair is 80 EUR.")];
+  await ui({ type: "run", text: "And the chair?" });
+  await settled();
+  assert.equal(calls.length, 3, "the conversation was titled twice");
+  assert.equal(stored.title, "Lamp price check");
+
+  // A failed title keeps the request's first words.
+  await ui({ type: "reset" });
+  queue = [say("Done."), { content: [{ type: "tool_call", id: "t", name: "notes", input: { action: "read" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }];
+  await ui({ type: "run", text: "Open the news" });
+  await settled();
+  assert.equal(stored.title, "Open the news", "a title that called a tool was used");
+  providers.openai.turn = turnBefore;
+  console.log("conversation title checks passed");
 }
 
 // Once requests are large, a new task first gets a summary of all but the last two tasks;
