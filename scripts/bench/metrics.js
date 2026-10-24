@@ -11,6 +11,10 @@ const sha = (text) => createHash("sha256").update(text).digest("hex").slice(0, 1
 const callKey = (e) => `${e.name} ${JSON.stringify(e.input ?? {})}`;
 const textOf = (content) => (Array.isArray(content) ? content.filter((b) => b.type === "text").map((b) => b.text).join("\n") : String(content ?? ""));
 
+// A final reply that hands the task back to the user (asks them to do or decide something)
+// rather than claiming it is done.
+const ASKS_USER = /\?\s*$|\b(could you|can you|would you|please (do|sign|log|enter|provide|confirm|check)|let me know|do you want|shall i|should i)\b/im;
+
 // Tools that act on the page or browser, as opposed to the agent's notepad and questions.
 const AGENT_TOOLS = new Set(["notes", "ask_user"]);
 
@@ -40,8 +44,11 @@ export function taskMetrics(events, outcome) {
   const loopStop = notices.some((t) => /seems stuck/.test(t));
   const prompts = {};
   for (const e of events.filter((e) => e.type === "permission_request")) prompts[e.kind || "other"] = (prompts[e.kind || "other"] || 0) + 1;
-  const asked = events.some((e) => e.type === "question");
-  const replied = events.some((e) => e.type === "reply");
+  const replies = events.filter((e) => e.type === "reply");
+  const lastReply = replies.at(-1)?.text ?? "";
+  // A question asked with ask_user, or in the final reply's own words.
+  const asked = events.some((e) => e.type === "question") || ASKS_USER.test(lastReply);
+  const replied = replies.length > 0;
   const stoppedOther = loopStop || notices.some((t) => /^Stopped/.test(t));
   const speed = events.filter((e) => e.type === "speed");
   const stats = [...events].reverse().find((e) => e.type === "task_stats")?.text || "";

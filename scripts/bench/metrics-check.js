@@ -48,6 +48,7 @@ assert.equal(passed.premature, false);
 // Not premature when the task timed out, the agent asked a question, or the loop guard stopped it.
 assert.equal(taskMetrics(premature, { ok: false, timedOut: true }).premature, false);
 assert.equal(taskMetrics([...premature, { type: "question", text: "Which one?" }], { ok: false }).premature, false);
+assert.equal(taskMetrics([...premature, { type: "reply", text: "I can't type passwords. Could you sign in yourself?" }], { ok: false }).premature, false, "a reply that hands the task back is not premature");
 const stopped = taskMetrics([...premature, { type: "notice", text: "Stopped because the agent seems stuck: same error." }], { ok: false });
 assert.equal(stopped.loopStop, true);
 assert.equal(stopped.premature, false);
