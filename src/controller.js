@@ -11,7 +11,7 @@ const MODEL_TEST_TIMEOUT_MS = 60000;
 // The longest task request accepted, from the prompt box or a remote client.
 const PROMPT_MAX_CHARS = 50000;
 // The events an internal build's debug log keeps (see logEvent), and how much of each text.
-const LOGGED_EVENTS = new Set(["request", "status", "notice", "error", "debug", "tool_call", "tool_result", "reply", "speed", "usage", "task_stats", "permission_request", "permission_closed", "notes", "session", "session_title"]);
+const LOGGED_EVENTS = new Set(["request", "status", "notice", "error", "debug", "tool_call", "tool_result", "reply", "speed", "usage", "task_stats", "permission_request", "permission_closed", "notes", "question", "session", "session_title"]);
 const LOG_TEXT_MAX_CHARS = 4000;
 const hasProvider = (id) => typeof id === "string" && Object.hasOwn(providers, id);
 

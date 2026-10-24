@@ -13,6 +13,9 @@ const log = $("log");
 const host = globalThis.agentHost;
 const GHOST_TEXT = "This session will not be saved";
 const GHOST_LOCKED_TEXT = "Ghost mode is on during incognito mode";
+// A question mark that ends a sentence (not one in a link's query): text that asks the user
+// something, which must stay in the chat rather than fold away as the narration of a step.
+const ASKS_USER = /\?(?=[)\]*_"'”’]*(\s|$))/;
 document.documentElement.classList.add("in-sidebar");
 // Set by the side panel in an incognito window, where Ghost mode is locked on.
 const incognito = host.incognito;
@@ -535,9 +538,15 @@ const handlers = {
     activity.set("Thinking…");
   },
   tool_call(msg) {
+    // The question shows as the agent's reply (see question), and the text before it stays.
+    if (msg.name === "ask_user") {
+      textNode = null;
+      return;
+    }
     // Text written before an action in the same turn narrates the step; it belongs with the
-    // actions, collapsed, not in the chat.
-    if (textNode) {
+    // actions, collapsed, not in the chat. Text that asks the user something stays, for a
+    // model that asks in text instead of with ask_user.
+    if (textNode && !ASKS_USER.test(textNode.raw)) {
       const note = el("details", "thinking");
       note.append(el("summary", null, "Note"), el("div", null, textNode.raw));
       textNode.remove();
@@ -568,6 +577,12 @@ const handlers = {
     }
     renderBlocks(row.body, msg.content);
     activity.set(randomVerb());
+  },
+  // The model asked the user something with ask_user; the task has ended.
+  question(msg) {
+    closeGroup();
+    textNode = null;
+    append(el("div", "msg assistant")).innerHTML = renderMarkdown(msg.text);
   },
   notice(msg) {
     closeGroup();

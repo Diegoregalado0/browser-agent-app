@@ -2370,7 +2370,9 @@ console.log("safety shortcut checks passed");
   const { cleanTitle } = await import("../src/agent.js");
   assert.equal(cleanTitle('<think>hmm</think>\n**Title:** "Compare lamp prices."'), "Compare lamp prices");
   assert.equal(cleanTitle("<think>never closed"), null);
-  assert.equal(cleanTitle("x".repeat(90)).length, 60);
+  assert.equal(cleanTitle("x".repeat(90)).length, 40);
+  assert.equal(cleanTitle("Tips for Keeping Basil Alive"), "Tips for Keeping", "a long title was not cut to three words");
+  assert.equal(cleanTitle("Lamp price for the shop"), "Lamp price", "a cut title ends on a small word");
 
   const turnBefore = providers.openai.turn;
   const calls = [];
@@ -2418,6 +2420,52 @@ console.log("safety shortcut checks passed");
   assert.equal(stored.title, "Open the news", "a title that called a tool was used");
   providers.openai.turn = turnBefore;
   console.log("conversation title checks passed");
+}
+
+// ask_user ends the task: the question is the agent's reply in the history and the UI, a call
+// beside it does not run, and the next request follows it like any reply. A call without a
+// question is answered with an error and the task goes on.
+{
+  const turnBefore = providers.openai.turn;
+  const sent = [];
+  let queue = [];
+  providers.openai.turn = async ({ messages, tools }) => (sent.push({ messages: structuredClone(messages), tools }), queue.shift());
+  const step = (...content) => ({ content, raw: null, stop: content.some((b) => b.type === "tool_call") ? "tool_use" : "end", usage: { input: 1, output: 1 } });
+  const events = [];
+  const asker = new Agent({ emit: (e) => events.push(e), askPermission: async () => "allow" });
+  let ran = 0;
+  asker.browser = { ...agent.browser, run: async () => (ran++, "done") };
+  queue = [
+    step({ type: "tool_call", id: "q0", name: "ask_user", input: { question: " " } }),
+    step(
+      { type: "text", text: "A few questions first." },
+      { type: "tool_call", id: "q1", name: "ask_user", input: { question: "What is your **role**?" } },
+      { type: "tool_call", id: "s1", name: "browser", input: { action: "screenshot" } },
+    ),
+  ];
+  await asker.run("Network with PMs for me", loopConfig);
+  assert.ok(sent[0].tools.some((t) => t.name === "ask_user"), "the model was not offered ask_user");
+  assert.match(sent[1].messages.at(-1).content[0].content[0].text, /question is required/, "an empty question was not refused");
+  assert.equal(sent.length, 2, "the task went on after the question");
+  assert.equal(ran, 0, "a call beside the question ran");
+  assert.equal(queue.length, 0);
+  const [call, results, question] = asker.messages.slice(-3);
+  assert.equal(call.role, "assistant");
+  assert.deepEqual(results.content.map((r) => [r.id, Boolean(r.isError)]), [["q1", false], ["s1", true]], "every call did not get a result");
+  assert.deepEqual(question, { role: "assistant", content: [{ type: "text", text: "What is your **role**?" }], raw: null });
+  assert.ok(events.some((e) => e.type === "question" && e.text === "What is your **role**?"), "the UI was not sent the question");
+  assert.ok(!events.some((e) => e.type === "tool_call" && e.name === "ask_user"), "the question showed as an action");
+  assert.deepEqual(events.filter((e) => e.type === "status").map((e) => e.running), [true, false]);
+
+  queue = [step({ type: "text", text: "Thanks, noted." })];
+  await asker.run("I am a new grad", loopConfig);
+  const roles = sent.at(-1).messages.slice(-4).map((m) => m.role);
+  assert.deepEqual(roles, ["assistant", "user", "assistant", "user"], "the answer did not follow the question as a request");
+  assert.match(sent.at(-1).messages.at(-1).content[0].text, /^I am a new grad/);
+  const shown = transcriptOf(asker.shownMessages()).filter((i) => i.type === "assistant").map((i) => i.text);
+  assert.ok(shown.includes("What is your **role**?"), "a reopened conversation does not show the question");
+  providers.openai.turn = turnBefore;
+  console.log("ask_user checks passed");
 }
 
 // Once requests are large, a new task first gets a summary of all but the last two tasks;
