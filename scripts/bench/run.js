@@ -16,6 +16,8 @@
 // Flags: --provider --model --runs N --tasks a,b --host --base-url --timeout(ms)
 //        --port (DevTools port; 0 = any free one) --thinking on|off --taskfile <file>
 //        --canvas-tool on|off (the read-only canvas tool; default on)
+//        --split dev|heldout (tasks whose split matches; held-out tasks are kept for judging
+//        changes, not for tuning them)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
@@ -29,6 +31,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { mergeConfig } from "../../src/config-core.js";
+import { runMeta, summarize, taskMetrics } from "./metrics.js";
 
 const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
@@ -67,7 +70,7 @@ const canvasToolArg = args["canvas-tool"] || "on";
 if (!["on", "off"].includes(canvasToolArg)) throw new Error('--canvas-tool must be "on" or "off".');
 
 const taskIds = args.tasks ? args.tasks.split(",").map((s) => s.trim()) : TASKS.map((t) => t.id);
-const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id));
+const selectedTasks = TASKS.filter((t) => taskIds.includes(t.id) && (!args.split || t.split === args.split));
 if (!selectedTasks.length) {
   console.error(`No matching tasks for --tasks ${args.tasks}. Known ids: ${TASKS.map((t) => t.id).join(", ")}`);
   process.exit(1);
@@ -192,6 +195,14 @@ async function runBenchmark() {
 
   const config = buildConfig();
   await setConfig(cdp, sessionId, config);
+  const meta = await runMeta({
+    projectDir: PROJECT_DIR,
+    taskFile: taskFilePath,
+    model: args.model,
+    baseUrl: ["local", "openai"].includes(args.provider) ? args.baseUrl || args["base-url"] || "http://localhost:8081/v1" : null,
+    config,
+  });
+  console.log(`Commit ${meta.commit}${meta.dirty ? " (uncommitted changes)" : ""}, prompt ${meta.promptHash}, tools ${meta.toolSchemaHash}, tasks ${meta.taskFile} ${meta.taskFileHash}`);
 
   const rows = [...resumedRows];
   runs: for (let run = 1; run <= Number(args.runs); run++) {
@@ -223,13 +234,15 @@ async function runBenchmark() {
         // the whole run, so the remaining tasks and the report still happen; rerun the
         // task flagged this way once the underlying disruption is resolved.
         console.error(`  -> harness error: ${err.message}`);
-        result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0 };
+        result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0, metrics: null };
       }
       const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
       rows.push({
         run,
         task: task.id,
         name: task.name,
+        category: task.category ?? null,
+        split: task.split ?? null,
         success: result.ok,
         reason: result.reason,
         steps: result.steps,
@@ -237,11 +250,16 @@ async function runBenchmark() {
         tokensOut: result.tokensOut,
         wallMs: result.wallMs,
         costUsd: cost,
+        metrics: result.metrics,
       });
-      console.log(`  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s`);
+      const m = result.metrics;
+      console.log(
+        `  -> ${result.ok ? "PASS" : "FAIL"} (${result.reason}) steps=${result.steps} tokens=${result.tokensIn + result.tokensOut} time=${(result.wallMs / 1000).toFixed(1)}s` +
+          (m ? ` calls=${m.modelCalls} errors=${m.toolErrors} repeats=${m.repeatedCalls} loop=${m.loopNotes}${m.loopStop ? "+stop" : ""}${m.premature ? " PREMATURE" : ""}` : ""),
+      );
       // Written after every task, not just at the end, so a crash mid-run only costs the
       // task in flight: --resume picks up from here, same two files, overwritten in place.
-      writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, canvasTool: canvasToolArg, rows });
+      writeReport({ runId, provider: args.provider, model: args.model, thinking: thinkingArg, canvasTool: canvasToolArg, rows, meta });
     }
   }
 
@@ -499,6 +517,8 @@ async function waitServerIdle() {
 const STOP_GRACE_MS = 120000;
 
 async function runTask(cdp, sessionId, task, timeoutMs) {
+  // A fixture task resets its site's state, so each run starts from the same page state.
+  await task.setup?.();
   await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId);
   await drainEvents(cdp, sessionId);
 
@@ -623,6 +643,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   return {
     ok: verdict.ok,
     reason: verdict.reason,
+    metrics: taskMetrics(events, { ok: verdict.ok, timedOut, agentError }),
     steps,
     tokensIn: usage?.usage?.input ?? 0,
     tokensOut: usage?.usage?.output ?? 0,
@@ -634,11 +655,13 @@ function fmtCost(c) {
   return c == null ? "-" : `~$${c.amount.toFixed(4)} (estimate)`;
 }
 
-function writeReport({ runId, provider, model, thinking, canvasTool, rows }) {
+function writeReport({ runId, provider, model, thinking, canvasTool, rows, meta }) {
   mkdirSync(RESULTS_DIR, { recursive: true });
   const jsonPath = join(RESULTS_DIR, `${runId}.json`);
   const mdPath = join(RESULTS_DIR, `${runId}.md`);
-  writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, canvasTool, rows }, null, 2));
+  const groups = (key) => Object.fromEntries([...new Set(rows.map((r) => r[key]).filter(Boolean))].map((g) => [g, summarize(rows.filter((r) => r[key] === g))]));
+  const summary = { all: summarize(rows), bySplit: groups("split"), byCategory: groups("category") };
+  writeFileSync(jsonPath, JSON.stringify({ provider, model, thinking, canvasTool, meta, summary, rows }, null, 2));
 
   const header = `| Task | Run | Success | Steps | Tokens in | Tokens out | Wall time (s) | Cost | Notes |\n|---|---|---|---|---|---|---|---|---|`;
   const lines = rows.map(
@@ -663,10 +686,23 @@ function writeReport({ runId, provider, model, thinking, canvasTool, rows }) {
   const totalCost = rows.reduce((s, r) => s + (r.costUsd?.amount || 0), 0);
   const anyEstimate = rows.some((r) => r.costUsd);
 
+  const pct = (x) => (x == null ? "-" : `${Math.round(x * 100)}%`);
+  const sumLine = (label, s) =>
+    `| ${label} | ${s.passed}/${s.runs} (${pct(s.successRate)}) | ${s.avgWallS.toFixed(0)} | ${s.avgModelCalls.toFixed(1)} | ${s.avgActions.toFixed(1)} | ${Math.round(s.avgTokens)} | ${s.toolErrors} | ${pct(s.recoveryRate)} | ${s.repeatedCalls} | ${s.loopNotes}/${s.loopStops} | ${s.premature} | ${s.prompts} | ${s.timeouts} |`;
   const md = [
     `# Browsby benchmark: ${provider} / ${model}`,
     "",
     `Thinking: ${thinking}. Canvas tool: ${canvasTool}.`,
+    meta ? `Commit ${meta.commit}${meta.dirty ? " (dirty)" : ""} on ${meta.branch}; prompt ${meta.promptHash}; tools ${meta.toolSchemaHash}; tasks ${meta.taskFile} ${meta.taskFileHash}${meta.benchVersion ? ` (v${meta.benchVersion})` : ""}.` : "",
+    meta?.serverArgs ? `Server: ${meta.serverArgs.filter((a) => /^--(ctx-size|temp|top-p|top-k|min-p|presence-penalty|repeat-penalty|n-cpu-moe|cache-type-k|model)$/.test(a) || !a.startsWith("--")).join(" ").slice(0, 600)}` : "",
+    "",
+    "## Summary",
+    "",
+    "| Group | Passed | Avg s | Model calls | Actions | Tokens | Tool errors | Recovered | Repeats | Loop notes/stops | Premature | Prompts | Timeouts |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    sumLine("All", summary.all),
+    ...Object.entries(summary.bySplit).map(([g, s]) => sumLine(`split: ${g}`, s)),
+    ...Object.entries(summary.byCategory).map(([g, s]) => sumLine(g, s)),
     "",
     `Overall success rate: ${overallRate.toFixed(0)}% (${rows.filter((r) => r.success).length}/${rows.length}). Total cost: ${anyEstimate ? `~$${totalCost.toFixed(4)} (estimate)` : "-"}.`,
     "",
