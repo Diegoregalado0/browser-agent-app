@@ -491,7 +491,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       state.error ??
       (!state.models.length && !state.loadedFor ? ""
       : !state.models.length ? "Loading models…"
-      : server && state.models.length === 1 ? `The GPU server offers one model, so Browsby always uses ${nameOf(p, state.models[0])}.`
+      : server && state.models.length === 1 ? ""
       : server && !query ? `${state.models.length} models on the GPU server.`
       : shown.length > LIST_MAX ? `Showing ${LIST_MAX} of ${shown.length}. Search to narrow it down.`
       : `${shown.length} model${shown.length === 1 ? "" : "s"}${query ? (shown.length === 1 ? " matches" : " match") : ""}.`);
