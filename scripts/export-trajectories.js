@@ -98,7 +98,16 @@ function pyJson(v) {
 // The tool instructions the Qwen3.5/3.6 template puts in the system turn. To be checked
 // byte for byte against the GGUF's own template before training on the text form.
 const TOOL_INSTRUCTIONS =
-  "If you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like a helpful assistant\n</IMPORTANT>";
+  "If you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>";
+
+// A tool-call argument as the template writes it: objects and arrays as JSON, anything else
+// through Jinja's string filter, which writes Python's True, False and None.
+function pyValue(value) {
+  if (value !== null && typeof value === "object") return pyJson(value);
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (value === null || value === undefined) return "None";
+  return String(value);
+}
 
 // An example as ChatML in the Qwen3.6 template's conventions, thinking off: tools as JSON in
 // the system turn, tool calls as <tool_call><function=..><parameter=..> blocks (non-string
@@ -124,7 +133,7 @@ export function renderChatML({ messages, tools }) {
       (m.tool_calls ?? []).forEach((call, n) => {
         const fn = call.function ?? call;
         out += `${n ? "\n" : content ? "\n\n" : ""}<tool_call>\n<function=${fn.name}>\n`;
-        for (const [name, value] of Object.entries(fn.arguments ?? {})) out += `<parameter=${name}>\n${typeof value === "string" ? value : pyJson(value)}\n</parameter>\n`;
+        for (const [name, value] of Object.entries(fn.arguments ?? {})) out += `<parameter=${name}>\n${pyValue(value)}\n</parameter>\n`;
         out += "</function>\n</tool_call>";
       });
       out += "<|im_end|>\n";

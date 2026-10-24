@@ -312,3 +312,23 @@ const shot = { type: "image", mediaType: "image/png", data: Buffer.from("png byt
 }
 
 console.log("trajectory checks passed");
+
+// The ChatML renderer against the model's real template: the golden file is llama.cpp's
+// /apply-template output (router build 0c1e57098, GGUF template of Qwen3.6-35B-A3B) for the
+// conversation below. Ours closes the final reply with <|im_end|>, which training needs (the
+// model must learn to stop) and /apply-template leaves open.
+{
+  const { renderChatML } = await import("./export-trajectories.js");
+  const { readFileSync } = await import("node:fs");
+  const golden = readFileSync(new URL("./fixtures/qwen36-chat-template-golden.txt", import.meta.url), "utf8");
+  const tools = [{ type: "function", function: { name: "navigate", description: "Load a URL.", parameters: { type: "object", properties: { url: { type: "string" }, new_tab: { type: "boolean" } }, required: ["url"] } } }];
+  const messages = [
+    { role: "system", content: "You are a browser agent." },
+    { role: "user", content: "Open example.com" },
+    { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "navigate", arguments: { url: "https://example.com", new_tab: false } } }] },
+    { role: "tool", tool_call_id: "c1", content: "Loaded: Example | https://example.com" },
+    { role: "assistant", content: "Opened example.com." },
+  ];
+  assert.equal(renderChatML({ messages, tools }), `${golden}<|im_end|>\n`, "the ChatML rendering differs from the model's own template");
+  console.log("chat template golden check passed");
+}
