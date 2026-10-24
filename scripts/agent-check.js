@@ -1800,7 +1800,7 @@ assert.ok(savedSessions.length && pwEvents.some((e) => e.type === "tool_call"));
 assert.ok(!JSON.stringify([savedSessions, pwEvents]).includes("hunter2"), "password text reached the panel or the saved session");
 assert.ok(pwEvents.some((e) => e.type === "tool_call" && e.input.text === "[hidden]"));
 assert.ok(JSON.stringify(savedSessions.at(-1)).includes('"value":"ada"'), "text outside password fields was hidden");
-assert.ok(requests.some((r) => JSON.stringify(r).includes("hunter2-secret")), "the provider lost the model's own call");
+assert.ok(JSON.stringify(requests.at(-1)).includes("hunter2-secret"), "the provider lost the model's own call");
 
 // The frame script finds the frame at a point or with focus, through same-origin frames.
 const { targetFrameScript } = await import("../src/page-scripts.js");
@@ -2340,7 +2340,6 @@ console.log("safety shortcut checks passed");
     step({ type: "tool_call", id: "s1", name: "browser", input: { action: "screenshot" } }),
     step({ type: "tool_call", id: "n2", name: "notes", input: { action: "read" } }),
     step({ type: "text", text: "The lamp is 42 EUR." }),
-    step({ type: "text", text: "Lamp price" }),
   ];
   await ui({ type: "run", text: "Price of the lamp?" });
   assert.ok(events.some((e) => e.type === "notes" && e.text === "Lamp: 42 EUR"), "the UI was not sent the new notes");
@@ -2364,24 +2363,38 @@ console.log("safety shortcut checks passed");
   console.log("notes and debug log checks passed");
 }
 
-// After a conversation's first task the model titles it once, without thinking; the title
-// replaces the request's first words in the saved session and every UI.
+// The model titles a conversation from its first request alone, on the small model, while the
+// first task runs. A failed attempt keeps the request's opening words and is tried again with
+// the next request, up to TITLE_ATTEMPTS; a model title is kept for good.
 {
-  const { cleanTitle } = await import("../src/agent.js");
+  const { cleanTitle } = await import("../src/title.js");
+  const { titleFor } = await import("../src/session-format.js");
   assert.equal(cleanTitle('<think>hmm</think>\n**Title:** "Compare lamp prices."'), "Compare lamp prices");
   assert.equal(cleanTitle("<think>never closed"), null);
-  assert.equal(cleanTitle("x".repeat(90)).length, 40);
-  assert.equal(cleanTitle("Tips for Keeping Basil Alive"), "Tips for Keeping", "a long title was not cut to three words");
+  assert.equal(cleanTitle(undefined), null);
   assert.equal(cleanTitle("Lamp price for the shop"), "Lamp price", "a cut title ends on a small word");
+  assert.equal(cleanTitle("x".repeat(90)).length, 40);
+  const first = (text) => titleFor([{ role: "user", content: [{ type: "text", text: `${text}\n\n<current_tab id="t" />` }] }]);
+  assert.equal(first("Hey, can you please find me a lamp"), "Find me a lamp", "the placeholder kept the filler");
+  assert.equal(first("Please"), "Please");
+  assert.ok(first("word ".repeat(40)).length <= 61);
 
   const turnBefore = providers.openai.turn;
-  const calls = [];
+  const classifyBefore = providers.openai.classify;
   let queue = [];
-  providers.openai.turn = async (opts) => (calls.push(opts), queue.shift());
+  providers.openai.turn = async () => queue.shift();
+  const titleCalls = [];
+  let titles = [];
+  providers.openai.classify = async (args) => {
+    titleCalls.push(args);
+    const next = titles.shift();
+    if (next instanceof Error) throw next;
+    return { title: next };
+  };
   const say = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
   let stored = null;
   const titleController = createController({
-    loadConfig: async () => structuredClone({ ...loopConfig, thinking: true }),
+    loadConfig: async () => structuredClone({ ...loopConfig, guardModels: { openai: "small-model" } }),
     saveConfig: async () => {},
     loadUsage: async () => null,
     saveUsage: async () => {},
@@ -2390,35 +2403,63 @@ console.log("safety shortcut checks passed");
       a.browser ??= agent.browser;
     },
   });
+  titleController.agent.guard.checkTimeoutMs = 2000;
   const events = [];
   const ui = titleController.connect({ send: (e) => events.push(e) });
-  const settled = async () => {
-    for (let i = 0; i < 50 && calls.length > 0 && queue.length > 0; i++) await new Promise((r) => setTimeout(r, 10));
-    await new Promise((r) => setTimeout(r, 10));
-  };
-  queue = [say("The lamp is 42 EUR."), say("Lamp price check")];
-  await ui({ type: "run", text: "What does the lamp cost on shop.test?" });
-  await settled();
-  assert.equal(calls.length, 2, "no title was asked for");
-  assert.match(calls[1].messages[0].content[0].text, /What does the lamp cost[\s\S]*42 EUR/, "the title request lacks the request or reply");
-  assert.equal(calls[1].config.thinking, false, "the title request thought");
-  assert.equal(stored.title, "Lamp price check", "the title was not saved");
-  assert.equal(stored.titled, true);
-  assert.ok(events.some((e) => e.type === "session_title" && e.title === "Lamp price check"), "the UI was not sent the title");
+  const settled = () => new Promise((r) => setTimeout(r, 30));
 
+  // Failures (bad JSON, then an error) leave the placeholder and count as attempts.
+  titles = [undefined];
+  queue = [say("The lamp is 42 EUR.")];
+  await ui({ type: "run", text: "Hey, what does the lamp cost on shop.test?" });
+  await settled();
+  assert.equal(titleCalls.length, 1, "no title was asked for");
+  assert.equal(titleCalls[0].model, "small-model", "the title did not use the small model");
+  assert.equal(titleCalls[0].text, "<request>\nHey, what does the lamp cost on shop.test?\n</request>", "the title saw more than the request");
+  assert.equal(stored.title, "What does the lamp cost on shop.test?");
+  assert.deepEqual([stored.titleSource, stored.titleAttempts], ["request", 1]);
+
+  titles = [Object.assign(new Error("bad key"), { status: 401 })];
   queue = [say("The chair is 80 EUR.")];
   await ui({ type: "run", text: "And the chair?" });
   await settled();
-  assert.equal(calls.length, 3, "the conversation was titled twice");
-  assert.equal(stored.title, "Lamp price check");
+  assert.match(titleCalls.at(-1).text, /Hey, what does the lamp cost/, "a later attempt did not title from the first request");
+  assert.deepEqual([stored.titleSource, stored.titleAttempts], ["request", 2]);
 
-  // A failed title keeps the request's first words.
+  titles = ["Lamp price check"];
+  queue = [say("The desk is 120 EUR.")];
+  await ui({ type: "run", text: "And the desk?" });
+  await settled();
+  assert.deepEqual([stored.title, stored.titleSource, stored.titleAttempts], ["Lamp price check", "model", 3]);
+  assert.ok(events.some((e) => e.type === "session_title" && e.title === "Lamp price check"), "the UI was not sent the title");
+  const calls = titleCalls.length;
+  queue = [say("Done.")];
+  await ui({ type: "run", text: "Thanks" });
+  await settled();
+  assert.equal(titleCalls.length, calls, "a named conversation was named again");
+
+  // A title that comes before the first save names the session as it is created.
   await ui({ type: "reset" });
-  queue = [say("Done."), { content: [{ type: "tool_call", id: "t", name: "notes", input: { action: "read" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }];
+  titles = ["News headlines"];
+  providers.openai.turn = async () => (await settled(), say("Here are the headlines."));
+  events.length = 0;
   await ui({ type: "run", text: "Open the news" });
   await settled();
-  assert.equal(stored.title, "Open the news", "a title that called a tool was used");
+  assert.deepEqual([stored.title, stored.titleSource], ["News headlines", "model"]);
+  assert.equal(events.find((e) => e.type === "session")?.title, "News headlines", "the new session was not announced with its title");
+
+  // A title that comes after the user moved on is dropped.
+  let release;
+  providers.openai.classify = () => new Promise((r) => (release = () => r({ title: "Stale title" })));
+  providers.openai.turn = async () => say("Done.");
+  await ui({ type: "reset" });
+  await ui({ type: "run", text: "First thing" });
+  await ui({ type: "reset" });
+  release();
+  await settled();
+  assert.equal(stored.title, "First thing", "a title went to the conversation after a reset");
   providers.openai.turn = turnBefore;
+  providers.openai.classify = classifyBefore;
   console.log("conversation title checks passed");
 }
 

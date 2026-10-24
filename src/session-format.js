@@ -36,10 +36,21 @@ export function withoutImages(blocks) {
   });
 }
 
+// Openers that say nothing about the request ("Hey, can you please ...").
+const TITLE_FILLER = /^(?:(?:hey|hi|hello|ok(?:ay)?|so|please|pls|can you|could you|would you|will you|i want you to|i need you to|i'?d like you to|help me to)\b[\s,!.:-]*)+/i;
+const PLACEHOLDER_MAX_CHARS = 60;
+
+// The title a conversation has until the model names it (see title.js): the first request
+// without its opening filler, cut at a word.
 export function titleFor(messages) {
-  const first = messages.find((m) => m.role === "user")?.content.find((b) => b.type === "text")?.text || "Untitled";
-  const text = first.replace(CURRENT_TAB_TAG, "").replace(/\s+/g, " ").trim();
-  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  const first = messages.find((m) => m.role === "user")?.content.find((b) => b.type === "text")?.text || "";
+  const whole = first.replace(CURRENT_TAB_TAG, "").replace(/\s+/g, " ").trim();
+  const rest = whole.replace(TITLE_FILLER, "");
+  const text = rest ? rest[0].toUpperCase() + rest.slice(1) : whole;
+  if (!text) return "Untitled";
+  if (text.length <= PLACEHOLDER_MAX_CHARS) return text;
+  const cut = text.slice(0, PLACEHOLDER_MAX_CHARS);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : cut.length).replace(/[\s,;:.-]+$/, "")}…`;
 }
 
 export function metaOf(session) {
@@ -53,11 +64,12 @@ export function metaOf(session) {
 }
 
 // A stored copy of a conversation: history without screenshots, plus metadata.
-export function sessionRecord({ id, title, created, titled = false, messages, usage, notes = "" }) {
+export function sessionRecord({ id, title, created, titleSource = "request", titleAttempts = 0, messages, usage, notes = "" }) {
   return {
     id,
     title,
-    titled,
+    titleSource,
+    titleAttempts,
     created,
     notes,
     updated: new Date().toISOString(),

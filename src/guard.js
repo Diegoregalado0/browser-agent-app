@@ -170,6 +170,12 @@ export class Guard {
     }
   }
 
+  // A one-shot JSON call on the checks' small model, with their retries and fallback to the
+  // main model, for other short jobs (conversation titles, see title.js).
+  smallCall(config, args, signal) {
+    return this.#classify(config, args, signal);
+  }
+
   // Returns { verdict: "allow" | "ask" | "block", reason }.
   // declined: actions the user declined during this task, as "name {input}".
   async checkAction({ config, userRequests, page, name, input, target, declined = [], signal }) {

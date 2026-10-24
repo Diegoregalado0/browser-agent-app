@@ -3,6 +3,7 @@ import { providers } from "./providers/index.js";
 import { busyStatus } from "./providers/local.js";
 import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
+import { TITLE_ATTEMPTS } from "./title.js";
 import { today } from "./limits.js";
 
 const CONNECTION_TEST_TIMEOUT_MS = 15000;
@@ -98,6 +99,11 @@ export function createController(host) {
   // The saved conversation the agent's history belongs to: { id, title, created }, or
   // null until the first request of a new conversation is saved.
   let session = null;
+  // Counts conversation switches (new, opened), so a title written for one is never given to
+  // another. early: titling done before the conversation's first save, for the session.
+  let conversationEpoch = 0;
+  let early = { title: null, attempts: 0 };
+  let naming = false;
   // Ghost mode saves nothing: no session. It is on when the
   // user switches it on, and forced on while any incognito client is connected. A
   // conversation that starts as a ghost stays one until a new conversation begins, so it
@@ -160,7 +166,10 @@ export function createController(host) {
   async function persistSession() {
     if (unsaved() || agent.messages.length === 0) return;
     const created = !session;
-    if (created) session = { id: newSessionId(), title: titleFor(agent.messages), created: new Date().toISOString() };
+    if (created) {
+      session = { id: newSessionId(), title: early.title ?? titleFor(agent.messages), titleSource: early.title ? "model" : "request", titleAttempts: early.attempts, created: new Date().toISOString() };
+      early = { title: null, attempts: 0 };
+    }
     try {
       await host.sessions.save({ ...session, messages: agent.shownMessages(), usage: agent.usage, notes: agent.notes });
     } catch (err) {
@@ -170,17 +179,32 @@ export function createController(host) {
     if (created) broadcast({ type: "session", id: session.id, title: session.title });
   }
 
-  // Once per saved conversation, after a task: the model's title replaces the first words of
-  // the request. The conversation may have been switched or cleared while it was written.
-  async function nameSession(config) {
-    const named = session;
-    if (!named || named.titled || unsaved()) return;
-    named.titled = true;
-    const title = await agent.title(config);
-    if (!title || session !== named) return;
-    named.title = title;
+  // Names a conversation the model has not named yet, alongside the task that request
+  // starts. A failed attempt leaves the request's opening words and is tried again with the
+  // next request, up to TITLE_ATTEMPTS. A title the user set is never replaced.
+  async function nameSession(config, request) {
+    if (naming || unsaved()) return;
+    const { titleSource, titleAttempts } = session ?? { titleSource: early.title ? "model" : "request", titleAttempts: early.attempts };
+    if (titleSource !== "request" || titleAttempts >= TITLE_ATTEMPTS) return;
+    naming = true;
+    const epoch = conversationEpoch;
+    let title = null;
+    try {
+      title = await agent.title(config, request);
+    } catch (err) {
+      if (config.debugMode) broadcast({ type: "debug", text: `Could not title the conversation: ${err.message}` });
+    } finally {
+      naming = false;
+    }
+    if (epoch !== conversationEpoch || unsaved()) return;
+    if (!session) {
+      early = { title, attempts: early.attempts + 1 };
+      return;
+    }
+    session.titleAttempts += 1;
+    if (title) Object.assign(session, { title, titleSource: "model" });
     await persistSession();
-    broadcast({ type: "session_title", id: named.id, title });
+    if (title) broadcast({ type: "session_title", id: session.id, title });
   }
 
   // Starts a new, empty conversation in every open UI.
@@ -188,6 +212,8 @@ export function createController(host) {
     agent.reset();
     resolvePermission("deny");
     session = null;
+    conversationEpoch++;
+    early = { title: null, attempts: 0 };
     pendingLog = [];
     conversationGhost = ghostActive();
     broadcast({ type: "cleared" });
@@ -273,9 +299,9 @@ export function createController(host) {
           const config = await host.loadConfig();
           logEvent({ type: "request", text, provider: config.provider, model: config.models[config.provider], localKind: config.localKind, permissionMode: config.permissionMode });
           if (config.provider === "ollama") checkBusy(config);
+          nameSession(config, text);
           await host.ensureBrowser(agent);
           await agent.run(text, config);
-          nameSession(config).catch((err) => console.error(`Could not name the session: ${err.message}`));
         } catch (err) {
           broadcast({ type: "error", text: err.message });
         }
@@ -357,7 +383,16 @@ export function createController(host) {
         const saved = await host.sessions.load(msg.id);
         agent.restore(saved);
         resolvePermission("deny");
-        session = { id: saved.id, title: saved.title, created: saved.created, titled: Boolean(saved.titled) };
+        // Sessions saved before titleSource have titled (true once the model named them).
+        session = {
+          id: saved.id,
+          title: saved.title,
+          titleSource: saved.titleSource ?? (saved.titled ? "model" : "request"),
+          titleAttempts: saved.titleAttempts ?? 0,
+          created: saved.created,
+        };
+        conversationEpoch++;
+        early = { title: null, attempts: 0 };
         conversationGhost = ghostActive();
         broadcast({ type: "conversation", id: saved.id, title: saved.title, transcript: transcriptOf(saved.messages), notes: agent.notes });
         return;
