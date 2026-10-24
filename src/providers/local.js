@@ -3,6 +3,8 @@
 // path, which carries the thinking setting as chat_template_kwargs (Ollama: think). See
 // LOCAL_KINDS.
 
+import { gpuHeaders } from "../config-core.js";
+
 // The OpenAI SDK requires a key; a server that needs none gets this stand-in.
 const NO_KEY = "local";
 
@@ -19,6 +21,8 @@ const warm = new Set();
 // to an OpenAI-compatible server.
 let last = null;
 let server = false;
+// Whether it went to the Browsby GPU server, whose gate and Cloudflare refuse access keys.
+let gpu = false;
 
 // The server a request goes to, for the warm set.
 const serverOf = (config) => (config.localKind === "ollama" ? config.ollamaHost : config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl);
@@ -34,6 +38,7 @@ async function adapter(opts, method) {
   };
   opts = { ...opts, config: { ...opts.config, thinking: opts.config.localThinking, ...limits } };
   server = opts.config.localKind !== "ollama";
+  gpu = opts.config.localKind === "gpu";
   if (!server) {
     last = await import("./ollama.js");
     return [last, opts, key];
@@ -41,7 +46,7 @@ async function adapter(opts, method) {
   last = await import("./openai.js");
   const { config } = opts;
   const openaiBaseUrl = serverOf(config);
-  const openaiHeaders = config.clientId ? { "X-Browsby-Client": config.clientId } : undefined;
+  const openaiHeaders = gpuHeaders(config, openaiBaseUrl);
   return [last, { ...opts, apiKey: opts.apiKey || NO_KEY, config: { ...config, openaiBaseUrl, openaiHeaders } }, key];
 }
 
@@ -52,7 +57,7 @@ export async function busyStatus(config) {
   if (config.localKind === "ollama" || !config.clientId) return null;
   try {
     const origin = new URL(config.localKind === "gpu" ? config.gpuBaseUrl : config.serverBaseUrl).origin;
-    const res = await fetch(`${origin}/browsby/busy`, { headers: { "X-Browsby-Client": config.clientId }, signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${origin}/browsby/busy`, { headers: gpuHeaders(config, origin), signal: AbortSignal.timeout(5000) });
     const body = res.ok ? await res.json() : null;
     if (typeof body?.busy !== "boolean") return null;
     return { busy: body.busy, running: Boolean(body.running), freeInSeconds: Number(body.freeInSeconds) || 0 };
@@ -69,9 +74,8 @@ export async function busyStatus(config) {
 const CATALOG_ID = /^[\w.:/@+-]{1,200}$/;
 export async function serverCatalog(config) {
   const origin = new URL(config.gpuBaseUrl).origin;
-  const headers = config.clientId ? { "X-Browsby-Client": config.clientId } : undefined;
-  const res = await fetch(`${origin}/browsby/models`, { headers, signal: AbortSignal.timeout(5000) });
-  if (!res.ok) throw new Error(`The GPU server sent no model list (${res.status}).`);
+  const res = await fetch(`${origin}/browsby/models`, { headers: gpuHeaders(config, origin), signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error(accessProblem(res.status) ?? `The GPU server sent no model list (${res.status}).`);
   const body = await res.json();
   if (!Array.isArray(body?.models)) throw new Error("The GPU server sent no model list.");
   const text = (value, max) => (typeof value === "string" ? value.trim().slice(0, max) : "");
@@ -120,7 +124,16 @@ export async function canChat(opts) {
   return module.canChat?.(mapped) ?? null;
 }
 
+// What a refusal from a shared GPU server (its gate or Cloudflare Access) means, or null.
+function accessProblem(status) {
+  if (status === 401) return "The GPU server did not accept the access key. Check it in Settings > Models, or ask the server's owner for a new one.";
+  if (status === 403) return "The GPU server's front door (Cloudflare) refused the access key. It may have expired or been revoked; ask the server's owner for a new one.";
+  return null;
+}
+
 export function describeError(err) {
+  if (gpu && (err?.status === 401 || err?.status === 403)) return accessProblem(err.status);
+  if (gpu && err?.status === 429 && err?.error?.message) return `The GPU server's limit for this access key: ${err.error.message}. Try again later.`;
   const text = last?.describeError(err) ?? null;
   return server && text ? text.replace("the OpenAI endpoint", "the server").replace(/^OpenAI/, "The server") : text;
 }

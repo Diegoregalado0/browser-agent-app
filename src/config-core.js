@@ -23,7 +23,8 @@ export const GPU_BASE_URL = "http://localhost:8081/v1";
 export const DEFAULTS = {
   provider: "openai",
   models: { anthropic: "claude-opus-5", openai: "gpt-6-sol", gemini: "", mistral: "mistral-medium-latest", ollama: "" },
-  keys: { anthropic: "", openai: "", gemini: "", mistral: "", ollama: "" },
+  // gpu: an access key for a shared Browsby GPU server (accessKeyParts).
+  keys: { anthropic: "", openai: "", gemini: "", mistral: "", ollama: "", gpu: "" },
   // The models picked so far, newest first, for quick switching: [{ provider, model }],
   // with kind (LOCAL_KINDS) on Local entries, so picking one also picks its connection.
   modelHistory: [],
@@ -92,6 +93,35 @@ export function resetConfig(config) {
 export function apiKeyFor(config, provider) {
   if (provider === "ollama" && config.localKind !== "server") return "";
   return config.keys[provider] || "";
+}
+
+// A Browsby GPU server access key (made on the server with `keys create`): bzk1_ and base64url
+// JSON with the server address and three credentials. Returns { origin, headers }, or null for
+// anything else. The headers go only to that origin (gpuHeaders).
+const ACCESS_KEY = /^bzk1_[A-Za-z0-9_-]{40,1200}$/;
+export function accessKeyParts(key) {
+  if (!ACCESS_KEY.test(key ?? "")) return null;
+  try {
+    const raw = atob(key.slice(5).replace(/-/g, "+").replace(/_/g, "/"));
+    const { u, cid, cs, k } = JSON.parse(raw);
+    const url = new URL(u);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    if (![cid, cs, k].every((v) => typeof v === "string" && /^[\x21-\x7e]{8,200}$/.test(v)) || !/^bgk_[a-z2-7]{8}_[A-Za-z0-9_-]{43}$/.test(k)) return null;
+    return { origin: url.origin, headers: { "CF-Access-Client-Id": cid, "CF-Access-Client-Secret": cs, "X-Browsby-Key": k } };
+  } catch {
+    return null;
+  }
+}
+
+// Headers for a request from the Local provider to url: the install id, and on the Browsby GPU
+// server the saved access key's credentials when url is that key's server.
+export function gpuHeaders(config, url) {
+  const headers = config.clientId ? { "X-Browsby-Client": config.clientId } : {};
+  const access = config.localKind === "gpu" ? accessKeyParts(config.keys?.gpu) : null;
+  try {
+    if (access && new URL(url).origin === access.origin) Object.assign(headers, access.headers);
+  } catch {}
+  return headers;
 }
 
 // Why a pasted API key or bot token (already trimmed) cannot be one, or null when it can.

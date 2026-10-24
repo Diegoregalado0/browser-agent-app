@@ -1522,7 +1522,24 @@ await localTurn(gpuConfig);
 await localTurn({ ...gpuConfig, thinking: false, localThinking: true });
 await localModule.classify({ apiKey: "", model: "Browsby-Steady", config: { ...gpuConfig, localThinking: true }, system: "s", text: "t", schema: {} }).catch(() => {});
 assert.deepEqual(localRequests.map((r) => r.body.chat_template_kwargs), [{ enable_thinking: false }, { enable_thinking: true }, { enable_thinking: false }], "Local thinking control did not reach the server");
-assert.match(localModule.describeError(new OpenAI.AuthenticationError(401, {}, "no", new Headers())), /^The server rejected/);
+// On the Browsby GPU server a 401 is the gate refusing the access key.
+assert.match(localModule.describeError(new OpenAI.AuthenticationError(401, {}, "no", new Headers())), /did not accept the access key/);
+// Access keys: only a well-formed bzk1_ key for an https server counts, and its credentials go
+// only to that server's origin.
+{
+  const { accessKeyParts, gpuHeaders } = await import("../src/config-core.js");
+  const pack = (o) => "bzk1_" + Buffer.from(JSON.stringify(o)).toString("base64url");
+  const gate = "bgk_abcdefgh_" + "S".repeat(43);
+  const good = pack({ u: "https://gpu.browsby.download", cid: "client-id.access", cs: "client-secret-value", k: gate });
+  assert.deepEqual(accessKeyParts(good), { origin: "https://gpu.browsby.download", headers: { "CF-Access-Client-Id": "client-id.access", "CF-Access-Client-Secret": "client-secret-value", "X-Browsby-Key": gate } });
+  for (const bad of [pack({ u: "http://gpu.browsby.download", cid: "client-id.access", cs: "client-secret-value", k: gate }), pack({ u: "https://x.test", cid: "client-id.access", cs: "client-secret-value", k: "bgk_short" }), "bzk1_notbase64!!", "sk-123", "", undefined]) {
+    assert.equal(accessKeyParts(bad), null, `accepted ${bad}`);
+  }
+  const withKey = { localKind: "gpu", clientId: "id-1", keys: { gpu: good } };
+  assert.equal(gpuHeaders(withKey, "https://gpu.browsby.download/v1")["X-Browsby-Key"], gate);
+  assert.deepEqual(gpuHeaders(withKey, "http://localhost:8081/v1"), { "X-Browsby-Client": "id-1" }, "the key went to another server");
+  assert.deepEqual(gpuHeaders({ ...withKey, localKind: "server" }, "https://gpu.browsby.download/v1"), { "X-Browsby-Client": "id-1" }, "the key went out on another kind of connection");
+}
 localServer.close();
 // Local needs no key to run a task.
 {

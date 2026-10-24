@@ -1,4 +1,4 @@
-import { keyProblem, MODEL_HISTORY_MAX, GPU_BASE_URL } from "../src/config-core.js";
+import { accessKeyParts, keyProblem, MODEL_HISTORY_MAX, GPU_BASE_URL } from "../src/config-core.js";
 
 // Models, in two places. The quick selector: the current model as a button at the top
 // left, opening a menu of the models already used, to switch between them. The main menu
@@ -322,6 +322,13 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         return input;
       };
       const gpuBase = url("gpu-base", GPU_BASE_URL);
+      // A shared GPU server's access key; pasting one fills in its address.
+      const gpuKey = Object.assign(el("input"), { type: "password", spellcheck: false, autocomplete: "off" });
+      gpuKey.dataset.role = "gpu-key";
+      gpuKey.addEventListener("input", () => {
+        const access = accessKeyParts(gpuKey.value.trim());
+        if (access) gpuBase.value = `${access.origin}/v1`;
+      });
       const serverBase = url("server-base", "http://localhost:1234/v1");
       const host = Object.assign(el("input"), { spellcheck: false, placeholder: "http://127.0.0.1:11434" });
       host.dataset.role = "host";
@@ -333,7 +340,11 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         send({ type: "save_config", patch: { ollamaContext: value } });
       });
       body.append(
-        group("gpu", inputField(card, "Base URL", gpuBase, "The GPU server through its tunnel on this computer. No key needed.")),
+        group(
+          "gpu",
+          inputField(card, "Base URL", gpuBase, "The GPU server through its tunnel on this computer, or its address from an access key."),
+          inputField(card, "Access key (optional)", gpuKey, "For a shared Browsby GPU server: paste the bzk1_ key its owner gave you. It goes only to that server."),
+        ),
         group(
           "server",
           inputField(card, "Base URL", serverBase, "For llama.cpp, LM Studio, vLLM and similar."),
@@ -349,7 +360,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       const link = Object.assign(el("a", null, new URL(p.keyPage).hostname), { href: p.keyPage, target: "_blank", rel: "noopener noreferrer" });
       body.append(inputField(card, "API key", key, ["Get one at ", link, `. It stays on this device and goes only to ${p.name}.`]));
     }
-    for (const field of body.querySelectorAll('[data-role="key"], [data-role="host"], [data-role$="base"]')) {
+    for (const field of body.querySelectorAll('[data-role="key"], [data-role="gpu-key"], [data-role="host"], [data-role$="base"]')) {
       field.addEventListener("keydown", (e) => e.key === "Enter" && !testing.has(p.id) && test(card));
     }
 
@@ -362,9 +373,9 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     remove.type = "button";
     remove.onclick = () =>
       confirmInline(remove, {
-        question: `Remove the saved ${p.local ? "server" : p.name} key?`,
+        question: `Remove the saved ${p.local ? (config.localKind === "gpu" ? "access" : "server") : p.name} key?`,
         confirmLabel: "Remove",
-        onConfirm: () => send({ type: "save_config", patch: { keys: { [p.id]: "__clear__" } } }),
+        onConfirm: () => send({ type: "save_config", patch: { keys: { [p.local && config.localKind === "gpu" ? "gpu" : p.id]: "__clear__" } } }),
       });
     actions.append(remove);
     const result = Object.assign(el("p", "pc-result"), { id: `${p.id}-result` });
@@ -442,7 +453,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     const p = card.dataset.provider;
     const local = providerById(p).local;
     const kind = local && field(card, "kind").value;
-    const key = local && kind !== "server" ? "" : field(card, "key").value.trim();
+    const key = kind === "gpu" ? field(card, "gpu-key").value.trim() : local && kind !== "server" ? "" : field(card, "key").value.trim();
     if (!local && !key && !usable(config, p)) {
       result(card, "error", "Paste an API key first.");
       return field(card, "key").focus();
@@ -527,6 +538,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       card.querySelector(".pc-test").textContent = !local && ok && !key.value ? "Test connection" : "Test and save";
       card.querySelector(".pc-remove").hidden = !ok;
       if (local) {
+        const access = config.keyInfo?.gpu;
+        field(card, "gpu-key").placeholder = access?.source === "saved" ? `Paste a new key to replace ${access.mask}` : "None";
         for (const [role, value] of [["kind", config.localKind], ["gpu-base", config.gpuBaseUrl], ["server-base", config.serverBaseUrl], ["host", config.ollamaHost], ["context", config.ollamaContext]]) {
           const input = field(card, role);
           if (document.activeElement !== input) input.value = value ?? "";
@@ -581,11 +594,13 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
           return (providerById(msg.provider).local ? firstField(card) : field(card, "key")).focus();
         }
         const local = providerById(msg.provider).local;
-        const key = local && field(card, "kind").value !== "server" ? "" : field(card, "key").value.trim();
+        const kind = local && field(card, "kind").value;
+        const key = kind === "gpu" ? field(card, "gpu-key").value.trim() : local && kind !== "server" ? "" : field(card, "key").value.trim();
         const patch = {};
-        if (key) patch.keys = { [msg.provider]: key };
+        if (key) patch.keys = { [kind === "gpu" ? "gpu" : msg.provider]: key };
         if (local) Object.assign(patch, localPatch(config, localFields(card)));
         field(card, "key").value = "";
+        if (local) field(card, "gpu-key").value = "";
         result(card, "ok", Object.keys(patch).length ? `${msg.text} Saved.` : msg.text);
         if (Object.keys(patch).length) send({ type: "save_config", patch });
         else {

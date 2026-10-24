@@ -30,6 +30,8 @@ const PROVIDER_HOSTS = [
   "https://api.mistral.ai/*",
   "http://127.0.0.1/*",
   "http://localhost/*",
+  // The shared Browsby GPU server, reached with an access key through Cloudflare.
+  "https://*.browsby.download/*",
 ];
 
 // Microsoft sign-in and Graph, for Outlook.

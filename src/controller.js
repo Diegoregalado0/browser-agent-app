@@ -1,7 +1,7 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
 import { busyStatus, pickServerModel, serverCatalog } from "./providers/local.js";
-import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
+import { DEFAULTS, accessKeyParts, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { TITLE_ATTEMPTS } from "./title.js";
 import { today } from "./limits.js";
@@ -486,7 +486,11 @@ export function createController(host) {
             const key = String(msg.key).trim();
             const problem = keyProblem(key);
             if (problem) return result(false, problem);
-            config.keys[msg.provider] = key;
+            // On the Browsby GPU server the key is an access key, kept apart from a server's API key.
+            if (msg.provider === "ollama" && msg.kind === "gpu") {
+              if (!accessKeyParts(key)) return result(false, "That is not a Browsby access key. Copy the whole key, starting with bzk1_, and paste it again.");
+              config.keys.gpu = key;
+            } else config.keys[msg.provider] = key;
           }
           if (msg.provider === "ollama") {
             // The model chosen for another kind of connection is not tested on this one.
