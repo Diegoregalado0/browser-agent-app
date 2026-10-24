@@ -1,7 +1,8 @@
 # Fine-tuning readiness: Zigger 1.0 (Qwen3.6-35B-A3B)
 
-Status 2026-10-24. Research only: nothing was trained, downloaded or installed. Sources were
-read by a research subagent and spot-checked; items marked UNVERIFIED could not be confirmed.
+Status 2026-10-24. Research, plus a free compatibility pilot on ai-linux (approved: Python
+packages and a pinned llama.cpp source checkout in ~/finetune-pilot). No real weights were
+trained. Items marked UNVERIFIED could not be confirmed.
 
 ## The model
 
@@ -62,13 +63,28 @@ PEFT's `all-linear` misses shared-expert modules on Transformers 5 MoE models (f
   H200 $3.59-5.29/h. Lambda H100 $4.29/h. No published throughput for this model: a full run's
   time and cost are unknown until the pilot measures them.
 
-## Proposed pilot (needs approval for downloads, installs and paid GPU time)
+## Pilot step 1 results (2026-10-24, scripts/finetune/)
 
-1. Compatibility, free: on ai-linux, build a tiny random qwen3_5_moe model with the same module
-   names (4 layers, 8 experts, hidden 256), train a PEFT LoRA on the recommended targets for a
-   few steps, convert with convert_lora_to_gguf.py at commit 0c1e57098, and compare llama.cpp
-   logits with the adapter against the HF model with the adapter. Needs: llama.cpp source and
-   Python packages (torch CPU, transformers, peft, gguf). Cost $0.
+Environment: ~/finetune-pilot venv (torch 2.14.1 CPU, transformers 5.20.2, peft 0.21.2, gguf
+from llama.cpp at 0c1e57098, the router's build); setup.sh records it.
+- lora_pilot.py: a tiny random qwen3_5_moe from the real config (4 layers: 3 linear attention,
+  1 full attention; 8 experts; one MTP layer declared as in the real config), PEFT LoRA r=8 on
+  12 module kinds (q/k/v/o_proj, in_proj_qkv/z/a/b, out_proj, shared gate/up/down_proj), 8
+  training steps (loss 12.5 -> 9.1).
+  - convert_hf_to_gguf.py (--no-mtp) and convert_lora_to_gguf.py: both succeed (62 adapter
+    tensors). The converter asserts when a config declares no MTP layers; the real config
+    declares one, so this does not affect the real model.
+  - llama-server (the router's binary, CPU) with --lora and per-request scale: next-token top-5
+    identical to Hugging Face with the adapter off and on; log-probabilities within 0.0003.
+    The PEFT -> GGUF LoRA path for qwen35moe works.
+- lora_quant.py: the same adapter on Q4_K_M and Q3_K_M quantizations of the tiny base loads and
+  changes the output, switchable per request. Fidelity cannot be judged on a random tiny model
+  (quantization noise dominates: the Q3 base's own top-5 shares 2/5 with f32). Whether a bf16
+  adapter keeps its effect on the real 3-bit base must be measured on the real model (step 2).
+
+## Proposed next pilot steps (paid GPU time needs approval)
+
+1. Done (above).
 2. Real-model smoke, about $5-15: rent one 96 GB GPU for 1-2 h; 30-50 steps (rank 16, 8k) on
    50 tool-call examples from the trajectory exporter; convert; load with --lora on the
    UD-Q3_K_XL base in a separate preset (not the public Zigger preset).
@@ -83,5 +99,4 @@ PEFT's `all-linear` misses shared-expert modules on Transformers 5 MoE models (f
 No-go for training now; go for the free compatibility pilot once approved. Blockers, in order:
 (1) no dataset (the trajectory recorder and exporter come first, and data rights for any
 teacher model must be checked); (2) a measured baseline that the cheaper agent changes have
-already moved; (3) the PEFT-to-GGUF path for qwen35moe has no confirmed public success: the
-free pilot settles it; (4) a bf16 adapter on a Q3 base is untested (the only precedent is Q4).
+already moved; (3) settled: the PEFT-to-GGUF path works (pilot step 1); (4) a bf16 adapter on a Q3 base is untested (the only precedent is Q4).
