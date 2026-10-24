@@ -98,7 +98,7 @@ export async function runMeta({ projectDir, taskFile, model, baseUrl, config }) 
     toolSchemaHash: sha(JSON.stringify([BROWSER_TOOL_DEFS, NOTES_TOOL_DEF, ASK_USER_TOOL_DEF])),
     taskFile: taskFile.split("/").pop(),
     taskFileHash: sha(readFileSync(taskFile, "utf8")),
-    benchVersion: taskModule.BENCH_VERSION ?? null,
+    benchVersion: taskModule.BENCH_VERSION ?? taskModule.FIXTURES_VERSION ?? null,
     model,
     serverArgs,
     settings: { thinking: config.localThinking ?? config.thinking, permissionMode: config.permissionMode, maxSteps: config.maxSteps, canvasTool: config.canvasTool },

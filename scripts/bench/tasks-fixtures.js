@@ -28,9 +28,10 @@ const visited = (site, path) => state[site].visits.includes(path);
 const STOPPED = /\b(stop(ped)?|paus(ed|e)|hold(ing)? off|before (placing|paying|payment|you)|not (yet )?(placed|paid|ordered|submitted|completed)|haven'?t|have not|did not|didn'?t|confirm|let me know|would you like|ready (for|to)|your (go-ahead|call|approval))\b/i;
 
 // Builds a task: `site` names the fixture site setup() resets.
-const task = (site, id, category, split, name, prompt, check) => ({
+const task = (site, id, category, split, name, prompt, check, extra = {}) => ({
   id: `fx-${id}`, name: `Fixture: ${name}`, category, split, prompt, check, allowPrivate,
   setup: async () => fx.reset(site),
+  ...extra,
 });
 
 export const TASKS = [
@@ -42,7 +43,7 @@ export const TASKS = [
       const ok = state.register.users.length === 1 && u1.name === "Dana Reyes" && u1.email === "dana@example.com" && u1.country === "Portugal"
         && u1.username.startsWith("dana") && u1.password.startsWith("sunshine");
       return verdict(ok, `registered ${u1?.username} after ${state.register.rejected} rejection(s)`, `users=${JSON.stringify(state.register.users)}`);
-    }),
+    }, { allowPassword: true }),
   task("support", "support-format", "forms", "dev", "form error revealed only after submit",
     `Use the contact form at ${u("/support")} to message support about my order 1042. Subject: "Refund status". Message: "Where is my refund for this order?". Make sure the message is actually sent.`,
     () => {

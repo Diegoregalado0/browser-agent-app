@@ -409,11 +409,15 @@ async function drainEvents(cdp, sessionId) {
 }
 
 // Fixed permission policy: allow ordinary prompts (safety checks, new-site approvals),
-// deny anything that reaches a sensitive site or a password field. Never answered as
+// deny anything that reaches a sensitive site or a password field (except a fixture task's
+// made-up credentials, see allowPassword). Never answered as
 // "always", since that would persist a setting change between tasks/runs. A task's
 // allowPrivate hosts (a local stand-in site) get their local-address prompt answered once.
 function decisionFor(kind, text = "", task = {}) {
   if (kind === "sensitive" && (task.allowPrivate ?? []).some((host) => text.startsWith(`${host} is on this computer or your local network`))) return "once";
+  // A local fixture whose task is to type made-up credentials (allowPassword) gets its
+  // password prompt answered once; on real sites such prompts are always denied.
+  if (kind === "password" && task.allowPassword) return "once";
   return ["sensitive", "password"].includes(kind) ? "deny" : "once";
 }
 
