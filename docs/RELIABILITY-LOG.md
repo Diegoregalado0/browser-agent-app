@@ -58,3 +58,32 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   than 5 s in flight, page loaded, up to 2 s; replaces the fixed 300 ms + load-state wait.
 - marks: screenshots carry a numbered label per control in view (label N = ref_N), drawn just
   before the capture in a click-through layer and removed after.
+
+### Baselines (main code, no experiments, 15-minute task limit)
+- Stress suite (12 live-site tasks): 9/12; 1 premature completion (quotes-pagination: 28 calls,
+  13 repeated identical calls, reported done without the author); checkout-stop-two-products
+  timed out (34 calls, 13 repeats); herokuapp-form-retry cannot pass under the runner's
+  password-deny policy (the agent rightly asked the user, in text rather than with ask_user).
+- Premature rule refined: a final reply that hands the task back to the user ("Could you sign in
+  yourself?") is not a premature claim. rescore.js recomputes saved runs with the current rule.
+
+### Phase 6: LoRA compatibility pilot (approved installs, ~/finetune-pilot on ai-linux)
+- The PEFT -> GGUF adapter path works for qwen35moe at the router's llama.cpp commit: a tiny
+  random model from the real config, LoRA on attention / linear attention / shared expert,
+  converted with convert_lora_to_gguf.py, gives llama-server outputs identical to Hugging Face
+  with the adapter off and on (top-5 equal, log-probs within 0.0003). The adapter also loads and
+  acts on Q4_K_M / Q3_K_M bases (fidelity needs the real model). Details: docs/FINETUNE-READINESS.md.
+
+### Phase 4: trajectory recorder (branch reliability-trajectory, subagent; reviewed)
+- Recorder, redaction, IndexedDB and JSONL sinks, bench --record, exporter, checks. Off by
+  default, internal builds only, never in Ghost mode; hooks in agent.js are optional no-ops.
+- Review: redaction checked on my own strings (password, URL token and fragment, email, phone,
+  card, OTP, bearer token, IBAN hidden; order numbers, prices, counts kept). The exporter's
+  ChatML did not match the model's real template (compared with llama.cpp /apply-template):
+  one instruction line differed and booleans were written false instead of the template's
+  False. Fixed, with a golden file from /apply-template in the checks.
+
+### Phase 5: data rights
+- Anthropic's and OpenAI's terms restrict using their outputs to train competing models without
+  permission; teacher data comes from Zigger's own verified runs, permissively licensed open
+  models, or humans (docs/TEACHER-PIPELINE.md).
