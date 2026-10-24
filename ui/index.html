@@ -127,37 +127,6 @@
               </div>
               <input id="localThinking" type="checkbox" role="switch" class="switch" data-setting="localThinking" />
             </div>
-          </div>
-
-          <div class="setting-group">
-            <div class="setting">
-              <div class="setting-text">
-                <span class="setting-title">Setup</span>
-                <p class="setting-desc">Walks through choosing a model provider and API key, as on first launch.</p>
-              </div>
-              <button id="run-setup" type="button">Run setup</button>
-            </div>
-          </div>
-
-          <h3 class="group-label">Reset</h3>
-          <div class="setting-group">
-            <div class="setting">
-              <div class="setting-text">
-                <span class="setting-title">Reset settings to defaults</span>
-                <p class="setting-desc">Restores every setting to its default. API keys, saved sessions, and Ghost mode are kept.</p>
-              </div>
-              <button id="reset-settings" type="button" class="danger-outline">Reset</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="settings-page" data-page="models" data-title="Models" hidden>
-          <h3 class="group-label">Providers</h3>
-          <p class="group-desc">Connect a provider with your own API key, or a local model, then pick a model. Models you pick also show up at the top left for quick switching. A switch applies from your next message.</p>
-          <div id="provider-cards"></div>
-
-          <h3 class="group-label">Reasoning</h3>
-          <div class="setting-group">
             <div class="setting" data-for-provider="openai">
               <div class="setting-text">
                 <label class="setting-title" for="openaiEffort">Reasoning effort</label>
@@ -188,6 +157,33 @@
               <input id="webSearch" type="checkbox" role="switch" class="switch" data-setting="webSearch" />
             </div>
           </div>
+
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Setup</span>
+                <p class="setting-desc">Walks through choosing a model provider and API key, as on first launch.</p>
+              </div>
+              <button id="run-setup" type="button">Run setup</button>
+            </div>
+          </div>
+
+          <h3 class="group-label">Reset</h3>
+          <div class="setting-group">
+            <div class="setting">
+              <div class="setting-text">
+                <span class="setting-title">Reset settings to defaults</span>
+                <p class="setting-desc">Restores every setting to its default. API keys, saved sessions, and Ghost mode are kept.</p>
+              </div>
+              <button id="reset-settings" type="button" class="danger-outline">Reset</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-page" data-page="models" data-title="Models" hidden>
+          <h3 class="group-label">Providers</h3>
+          <p class="group-desc">Connect a provider with your own API key, or a local model, then pick a model. Models you pick also show up at the top left for quick switching. A switch applies from your next message.</p>
+          <div id="provider-cards"></div>
 
           <p class="group-desc">Your API keys are stored only in this browser profile, never synced, and sent only to the provider they belong to. Usage is billed to your account with that provider.</p>
         </section>
