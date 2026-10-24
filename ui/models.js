@@ -104,6 +104,12 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
   let config = null;
   // A switch waiting for the saved config: { provider, model }.
   let pending = null;
+  // The Browsby GPU server's catalog ({ models, default }) once the controller has fetched
+  // it: the GPU server offers these models only, shown by name.
+  let serverModels = null;
+  const onServer = (provider, kind = config.localKind) => provider === "ollama" && kind === "gpu";
+  const serverEntry = (provider, model, kind) => (onServer(provider, kind) ? serverModels?.models.find((m) => m.id === model) : undefined);
+  const nameOf = (provider, model, kind) => serverEntry(provider, model, kind)?.name ?? model;
 
   function mark(id) {
     const p = providerById(id);
@@ -118,7 +124,7 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
 
   function renderChip() {
     const model = config.models[config.provider];
-    chip.replaceChildren(mark(config.provider), el("span", "sr-only", "Model: "), el("span", "model-name", model || "Choose a model"), icon("down"));
+    chip.replaceChildren(mark(config.provider), el("span", "sr-only", "Model: "), el("span", "model-name", model ? nameOf(config.provider, model) : "Choose a model"), icon("down"));
     chip.classList.toggle("unset", !model);
   }
 
@@ -135,8 +141,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     void chip.offsetWidth;
     chip.classList.add("switched");
     const later = isRunning() ? " The running task finishes on its current model." : "";
-    toast(`Now using ${model}.${later}`);
-    $("announce").textContent = `Now using ${model} from ${providerById(provider).name}`;
+    toast(`Now using ${nameOf(provider, model)}.${later}`);
+    $("announce").textContent = `Now using ${nameOf(provider, model)} from ${providerById(provider).name}`;
   }
 
   // Quick selector.
@@ -151,24 +157,35 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     return item;
   }
 
+  // The models already used, where the GPU server's are its current catalog: every model it
+  // offers, and none it no longer does.
+  function menuModels() {
+    const used = usedModels(config);
+    if (!serverModels) return used;
+    const catalog = serverModels.models.map((m) => entry(config, "ollama", m.id, "gpu"));
+    return [...used.filter((m) => !onServer(m.provider, m.kind) || serverEntry(m.provider, m.model, m.kind)), ...catalog].filter((m, i, all) => all.findIndex((n) => same(m, n)) === i);
+  }
+
   function renderMenu() {
-    const rows = usedModels(config).map((m) => {
+    const rows = menuModels().map((m) => {
       const current = isCurrent(config, m);
       const row = el("div", "mm-row");
       const where = m.kind ? kindName(m.kind) : providerById(m.provider).name;
-      const item = menuItem("menuitemradio", [mark(m.provider), el("span", "mm-name", m.model), ...tagList(m.provider, m.model), icon("check")], () => {
+      const name = nameOf(m.provider, m.model, m.kind);
+      const item = menuItem("menuitemradio", [mark(m.provider), el("span", "mm-name", name), ...tagList(m.provider, m.model), icon("check")], () => {
         closeMenu();
         if (!current) pick(m.provider, m.model, m.kind);
       });
       item.setAttribute("aria-checked", String(current));
-      item.setAttribute("aria-label", `${m.model}, ${where}`);
-      item.title = where;
+      item.setAttribute("aria-label", `${name}, ${where}`);
+      item.title = serverEntry(m.provider, m.model, m.kind)?.description || where;
       row.append(item);
-      if (!current) {
+      // The GPU server's models stay listed while it offers them.
+      if (!current && !serverEntry(m.provider, m.model, m.kind)) {
         item.setAttribute("aria-keyshortcuts", "Delete");
         const x = menuItem("menuitem", [icon("close")], () => forget(m, row));
         x.classList.add("mm-remove");
-        x.setAttribute("aria-label", `Remove ${m.model} from this list`);
+        x.setAttribute("aria-label", `Remove ${name} from this list`);
         x.title = "Remove from this list";
         row.append(x);
       }
@@ -459,12 +476,14 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     const list = card.querySelector(".ml-list");
     const status = card.querySelector(`#${p}-models-status`);
     const query = field(card, "search").value.trim();
-    const used = usedModels(config).filter((m) => m.provider === p && m.kind === entry(config, p, "").kind).map((m) => m.model);
+    // The GPU server offers its catalog and nothing else, so nothing can be typed in.
+    const server = onServer(p);
+    const used = server ? [] : usedModels(config).filter((m) => m.provider === p && m.kind === entry(config, p, "").kind).map((m) => m.model);
     const all = [...new Set([...used, ...state.models])];
-    const shown = all.filter((m) => m.toLowerCase().includes(query.toLowerCase()));
-    const options = shown.slice(0, LIST_MAX).map((m) => option(p, m, m));
+    const shown = all.filter((m) => `${m} ${nameOf(p, m)}`.toLowerCase().includes(query.toLowerCase()));
+    const options = shown.slice(0, LIST_MAX).map((m) => option(p, m, nameOf(p, m)));
     // A model the list does not show (a new release, a custom server) can be typed.
-    if (query && !all.includes(query) && MODEL_ID.test(query)) options.push(option(p, query, `Use “${query}”`));
+    if (!server && query && !all.includes(query) && MODEL_ID.test(query)) options.push(option(p, query, `Use “${query}”`));
     list.replaceChildren(...options);
     list.hidden = !options.length;
     status.className = `field-note${state.error ? " error" : ""}`;
@@ -472,6 +491,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
       state.error ??
       (!state.models.length && !state.loadedFor ? ""
       : !state.models.length ? "Loading models…"
+      : server && state.models.length === 1 ? `The GPU server offers one model, so Browsby always uses ${nameOf(p, state.models[0])}.`
+      : server && !query ? `${state.models.length} models on the GPU server.`
       : shown.length > LIST_MAX ? `Showing ${LIST_MAX} of ${shown.length}. Search to narrow it down.`
       : `${shown.length} model${shown.length === 1 ? "" : "s"}${query ? (shown.length === 1 ? " matches" : " match") : ""}.`);
   }
@@ -483,6 +504,8 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
     node.setAttribute("aria-selected", String(current));
     node.tabIndex = -1;
     node.append(icon("check"), el("span", "mm-name", text), ...tagList(p, model));
+    const description = serverEntry(p, model)?.description;
+    if (description) node.title = description;
     node.onclick = () => current || pick(p, model);
     return node;
   }
@@ -568,6 +591,14 @@ export function createModelSwitcher({ $, el, icon, send, toast, isRunning, openM
         else {
           if (lists[msg.provider]) lists[msg.provider].loadedFor = null;
           loadIfNeeded(msg.provider);
+        }
+      },
+      server_models(msg) {
+        serverModels = { models: msg.models, default: msg.default };
+        if (config) {
+          renderChip();
+          if (!menu.hidden) renderMenu();
+          if (lists.ollama && cardOf("ollama")) renderList(cardOf("ollama"));
         }
       },
       models(msg) {

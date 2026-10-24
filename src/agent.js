@@ -281,7 +281,8 @@ export class Agent {
   // request was large (see SUMMARY_AT_TOKENS). req: the provider and the arguments a turn
   // takes. A failed or unusable summary leaves things as they were; trimming still applies.
   async #summarize(req, signal) {
-    const at = SUMMARY_AT_MODEL.find(([name]) => name.test(req.model))?.[1] ?? SUMMARY_AT_TOKENS[req.config.provider] ?? SUMMARY_AT_TOKENS_DEFAULT;
+    // A GPU server model carries its own threshold in the server's catalog (summaryAt).
+    const at = req.config.summaryAt ?? SUMMARY_AT_MODEL.find(([name]) => name.test(req.model))?.[1] ?? SUMMARY_AT_TOKENS[req.config.provider] ?? SUMMARY_AT_TOKENS_DEFAULT;
     if (this.lastInput < at) return;
     const requests = this.#requests();
     const from = this.summary?.cut ?? 0;

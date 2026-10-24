@@ -61,6 +61,49 @@ export async function busyStatus(config) {
   }
 }
 
+// The Browsby GPU server's catalog, from the gate's /browsby/models (edited on the server
+// with ~/browsby/models): the models it offers Browsby, in order, and its default. The GPU
+// server kind offers exactly these, so models come and go on the server without an
+// extension update. Entries are checked, since they come over the network. Throws when the
+// server cannot be reached or sends no catalog.
+const CATALOG_ID = /^[\w.:/@+-]{1,200}$/;
+export async function serverCatalog(config) {
+  const origin = new URL(config.gpuBaseUrl).origin;
+  const headers = config.clientId ? { "X-Browsby-Client": config.clientId } : undefined;
+  const res = await fetch(`${origin}/browsby/models`, { headers, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error(`The GPU server sent no model list (${res.status}).`);
+  const body = await res.json();
+  if (!Array.isArray(body?.models)) throw new Error("The GPU server sent no model list.");
+  const text = (value, max) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+  const models = body.models
+    .filter((m) => CATALOG_ID.test(m?.id))
+    .map((m) => ({
+      id: m.id,
+      name: text(m.name, 60) || m.id,
+      description: text(m.description, 200),
+      backend: text(m.backend, 200),
+      aliases: Array.isArray(m.aliases) ? m.aliases.filter((a) => CATALOG_ID.test(a)) : [],
+      ...(Number.isInteger(m.summaryAt) && m.summaryAt >= 4000 && { summaryAt: m.summaryAt }),
+    }))
+    .filter((m, i, all) => all.findIndex((n) => n.id === m.id) === i);
+  const fallback = models.find((m) => m.id === body.default) ?? models[0] ?? null;
+  return { models, default: fallback?.id ?? null };
+}
+
+// The catalog entry to use for the model now chosen: the same one, one it was renamed from
+// on the server (aliases), or the one serving it as a backend model (picked before the
+// catalog), else the default. Null for an empty catalog.
+export function pickServerModel(catalog, current) {
+  const { models } = catalog;
+  return (
+    models.find((m) => m.id === current) ??
+    models.find((m) => m.aliases.includes(current)) ??
+    models.find((m) => m.backend && m.backend === current) ??
+    models.find((m) => m.id === catalog.default) ??
+    null
+  );
+}
+
 const call = (method) => async (opts) => {
   const [module, mapped, key] = await adapter(opts, method);
   const result = await module[method](mapped);

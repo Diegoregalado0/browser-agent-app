@@ -1,6 +1,6 @@
 import { Agent } from "./agent.js";
 import { providers } from "./providers/index.js";
-import { busyStatus } from "./providers/local.js";
+import { busyStatus, pickServerModel, serverCatalog } from "./providers/local.js";
 import { DEFAULTS, apiKeyFor, cleanSetting, keyProblem, publicConfig, resetConfig } from "./config-core.js";
 import { newSessionId, titleFor, transcriptOf } from "./session-format.js";
 import { TITLE_ATTEMPTS } from "./title.js";
@@ -43,11 +43,15 @@ async function testConnection(id, apiKey, config) {
   const provider = providers[id];
   const started = Date.now();
   try {
-    const models = await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
+    // The GPU server is tested with the model of its catalog that a task would use.
+    const gpu = id === "ollama" && config.localKind === "gpu";
+    const catalog = gpu ? await within(serverCatalog(config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.") : null;
+    if (catalog && !catalog.models.length) throw new Error("The GPU server answered but offers no models. Add one on the server with: models add, then test again.");
+    const models = catalog ? catalog.models.map((m) => m.id) : await within(provider.listModels({ apiKey, config }), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds.");
     // The built-in default model is skipped when the endpoint does not list it; a model the
     // user chose is always the one tested.
     const unlistedDefault = config.models[id] === DEFAULTS.models[id] && models.length && !models.includes(config.models[id]);
-    const saved = unlistedDefault ? "" : config.models[id];
+    const saved = catalog ? pickServerModel(catalog, config.models[id]).id : unlistedDefault ? "" : config.models[id];
     const model = saved || (await within(firstChatModel(provider, models, apiKey, config), CONNECTION_TEST_TIMEOUT_MS, "No response within 15 seconds."));
     if (!model) {
       const ollama = id === "ollama" && config.localKind === "ollama";
@@ -145,6 +149,35 @@ export function createController(host) {
 
   // Tells every UI whether the gate in front of a Local server is busy with another
   // install; a null status hides the notice.
+  // On the Browsby GPU server: fetches its catalog for every UI and moves a model the server
+  // no longer offers to its new id or the server's default, saving the switch. Returns the
+  // config to run with and the catalog entry, or null off the GPU server, or when the
+  // server cannot be reached (the request then shows why). The entry is null for an empty
+  // catalog.
+  async function syncServerModels(config) {
+    if (config.provider !== "ollama" || config.localKind !== "gpu") return null;
+    let catalog;
+    try {
+      catalog = await serverCatalog(config);
+    } catch (err) {
+      if (config.debugMode) broadcast({ type: "debug", text: `Could not load the GPU server's models: ${err.message}` });
+      return null;
+    }
+    broadcast({ type: "server_models", ...catalog });
+    const current = config.models.ollama;
+    const entry = pickServerModel(catalog, current);
+    if (entry && entry.id !== current) {
+      config = { ...config, models: { ...config.models, ollama: entry.id } };
+      await host.saveConfig(config);
+      broadcastConfig(config);
+      if (current) {
+        const renamed = entry.aliases.includes(current) || entry.backend === current;
+        broadcast({ type: "notice", text: renamed ? `${current} is now ${entry.name} on the GPU server.` : `${current} is no longer on the GPU server, so Browsby switched to ${entry.name}.` });
+      }
+    }
+    return { config, entry };
+  }
+
   const checkBusy = async (config) => broadcast({ type: "busy", kind: config.localKind, status: await busyStatus(config) });
 
   const broadcastConfig = (config) => {
@@ -279,8 +312,10 @@ export function createController(host) {
           incognitoClients.add(client);
           await ghostLockChanged();
         }
-        reply({ type: "config", config: clientConfig(await host.loadConfig()) });
+        const config = await host.loadConfig();
+        reply({ type: "config", config: clientConfig(config) });
         reply({ type: "status", running: agent.running });
+        syncServerModels(config).catch(() => {});
         if (pendingPermission) reply(permissionRequest());
         if (host.outlook) reply(await host.outlook.status());
         if (agent.messages.length) {
@@ -296,7 +331,10 @@ export function createController(host) {
           return reply({ type: "error", text: `That request is too long. Keep it under ${PROMPT_MAX_CHARS.toLocaleString("en-US")} characters.` });
         }
         try {
-          const config = await host.loadConfig();
+          let config = await host.loadConfig();
+          const synced = await syncServerModels(config);
+          if (synced && !synced.entry) throw new Error("The GPU server offers no models right now. Add one on the server with: models add");
+          if (synced) config = { ...synced.config, summaryAt: synced.entry.summaryAt };
           logEvent({ type: "request", text, provider: config.provider, model: config.models[config.provider], localKind: config.localKind, permissionMode: config.permissionMode });
           if (config.provider === "ollama") checkBusy(config);
           nameSession(config, text);
@@ -523,6 +561,16 @@ export function createController(host) {
         const apiKey = apiKeyFor(config, msg.provider);
         if (msg.provider !== "ollama" && !apiKey) {
           reply({ type: "models", provider: msg.provider, models: [], error: `Save a ${msg.provider} API key to load its models.` });
+          return;
+        }
+        // The GPU server offers its catalog only (syncServerModels also tells every UI).
+        if (msg.provider === "ollama" && config.localKind === "gpu") {
+          try {
+            reply({ type: "models", provider: msg.provider, models: (await serverCatalog(config)).models.map((m) => m.id) });
+            await syncServerModels(config);
+          } catch (err) {
+            reply({ type: "models", provider: msg.provider, models: [], error: `Could not load the GPU server's models: ${err.message}` });
+          }
           return;
         }
         try {

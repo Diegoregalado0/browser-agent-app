@@ -1451,6 +1451,7 @@ const localServer = createServer((req, res) => {
     localRequests.push({ path: req.url, auth: req.headers.authorization, client: req.headers["x-browsby-client"], body: body && JSON.parse(body) });
     if (req.url === "/browsby/busy") return json(req.headers["x-browsby-client"] === "11111111-2222-4333-8444-555555555555" ? { busy: true, running: false, freeInSeconds: 150 } : { busy: false });
     if (req.url === "/v1/models") return json({ object: "list", data: [{ id: "Browsby-Steady" }, { id: "Browsby-Swift" }, { id: "nomic-embed-text" }] });
+    if (req.url === "/browsby/models") return json({ default: "Browsby-Steady", models: [{ id: "Browsby-Steady", name: "Browsby Steady" }, { id: "Browsby-Swift", name: "Browsby Swift" }] });
     if (req.url === "/v1/chat/completions") return json({ choices: [{ index: 0, message: { role: "assistant", content: "Hi" }, finish_reason: "length" }], usage: { total_tokens: 2 } });
     if (req.url === "/api/tags") return json({ models: [{ name: "qwen3:8b" }, { name: "all-minilm" }] });
     if (req.url === "/api/show") return json({ capabilities: JSON.parse(body).model === "qwen3:8b" ? ["completion", "tools"] : ["embedding"] });
@@ -2461,6 +2462,86 @@ console.log("safety shortcut checks passed");
   providers.openai.turn = turnBefore;
   providers.openai.classify = classifyBefore;
   console.log("conversation title checks passed");
+}
+
+// The Browsby GPU server offers the models in its catalog (/browsby/models) and no others:
+// entries are checked, a model it no longer offers moves to its new id or the default (saved,
+// with a notice), the catalog's summary threshold reaches the agent, and an empty catalog
+// stops the request with a way out.
+{
+  const { serverCatalog, pickServerModel } = await import("../src/providers/local.js");
+  const fetchBefore = globalThis.fetch;
+  let served = null;
+  const fetched = [];
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return new Response(JSON.stringify(served), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const gpu = { gpuBaseUrl: "http://localhost:8081/v1" };
+  served = {
+    default: "Zigger-1.0",
+    models: [
+      { id: "Browsby-Steady", name: "Browsby Steady", backend: "qwen3.6-35b-a3b", summaryAt: 50000 },
+      { id: "Zigger-1.0", name: "Zigger 1.0", backend: "qwen3.6-35b-a3b-long", aliases: ["Zigger-0.9", "bad id!"], summaryAt: 12 },
+      { id: "has space", name: "x" },
+      { id: "Browsby-Steady", name: "duplicate" },
+      { id: "Bare" },
+    ],
+  };
+  const catalog = await serverCatalog(gpu);
+  assert.equal(fetched[0], "http://localhost:8081/browsby/models");
+  assert.deepEqual(catalog.models.map((m) => [m.id, m.name]), [["Browsby-Steady", "Browsby Steady"], ["Zigger-1.0", "Zigger 1.0"], ["Bare", "Bare"]], "bad or repeated entries were kept");
+  assert.deepEqual(catalog.models[1].aliases, ["Zigger-0.9"]);
+  assert.equal(catalog.models[1].summaryAt, undefined, "a threshold under 4000 was kept");
+  assert.equal(pickServerModel(catalog, "Browsby-Steady").id, "Browsby-Steady");
+  assert.equal(pickServerModel(catalog, "Zigger-0.9").id, "Zigger-1.0", "a renamed model did not follow its new id");
+  assert.equal(pickServerModel(catalog, "qwen3.6-35b-a3b").id, "Browsby-Steady", "a backend id did not find its entry");
+  assert.equal(pickServerModel(catalog, "gone").id, "Zigger-1.0", "a removed model did not fall back to the default");
+  assert.equal(pickServerModel({ models: [], default: null }, "x"), null);
+  served = { error: "nope" };
+  await assert.rejects(serverCatalog(gpu), /no model list/);
+
+  const turnBefore = providers.ollama.turn;
+  const sentModels = [];
+  providers.ollama.turn = async ({ model, config: c }) => (sentModels.push([model, c.summaryAt]), { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+  let saved = { ...structuredClone(loopConfig), provider: "ollama", localKind: "gpu", gpuBaseUrl: gpu.gpuBaseUrl, models: { ...loopConfig.models, ollama: "qwen3.6-35b-a3b-long" } };
+  const events = [];
+  const gpuController = createController({
+    loadConfig: async () => structuredClone(saved),
+    saveConfig: async (c) => (saved = structuredClone(c)),
+    loadUsage: async () => null,
+    saveUsage: async () => {},
+    sessions: { save: async () => {}, list: async () => [], load: async () => ({}), remove: async () => {}, removeAll: async () => {} },
+    ensureBrowser: async (a) => {
+      a.browser ??= agent.browser;
+    },
+  });
+  const ui = gpuController.connect({ send: (e) => events.push(e) });
+  served = { default: "Browsby-Steady", models: [{ id: "Browsby-Steady", name: "Browsby Steady", backend: "qwen3.6-35b-a3b" }, { id: "Zigger-1.0", name: "Zigger 1.0", backend: "qwen3.6-35b-a3b-long", summaryAt: 50000 }] };
+  await ui({ type: "run", text: "hi" });
+  assert.equal(saved.models.ollama, "Zigger-1.0", "a backend id picked before the catalog was not moved to its entry");
+  assert.deepEqual(sentModels.at(-1), ["Zigger-1.0", 50000], "the request did not use the entry or its summary threshold");
+  assert.ok(events.some((e) => e.type === "notice" && /qwen3\.6-35b-a3b-long is now Zigger 1\.0/.test(e.text)));
+  assert.ok(events.some((e) => e.type === "server_models" && e.models.length === 2), "the UIs were not sent the catalog");
+
+  served = { default: "Browsby-Steady", models: [{ id: "Browsby-Steady", name: "Browsby Steady", backend: "qwen3.6-35b-a3b" }] };
+  events.length = 0;
+  await ui({ type: "run", text: "again" });
+  assert.equal(saved.models.ollama, "Browsby-Steady", "a removed model was not replaced by the only one left");
+  assert.ok(events.some((e) => e.type === "notice" && /Zigger-1\.0 is no longer on the GPU server/.test(e.text)));
+  events.length = 0;
+  await ui({ type: "list_models", provider: "ollama" });
+  assert.deepEqual(events.find((e) => e.type === "models")?.models, ["Browsby-Steady"], "the list offered more than the catalog");
+
+  served = { default: null, models: [] };
+  events.length = 0;
+  const calls = sentModels.length;
+  await ui({ type: "run", text: "nothing to run on" });
+  assert.match(events.find((e) => e.type === "error")?.text ?? "", /offers no models/);
+  assert.equal(sentModels.length, calls, "a request ran with no model");
+  providers.ollama.turn = turnBefore;
+  globalThis.fetch = fetchBefore;
+  console.log("GPU server catalog checks passed");
 }
 
 // ask_user ends the task: the question is the agent's reply in the history and the UI, a call
