@@ -50,8 +50,16 @@ const host = {
     agent.browser = new Browser(transport);
   },
 };
-// Internal builds keep a debug log of every saved conversation; the store build drops this.
-if (globalThis.BROWSBY_INTERNAL) host.debugLog = (await import("./debug-log.js")).debugLog;
+// Internal builds keep a debug log of every saved conversation, and can record tasks for
+// fine-tuning data (off unless recordTrajectories is on; see src/trajectory.js). The store
+// build drops both.
+let trajectoryStore = null;
+if (globalThis.BROWSBY_INTERNAL) {
+  host.debugLog = (await import("./debug-log.js")).debugLog;
+  ({ trajectoryStore } = await import("./trajectory-store.js"));
+  const { TrajectoryRecorder } = await import("../src/trajectory.js");
+  host.trajectories = (options) => new TrajectoryRecorder({ ...options, sink: trajectoryStore });
+}
 const controller = createController(host);
 
 // Discord remote control. Every non-incognito panel is a session that Discord can send
@@ -95,6 +103,8 @@ addEventListener("pagehide", () => {
 
 globalThis.agentHost = {
   incognito: win.incognito,
+  // The benchmark (scripts/bench/run.js --record) takes the recorded tasks out over DevTools.
+  ...(trajectoryStore && { trajectories: { drain: async () => (await controller.agent.recorder?.idle(), trajectoryStore.drain()) } }),
   connect(onEvent) {
     // Events are cloned so the UI never shares objects with the agent's history.
     const client = { send: (event) => queueMicrotask(() => onEvent(structuredClone(event))) };

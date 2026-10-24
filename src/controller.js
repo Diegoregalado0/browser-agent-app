@@ -94,6 +94,7 @@ export const LOCAL_ONLY_PROMPTS = new Set(["sensitive", "password"]);
 //   loadUsage/saveUsage   today's token count, { day, tokens }, for the daily limit
 //   outlook               Outlook on Microsoft Graph (extension; see outlook-graph.js), optional
 //   debugLog              { append(sessionId, lines) }, internal builds only (extension/debug-log.js)
+//   trajectories(options) a TrajectoryRecorder (src/trajectory.js), internal builds only
 export function createController(host) {
   const clients = new Set();
   let pendingPermission = null;
@@ -277,6 +278,9 @@ export function createController(host) {
   });
   // Outlook's tools (outlook-graph.js), under mcp__ names.
   agent.mcp = host.outlook ?? null;
+  // Internal builds: a recorder of each task for fine-tuning data. It records only while the
+  // recordTrajectories setting is on, and never in Ghost mode, even when Ghost mode starts mid-task.
+  if (host.trajectories) agent.recorder = host.trajectories({ allowed: () => !unsaved(), sessionId: () => session?.id ?? null });
 
   const permissionRequest = () => ({
     type: "permission_request",
