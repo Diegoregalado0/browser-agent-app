@@ -28,6 +28,9 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //   settle       after an action, wait until the page has stopped changing and loading data
 //                (up to 2 s) instead of a fixed 300 ms
 //   marks        screenshots carry a numbered label on each control in view (label N is ref_N)
+// The sampling settings that may be sent per request (config.sampling), with their bounds.
+export const SAMPLING_RANGES = { temperature: [0, 2], top_p: [0, 1], top_k: [0, 200], min_p: [0, 1], presence_penalty: [-2, 2], repeat_penalty: [0.5, 2] };
+
 export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks"];
 
 export const DEFAULTS = {
@@ -63,6 +66,10 @@ export const DEFAULTS = {
   // Agent changes under evaluation, each off unless named here ({ name: true }); see
   // EXPERIMENTS. Set by the benchmark (--experiments) and not shown in Settings.
   experiments: {},
+  // Sampling settings sent with each agent request to an OpenAI-compatible server (Local),
+  // overriding the server's own; empty sends none. For measuring settings (the benchmark's
+  // --sampling), not shown in Settings. Keys: SAMPLING_RANGES.
+  sampling: {},
   customInstructions: "",
   autoConfirmAge: false,
   approvedOrigins: [],
@@ -250,6 +257,14 @@ export function cleanSetting(key, value) {
       } catch {}
       return site.length <= 253 && HOSTNAME.test(site) ? site : fail("Enter sensitive sites as hostnames like mybank.example, one per line.");
     });
+  }
+  if (key === "sampling") {
+    if (!isObject(value)) fail("Sampling settings must be numbers.");
+    for (const [name, v] of Object.entries(value)) {
+      const range = SAMPLING_RANGES[name];
+      if (!range || typeof v !== "number" || !(v >= range[0] && v <= range[1])) fail(`Unknown or out-of-range sampling setting ${String(name).slice(0, 40)}.`);
+    }
+    return value;
   }
   if (key === "experiments") {
     if (!isObject(value)) fail("Experiments must be a set of switches.");

@@ -211,4 +211,28 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   assert.deepEqual(order, ["draw", "capture", "remove"]);
   assert.match(on.at(-1).text, /A numbered label marks each of 3 controls in view: label N is ref_N/);
 }
+// sampling: per-request settings reach a Local server's request body, and only a Local one;
+// bad values are refused.
+{
+  assert.throws(() => cleanSetting("sampling", { presence_penalty: 9 }), /out-of-range/);
+  assert.throws(() => cleanSetting("sampling", { seed: 1 }), /Unknown/);
+  const bodies = [];
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    const sse = 'data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  const local = await import("../src/providers/local.js");
+  const mistral = await import("../src/providers/mistral.js");
+  const base = { ...structuredClone(DEFAULTS), provider: "ollama", localKind: "server", serverBaseUrl: "http://127.0.0.1:9/v1", sampling: { presence_penalty: 0.5 } };
+  const turn = (mod, config) => mod.turn({ apiKey: "k", model: "m", config, system: "s", tools: [], messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], signal: new AbortController().signal, onText: () => {}, onThinking: () => {} });
+  await turn(local, base);
+  assert.equal(bodies.at(-1).presence_penalty, 0.5, "the setting did not reach the Local server");
+  await turn(local, { ...base, sampling: {} });
+  assert.equal(bodies.at(-1).presence_penalty, undefined);
+  await turn(mistral, { ...base, provider: "mistral" });
+  assert.equal(bodies.at(-1).presence_penalty, undefined, "the setting reached Mistral");
+  globalThis.fetch = fetchBefore;
+}
 console.log("experiments checks passed");

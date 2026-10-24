@@ -164,6 +164,8 @@ async function chatTurn({ apiKey, model, config, system, tools, messages, signal
       stream: true,
       stream_options: { include_usage: true },
       ...thinkingKwargs(config, Boolean(config.thinking)),
+      // Measured sampling settings (config.sampling) override a Local server's defaults.
+      ...(config.provider === "ollama" && config.sampling),
       messages: toMessages(system, limitImages(messages, config.chatMaxImages)),
       tools: tools.map(({ name, description, input_schema }) => ({
         type: "function",

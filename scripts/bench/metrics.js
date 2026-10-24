@@ -101,7 +101,7 @@ export async function runMeta({ projectDir, taskFile, model, baseUrl, config }) 
     benchVersion: taskModule.BENCH_VERSION ?? taskModule.FIXTURES_VERSION ?? null,
     model,
     serverArgs,
-    settings: { thinking: config.localThinking ?? config.thinking, permissionMode: config.permissionMode, maxSteps: config.maxSteps, canvasTool: config.canvasTool, experiments: config.experiments ?? {} },
+    settings: { thinking: config.localThinking ?? config.thinking, permissionMode: config.permissionMode, maxSteps: config.maxSteps, canvasTool: config.canvasTool, experiments: config.experiments ?? {}, sampling: config.sampling ?? {} },
     node: process.version,
     started: new Date().toISOString(),
   };

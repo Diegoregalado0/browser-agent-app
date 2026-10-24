@@ -81,7 +81,7 @@ if (!selectedTasks.length) {
 // done (run+task pairs), which are skipped; its runId is reused so the same two files get
 // overwritten in place rather than starting a new pair.
 let resumedRows = [];
-let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}${canvasToolArg === "off" ? "-nocanvastool" : ""}${args.experiments ? `-x-${args.experiments.replace(/,/g, "+")}` : ""}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+let runId = `${args.provider}-${args.model.replace(/[^\w.-]/g, "_")}${canvasToolArg === "off" ? "-nocanvastool" : ""}${args.experiments ? `-x-${args.experiments.replace(/,/g, "+")}` : ""}${args.sampling ? `-s-${args.sampling.replace(/[,=]/g, "_")}` : ""}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 if (args.resume) {
   const { readFileSync } = await import("node:fs");
   const prior = JSON.parse(readFileSync(args.resume, "utf8"));
@@ -102,6 +102,8 @@ const REACH_WAIT_MS = 5 * 60000;
 function buildConfig() {
   const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking, canvasTool: canvasToolArg === "on" };
   if (args.experiments) overrides.experiments = Object.fromEntries(args.experiments.split(",").map((name) => [name.trim(), true]));
+  // --sampling presence_penalty=1.0,temperature=0.6: per-request sampling for a Local server.
+  if (args.sampling) overrides.sampling = Object.fromEntries(args.sampling.split(",").map((kv) => kv.split("=")).map(([k, v]) => [k.trim(), Number(v)]));
   overrides.models[args.provider] = args.model;
   if (args.provider === "local") {
     // The Local provider as an OpenAI-compatible server, so any model on the server can be
