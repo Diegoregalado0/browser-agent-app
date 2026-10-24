@@ -1,6 +1,6 @@
 # Plan: sharing the Browsby GPU server through Cloudflare Tunnel, with access keys
 
-Status: proposal, 2026-10-23. Nothing here is built yet.
+Status: built 2026-10-24 (gate public listener, browsby-keys, browsby-public, extension access key); live once `browsby-public setup` runs with a Cloudflare API token.
 
 ## Goal
 
@@ -50,11 +50,10 @@ One string, shown once, which the person pastes into Browsby:
 bzk1_<base64url of {"u": "https://gpu.<domain>", "cid": <Access client id>, "cs": <Access client secret>, "k": <gate key>}>
 ```
 
-- The extension decodes it locally into the server address and two headers:
-  - `Authorization: {"cf-access-client-id": "...", "cf-access-client-secret": "..."}`
-    (Access reads its service token from this one header: the application's
-    `read_service_tokens_from_header` is set to `Authorization`).
-  - `X-Browsby-Key: bgk_<id>_<secret>` for the gate.
+- The extension decodes it locally into the server address and three headers, sent only to
+  that address: `CF-Access-Client-Id` and `CF-Access-Client-Secret` for Access, and
+  `X-Browsby-Key: bgk_<id>_<secret>` for the gate. (Not Access's single `Authorization`
+  header: the OpenAI client library sets `Authorization` itself.)
 - The `bzk1_` prefix lets GitHub secret scanning (a custom pattern) and log scrubbers spot a
   leaked key.
 - Gate key format: `bgk_<id>_<secret>`. `id` is 8 random base32 characters, used to find the
@@ -62,7 +61,7 @@ bzk1_<base64url of {"u": "https://gpu.<domain>", "cid": <Access client id>, "cs"
 
 ## Layer 2: the gate's public listener (gate.py)
 
-A second `ThreadingHTTPServer` on 127.0.0.1:8091 in the same process, so it shares the GPU
+A second `ThreadingHTTPServer` on 127.0.0.1:8091 in the same process (`~/browsby/public.py`), so it shares the GPU
 switching lock, the busy tracking and gaming mode. Each request goes through these checks in
 order, and the first failure answers at once:
 
@@ -75,7 +74,7 @@ order, and the first failure answers at once:
    an unknown `kid`), `iss` equal to the team domain, `aud` equal to the application's AUD
    tag, `exp` in the future. This means a process on the PC that reaches 8091 directly
    still needs a key, and a request that skipped Access is refused.
-   (Needs PyJWT and cryptography in a small venv for the gate.)
+   (Verified with the standard library: the full PKCS#1 v1.5 encoding is compared.)
 3. **The key.** `X-Browsby-Key` parsed into id and secret; the record is found by id;
    `hmac.compare_digest(HMAC-SHA256(pepper, secret), stored_hash)`. Refused when missing,
    malformed, unknown, revoked or expired, always with the same `401 {"error": "invalid
