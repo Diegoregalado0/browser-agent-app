@@ -8,6 +8,7 @@
 // Usage:
 //   node scripts/bench/run.js --provider openai --model qwen3.6-35b-a3b \
 //     --base-url http://localhost:8081/v1 --runs 1
+//   node scripts/bench/run.js --provider local --model qwen3.8-27b --base-url http://localhost:8081/v1
 //   node scripts/bench/run.js --provider ollama --model gemma4:26b --host http://localhost:11436
 //   BENCH_KEY=$(grep ^MISTRAL_API_KEY= ~/browser-agent/.env | cut -d= -f2) \
 //     node scripts/bench/run.js --provider mistral --model ministral-14b-latest
@@ -53,11 +54,11 @@ const args = parseArgs(process.argv.slice(2));
 const taskFilePath = args.taskfile ? join(PROJECT_DIR, "scripts", "bench", args.taskfile) : join(PROJECT_DIR, "scripts", "bench", "tasks.js");
 const { TASKS } = await import(`file://${taskFilePath}`);
 if (!args.provider || !args.model) {
-  console.error("Usage: node scripts/bench/run.js --provider <openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--stall-ms ms] [--gate url] [--thinking on|off]");
+  console.error("Usage: node scripts/bench/run.js --provider <local|openai|ollama|mistral> --model <id> [--host|--base-url] [--runs N] [--tasks a,b] [--timeout ms] [--stall-ms ms] [--gate url] [--thinking on|off]");
   process.exit(1);
 }
 
-const defaultThinking = (provider) => (provider === "ollama" || provider === "openai" ? "off" : "on");
+const defaultThinking = (provider) => (provider === "ollama" || provider === "openai" || provider === "local" ? "off" : "on");
 const thinkingArg = args.thinking || defaultThinking(args.provider);
 if (!["on", "off"].includes(thinkingArg)) throw new Error('--thinking must be "on" or "off".');
 const thinking = thinkingArg === "on";
@@ -91,7 +92,13 @@ const done = new Set(resumedRows.map((r) => `${r.run}:${r.task}`));
 function buildConfig() {
   const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking, canvasTool: canvasToolArg === "on" };
   overrides.models[args.provider] = args.model;
-  if (args.provider === "ollama") {
+  if (args.provider === "local") {
+    // The Local provider as an OpenAI-compatible server, so any model on the server can be
+    // tested by its id: the Browsby GPU server kind offers only the server's catalog.
+    Object.assign(overrides, { provider: "ollama", localKind: "server", serverBaseUrl: args.baseUrl || args["base-url"] || "http://localhost:8081/v1", localThinking: thinking });
+    overrides.models = { ollama: args.model };
+    overrides.guardModels = { ollama: args.model };
+  } else if (args.provider === "ollama") {
     overrides.ollamaHost = args.host || "http://localhost:11436";
     // No key needed; guard uses the same model (DEFAULT_GUARD_MODELS.ollama is already "").
   } else if (args.provider === "openai") {
@@ -108,7 +115,7 @@ function buildConfig() {
     if (!process.env.BENCH_KEY) throw new Error("Mistral needs its API key in the BENCH_KEY environment variable.");
     overrides.keys.mistral = process.env.BENCH_KEY;
   } else {
-    throw new Error(`Unsupported provider "${args.provider}". Use openai, ollama, or mistral.`);
+    throw new Error(`Unsupported provider "${args.provider}". Use local, openai, ollama, or mistral.`);
   }
   return mergeConfig(overrides);
 }
