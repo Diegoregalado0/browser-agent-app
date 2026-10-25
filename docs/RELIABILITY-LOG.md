@@ -87,3 +87,23 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
 - Anthropic's and OpenAI's terms restrict using their outputs to train competing models without
   permission; teacher data comes from Zigger's own verified runs, permissively licensed open
   models, or humans (docs/TEACHER-PIPELINE.md).
+
+### Fixture screens on ai-linux (2026-10-25; dev split, one run each unless noted)
+- Benchmark bug: fx-sales-sum's checker (and its self-check) expected 40,375; the West Q3 total
+  is 40,425, which Zigger answered every time. Fixed (computed from SALES) and every saved run
+  re-verdicted with rescore.js --recheck fx-sales-sum (backup: ~/bench-results-backup-2026-10-25.tgz).
+- After the fix: baseline dev 14/18 and 16/18 (two runs), held-out 7/10 and 8/10. Experiments:
+  progress 16, settle 15, staleRefs 15, marks 15, clickTarget 14, verifyDone 13; Q4 15 (385 s
+  per task vs about 306 s); presence_penalty 0.75: 15. Run-to-run spread of the baseline is two
+  tasks, so none of these is a measured improvement. verifyDone is the only one below both
+  baseline runs (more repeats and timeouts): kept off. clickTarget used fewer tokens (68k vs
+  about 88k per task) and less time (250 s vs about 306 s) at equal accuracy: an efficiency
+  candidate to repeat.
+- fx-div-controls failed or timed out in every configuration: its switches are plain divs with
+  a pointer cursor and a script-set click handler, so the outline listed nothing and the agent
+  clicked blind. New experiment pointer lists such elements (outermost pointer element holding
+  no other control; an unnamed one takes the preceding text as its name). Verified in headless
+  Chrome: the prefs page lists the 3 switches and Save under their names and clicking their
+  boxes saves; the other 13 fixture pages and 5 public sites (HN, Wikipedia, books.toscrape,
+  GitHub, BBC News) produce identical outlines with it on, and outline time is unchanged
+  (1-4 ms). Benchmark run queued after the chain.
