@@ -130,3 +130,12 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   timed out with 26 repeated calls; Zigger had passed by not checking. Fixed and asserted in
   fixtures-check; FIXTURES_VERSION 2. The Holo4 run in progress keeps v1 (loaded at start); its
   fx-wizard is rerun on v2 afterwards. Zigger and Holo3.1 with fixes run on v2.
+- fx-newsletter-modal (fails for Zigger and Holo4): the popup opens 1.5 s after load, after the
+  view the change report compares with. Closing it (verified in Chrome: the click hides it)
+  matched that old view, so the report said "No change"; Holo4 clicked Close five times and
+  never retried the wishlist. New experiment freshBase: read_page and screenshots refresh the
+  comparison base. Also: Holo4 answered fx-directory-page7 with the decoy on page 1 (Priya
+  Abbott's extension) from two screenshots, without reading the text or paging: a model error.
+- Follow-up queued with pointer, refNames, continueIntent, freshBase: Holo4 reruns wizard,
+  sitemap-phone, newsletter-modal; Zigger reruns newsletter-modal. The main Holo4 / Zigger /
+  Holo3.1 runs keep the same three flags, so they stay comparable.
