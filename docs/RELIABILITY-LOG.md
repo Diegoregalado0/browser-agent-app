@@ -111,3 +111,9 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   15/18 (304 s per task); thinking on: 12/18, the lowest of all runs (400 s per task vs about
   306 s, 4 timeouts, 92 repeated calls). Thinking stays off. Neither sampling change moved
   accuracy beyond the baseline's spread (14 and 16).
+- pointer (dev, one run): 16/18, and fx-div-controls passed for the first time in 15 runs
+  (saved all three settings in 404 s; every earlier configuration failed or timed out). Failures:
+  fx-directory-page7 (outline unchanged by the flag; also failed under settle) and fx-http500
+  (timeout). 333 s per task, 95k tokens. The flag changed the outline of only 2 of 37 fixture
+  pages checked (prefs; stock, whose headers sort the table on click) and none of 5 public sites.
+  Candidate to enable by default after a repeat run.
