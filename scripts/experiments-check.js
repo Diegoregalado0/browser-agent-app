@@ -57,6 +57,27 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   await assert.rejects(browser.run("browser", { action: "left_click", ref: "ref_3" }), /not found/);
 }
 
+// refNames: a ref written as the control's outline line is taken as its ref when one control
+// matches; otherwise the error says what a ref looks like. Off, it fails as before.
+{
+  const tree = 'link "Offices" [ref_2] href="/offices" @64,181 55x19\nbutton "Save" [ref_5]\nbutton "Save" [ref_6]';
+  const page = scriptedPage({
+    readPageScript: () => outline(tree),
+    refCenterScript: (ref) => (ref === "ref_2" ? { x: 90, y: 190, w: 55, h: 19 } : { error: `${ref} not found; call read_page again to refresh refs` }),
+    hitTestScript: () => null,
+  });
+  const browser = new Browser(page.transport);
+  await browser.run("read_page", {});
+  await assert.rejects(browser.run("browser", { action: "left_click", ref: 'link "Offices"' }), /not found; call read_page again/, "off: unchanged");
+  browser.experiments = { refNames: true };
+  const out = await browser.run("browser", { action: "left_click", ref: 'link "Offices"' });
+  assert.match(out, /link "Offices" is ref_2; pass refs as ref_N/);
+  assert.ok(page.sent.some((s) => s.type === "mousePressed" && s.x === 90 && s.y === 190), "clicked the named link");
+  await browser.run("browser", { action: "left_click", ref: "[ref_2]" });
+  await assert.rejects(browser.run("browser", { action: "left_click", ref: 'button "Save"' }), /2 controls are button "Save": ref_5, ref_6/);
+  await assert.rejects(browser.run("browser", { action: "left_click", ref: "the offices link" }), /is not a ref: refs look like ref_12/);
+}
+
 // clickTarget: a coordinate click says what it landed on, and names an embedded frame.
 {
   let target = 'button "Proceed To Checkout"';

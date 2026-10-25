@@ -833,6 +833,22 @@ export class Browser {
     this.refLines.set(this.currentId, lines);
   }
 
+  // The refNames experiment: a ref written as the control's outline line (link "Offices", or
+  // [ref_2] with its brackets) instead of ref_2, taken as the one control shown with that role
+  // and name; anything else gets an error that says what a ref looks like.
+  #refNamed(text) {
+    const inner = /\bref_\d+\b/.exec(text)?.[0];
+    if (inner) return inner;
+    const key = (line) => /^(\S+)( "[^"]*")?/.exec(line.trim())?.[0];
+    const hits = [...(this.refLines.get(this.currentId) ?? new Map())].filter(([, line]) => key(line) === key(text));
+    if (hits.length === 1) {
+      this.stepNotes.push(`${text.trim()} is ${hits[0][0]}; pass refs as ref_N.`);
+      return hits[0][0];
+    }
+    const which = hits.length ? `${hits.length} controls are ${key(text)}: ${hits.slice(0, 5).map(([ref]) => ref).join(", ")}` : "copy the [ref_N] shown after the control in the outline";
+    throw new Error(`"${text}" is not a ref: refs look like ref_12; ${which}.`);
+  }
+
   // A ref the page no longer has, found again: the one control in the page's outline with the
   // same role and name as the ref's last reported line. Null when the experiment is off, the
   // ref was never shown, or no single control matches.
@@ -1088,6 +1104,7 @@ export class Browser {
     this.reportedDialogs = [];
     this.stepNotes = [];
     try {
+      if (this.experiments.refNames && typeof input?.ref === "string" && !/^ref_\d+$/.test(input.ref)) input = { ...input, ref: this.#refNamed(input.ref) };
       const output = await this.#run(name, input);
       await this.highlightQueue;
       const notes = (this.reportedDialogs = this.dialogNotes.splice(0));
