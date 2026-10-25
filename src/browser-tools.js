@@ -834,13 +834,20 @@ export class Browser {
   }
 
   // The refNames experiment: a ref written as the control's outline line (link "Offices", or
-  // [ref_2] with its brackets) instead of ref_2, taken as the one control shown with that role
+  // [ref_2] with its brackets, or link_2) instead of ref_2, taken as the one control shown with that role
   // and name; anything else gets an error that says what a ref looks like.
   #refNamed(text) {
     const inner = /\bref_\d+\b/.exec(text)?.[0];
     if (inner) return inner;
+    const shown = this.refLines.get(this.currentId) ?? new Map();
+    // A role and the ref's number (link_2 for link "Offices" [ref_2]), when the role matches.
+    const [, role, n] = /^([a-z]+)_(\d+)$/i.exec(text.trim()) ?? [];
+    if (role && shown.get(`ref_${n}`)?.startsWith(`${role.toLowerCase()} `)) {
+      this.stepNotes.push(`${text.trim()} is ref_${n}; pass refs as ref_N.`);
+      return `ref_${n}`;
+    }
     const key = (line) => /^(\S+)( "[^"]*")?/.exec(line.trim())?.[0];
-    const hits = [...(this.refLines.get(this.currentId) ?? new Map())].filter(([, line]) => key(line) === key(text));
+    const hits = [...shown].filter(([, line]) => key(line) === key(text));
     if (hits.length === 1) {
       this.stepNotes.push(`${text.trim()} is ${hits[0][0]}; pass refs as ref_N.`);
       return hits[0][0];

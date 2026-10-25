@@ -74,6 +74,8 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   assert.match(out, /link "Offices" is ref_2; pass refs as ref_N/);
   assert.ok(page.sent.some((s) => s.type === "mousePressed" && s.x === 90 && s.y === 190), "clicked the named link");
   await browser.run("browser", { action: "left_click", ref: "[ref_2]" });
+  assert.match(await browser.run("browser", { action: "left_click", ref: "link_2" }), /link_2 is ref_2/);
+  await assert.rejects(browser.run("browser", { action: "left_click", ref: "button_2" }), /is not a ref/, "the role must match the ref's control");
   await assert.rejects(browser.run("browser", { action: "left_click", ref: 'button "Save"' }), /2 controls are button "Save": ref_5, ref_6/);
   await assert.rejects(browser.run("browser", { action: "left_click", ref: "the offices link" }), /is not a ref: refs look like ref_12/);
 }
