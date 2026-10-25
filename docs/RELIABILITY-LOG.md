@@ -125,3 +125,8 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   about 4 of 20 non-timeout failures across all runs ended that way, Zigger and Holo4 alike).
 - On request, the Holo runs were restarted with pointer, refNames and continueIntent on, with
   Zigger run under the same three flags in between for a like-for-like comparison.
+- Benchmark bug 2 (fixtures v2): finishing the wizard redirected its result page back to step
+  1, so an agent that checked its work saw the wizard restart. Holo4 (with fixes) redid it and
+  timed out with 26 repeated calls; Zigger had passed by not checking. Fixed and asserted in
+  fixtures-check; FIXTURES_VERSION 2. The Holo4 run in progress keeps v1 (loaded at start); its
+  fx-wizard is rerun on v2 afterwards. Zigger and Holo3.1 with fixes run on v2.
