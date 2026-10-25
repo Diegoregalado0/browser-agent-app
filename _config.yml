@@ -12,6 +12,7 @@ exclude:
   - ui
   - package.json
   - package-lock.json
+  - docs
   - legal/IN-APP.md
   - legal/WEB-STORE.md
   - legal/PUBLISH-CHECKLIST.md
