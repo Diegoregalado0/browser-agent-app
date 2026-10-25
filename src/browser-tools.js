@@ -22,6 +22,8 @@ const PAGE_OUTLINE_MAX_CHARS = 40000;
 const VIEW_MAX_CHARS = 12000;
 // Lines of a change report after an action; a larger change points to read_page.
 const CHANGES_MAX_LINES = 40;
+// Controls listed with a "not a ref" error (refNames experiment).
+const REF_HELP_MAX = 15;
 const PAGE_TEXT_MAX_CHARS = 60000;
 const NETWORK_LOG_MAX_ENTRIES = 500;
 const NETWORK_BODY_MAX_CHARS = 8000;
@@ -853,7 +855,9 @@ export class Browser {
       return hits[0][0];
     }
     const which = hits.length ? `${hits.length} controls are ${key(text)}: ${hits.slice(0, 5).map(([ref]) => ref).join(", ")}` : "copy the [ref_N] shown after the control in the outline";
-    throw new Error(`"${text}" is not a ref: refs look like ref_12; ${which}.`);
+    // The controls in view with their refs, so the next call can copy one.
+    const inView = (this.views.get(this.currentId)?.items ?? []).slice(0, REF_HELP_MAX).map((i) => i.line);
+    throw new Error(`"${text}" is not a ref: refs look like ref_12; ${which}.${inView.length ? `\nControls in view:\n${inView.join("\n")}` : ""}`);
   }
 
   // A ref the page no longer has, found again: the one control in the page's outline with the

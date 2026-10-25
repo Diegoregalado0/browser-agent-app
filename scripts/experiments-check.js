@@ -62,7 +62,7 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
 {
   const tree = 'link "Offices" [ref_2] href="/offices" @64,181 55x19\nbutton "Save" [ref_5]\nbutton "Save" [ref_6]';
   const page = scriptedPage({
-    readPageScript: () => outline(tree),
+    readPageScript: () => ({ ...outline(tree), items: [{ ref: "ref_2", line: 'link "Offices" [ref_2] href="/offices"', box: "64,181 55x19" }] }),
     refCenterScript: (ref) => (ref === "ref_2" ? { x: 90, y: 190, w: 55, h: 19 } : { error: `${ref} not found; call read_page again to refresh refs` }),
     hitTestScript: () => null,
   });
@@ -78,6 +78,8 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   await assert.rejects(browser.run("browser", { action: "left_click", ref: "button_2" }), /is not a ref/, "the role must match the ref's control");
   await assert.rejects(browser.run("browser", { action: "left_click", ref: 'button "Save"' }), /2 controls are button "Save": ref_5, ref_6/);
   await assert.rejects(browser.run("browser", { action: "left_click", ref: "the offices link" }), /is not a ref: refs look like ref_12/);
+  await browser.run("browser", { action: "left_click", ref: "ref_2" });
+  await assert.rejects(browser.run("browser", { action: "left_click", ref: "req_3" }), /Controls in view:\nlink "Offices" \[ref_2\]/, "the error lists the refs in view");
 }
 
 // clickTarget: a coordinate click says what it landed on, and names an embedded frame.
