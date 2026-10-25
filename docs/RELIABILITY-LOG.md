@@ -107,3 +107,7 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   boxes saves; the other 13 fixture pages and 5 public sites (HN, Wikipedia, books.toscrape,
   GitHub, BBC News) produce identical outlines with it on, and outline time is unchanged
   (1-4 ms). Benchmark run queued after the chain.
+- Phase 3 results (dev split, one run each, fx-sales-sum re-verdicted): presence_penalty 0:
+  15/18 (304 s per task); thinking on: 12/18, the lowest of all runs (400 s per task vs about
+  306 s, 4 timeouts, 92 repeated calls). Thinking stays off. Neither sampling change moved
+  accuracy beyond the baseline's spread (14 and 16).
