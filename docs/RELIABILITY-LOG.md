@@ -117,3 +117,11 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   (timeout). 333 s per task, 95k tokens. The flag changed the outline of only 2 of 37 fixture
   pages checked (prefs; stock, whose headers sort the table on click) and none of 5 public sites.
   Candidate to enable by default after a repeat run.
+- Holo4 (plain, first 8 tasks before the restart): tool syntax works (refs, form_input,
+  read_page); fx-sitemap-phone failed because it passed ref 'link "Offices"' (the outline line)
+  and the tool's "not found; call read_page again" advice sent it in a loop. New experiments:
+  refNames (accept a unique outline line as the ref; clearer error otherwise) and
+  continueIntent (a reply that only announces its next step is told to take it, at most twice;
+  about 4 of 20 non-timeout failures across all runs ended that way, Zigger and Holo4 alike).
+- On request, the Holo runs were restarted with pointer, refNames and continueIntent on, with
+  Zigger run under the same three flags in between for a like-for-like comparison.
