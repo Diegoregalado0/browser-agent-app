@@ -6,7 +6,7 @@
 // iframes are walked in place; cross-origin ones are listed but their contents are not.
 // shotWidth: list only the controls in the viewport, one per line with a coarse box in
 // the pixels of a screenshot scaled to at most this width, and return them as items too.
-export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
+export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer = false) {
   const inView = shotWidth > 0;
   if (inView) interactiveOnly = true;
   const scale = inView ? Math.min(1, shotWidth / innerWidth) : 1;
@@ -33,8 +33,14 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
   // element styled as a button (Bootstrap's .btn), shown with a pointer cursor. Shops use
   // these for buttons such as "Proceed To Checkout".
   const SCRIPTED_SELECTOR = "a:not([href]), .btn";
+  const cursorOf = (el) => el.ownerDocument.defaultView.getComputedStyle(el).cursor;
+  // The pointer experiment: any element that shows a pointer cursor its parent does not (the
+  // cursor is inherited) and holds no other control, such as a toggle drawn as a plain div
+  // whose click handler a script set.
+  const isPointer = (el) =>
+    pointer && cursorOf(el) === "pointer" && !(el.parentElement && cursorOf(el.parentElement) === "pointer") && !el.querySelector(INTERACTIVE_SELECTOR);
   const isInteractive = (el) =>
-    el.matches(INTERACTIVE_SELECTOR) || (el.matches(SCRIPTED_SELECTOR) && el.ownerDocument.defaultView.getComputedStyle(el).cursor === "pointer");
+    el.matches(INTERACTIVE_SELECTOR) || (el.matches(SCRIPTED_SELECTOR) && cursorOf(el) === "pointer") || isPointer(el);
   const STRUCTURAL = {
     H1: "heading", H2: "heading", H3: "heading", H4: "heading", H5: "heading", H6: "heading",
     NAV: "navigation", MAIN: "main", HEADER: "banner", FOOTER: "contentinfo", ASIDE: "complementary",
@@ -81,7 +87,9 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0) {
     const attr = el.getAttribute("alt") || el.getAttribute("placeholder") || el.getAttribute("title");
     if (attr) return clean(attr);
     if (el.tagName === "INPUT" && ["submit", "button", "reset"].includes(el.type)) return clean(el.value);
-    return clean(el.innerText || el.textContent || "");
+    const text = clean(el.innerText || el.textContent || "");
+    // An unnamed pointer control (a bare switch) takes the text just before it as its name.
+    return text || (isPointer(el) && !el.matches(INTERACTIVE_SELECTOR) ? clean(el.previousElementSibling?.innerText) : "");
   };
 
   const lines = [];

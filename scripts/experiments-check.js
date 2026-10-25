@@ -3,6 +3,7 @@
 // each one is off unless switched on, and does what it says when on.
 import assert from "node:assert/strict";
 import { Browser } from "../src/browser-tools.js";
+import { readPageScript } from "../src/page-scripts.js";
 import { DEFAULTS, EXPERIMENTS, cleanSetting, mergeConfig } from "../src/config-core.js";
 import { Agent } from "../src/agent.js";
 import { providers } from "../src/providers/index.js";
@@ -210,6 +211,47 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   const on = await browser.run("browser", { action: "screenshot" });
   assert.deepEqual(order, ["draw", "capture", "remove"]);
   assert.match(on.at(-1).text, /A numbered label marks each of 3 controls in view: label N is ref_N/);
+}
+// pointer: the outline lists an element clickable only by its pointer cursor (a div switch,
+// named by the text before it), once and not through its children, and not a pointer card
+// that holds a real control; off, neither is listed. The Browser passes the switch along.
+{
+  const view = { getComputedStyle: (e) => ({ display: "block", visibility: "visible", opacity: "1", cursor: e.cursor }) };
+  const find = (kids, sel) => kids.find((k) => k.matches(sel) || find(k.children, sel));
+  const el = (tag, text = "", cursor = "auto", kids = []) => {
+    const e = {
+      tagName: tag, innerText: text, textContent: text, cursor, children: kids, labels: null, ownerDocument: { defaultView: view },
+      getAttribute: () => null, matches: (sel) => sel.split(",").includes(tag.toLowerCase()), querySelector: (sel) => find(kids, sel) ?? null,
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 }),
+    };
+    kids.forEach((k, i) => Object.assign(k, { parentElement: e, previousElementSibling: kids[i - 1] ?? null }));
+    return e;
+  };
+  const body = el("BODY", "", "auto", [
+    el("DIV", "Dark mode", "auto", [el("DIV", "Dark mode"), el("DIV", "", "pointer")]),
+    el("DIV", "Save changes", "pointer", [el("SPAN", "Save changes", "pointer")]),
+    el("DIV", "Buy", "pointer", [el("BUTTON", "Buy", "pointer")]),
+  ]);
+  Object.assign(globalThis, {
+    window: {}, innerWidth: 800, innerHeight: 600, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
+    document: { title: "Prefs", body, documentElement: { scrollWidth: 800, scrollHeight: 600 } },
+  });
+  const on = readPageScript(true, 40000, 0, true).tree;
+  assert.match(on, /div "Dark mode" \[ref_\d+\]/);
+  assert.equal(on.match(/"Save changes" \[ref_/g)?.length, 1, on);
+  assert.match(on, /button "Buy"/);
+  assert.doesNotMatch(on, /div "Buy"/, "a pointer card holding a button is not a control");
+  const off = readPageScript(true, 40000, 0, false).tree;
+  assert.doesNotMatch(off, /div "/);
+  assert.match(off, /button "Buy"/);
+  for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
+  const args = [];
+  const page = scriptedPage({ readPageScript: (...a) => (args.push(a.at(-1)), outline("")) });
+  const browser = new Browser(page.transport);
+  await browser.run("read_page", { filter: "interactive" });
+  browser.experiments = { pointer: true };
+  await browser.run("read_page", { filter: "interactive" });
+  assert.deepEqual(args, [false, true]);
 }
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.

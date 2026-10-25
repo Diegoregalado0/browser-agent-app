@@ -28,10 +28,12 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //   settle       after an action, wait until the page has stopped changing and loading data
 //                (up to 2 s) instead of a fixed 300 ms
 //   marks        screenshots carry a numbered label on each control in view (label N is ref_N)
+//   pointer      the page outline also lists elements a script made clickable with nothing but
+//                a pointer cursor (for example a toggle drawn as a div)
 // The sampling settings that may be sent per request (config.sampling), with their bounds.
 export const SAMPLING_RANGES = { temperature: [0, 2], top_p: [0, 1], top_k: [0, 200], min_p: [0, 1], presence_penalty: [-2, 2], repeat_penalty: [0.5, 2] };
 
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks"];
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer"];
 
 export const DEFAULTS = {
   provider: "openai",
