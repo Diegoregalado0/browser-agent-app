@@ -6,7 +6,7 @@
 // iframes are walked in place; cross-origin ones are listed but their contents are not.
 // shotWidth: list only the controls in the viewport, one per line with a coarse box in
 // the pixels of a screenshot scaled to at most this width, and return them as items too.
-export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer = false) {
+export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer = false, grid = false) {
   const inView = shotWidth > 0;
   if (inView) interactiveOnly = true;
   const scale = inView ? Math.min(1, shotWidth / innerWidth) : 1;
@@ -135,8 +135,10 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer
     const right = Math.min(innerWidth, r.right + ox);
     const bottom = Math.min(innerHeight, r.bottom + oy);
     if (right <= left || bottom <= top) return null;
-    const px = (v) => Math.round(v * scale);
-    return { text: `${px(left)},${px(top)} ${px(right - left)}x${px(bottom - top)}`, area: (right - left) * (bottom - top) };
+    // Screenshot pixels, or a 0-1000 grid over the view (the coords1000 experiment).
+    const px = (v) => Math.round(grid ? (v / innerWidth) * 1000 : v * scale);
+    const py = (v) => Math.round(grid ? (v / innerHeight) * 1000 : v * scale);
+    return { text: `${px(left)},${py(top)} ${px(right - left)}x${py(bottom - top)}`, area: (right - left) * (bottom - top) };
   };
 
   const walk = (root, depth, ox = 0, oy = 0) => {

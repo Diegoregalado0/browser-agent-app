@@ -679,6 +679,17 @@ export class Browser {
     }
     const coord = input[key];
     if (!Array.isArray(coord) || coord.length !== 2) throw new Error(`${key} [x, y] or ref is required for ${input.action}`);
+    return this.#toCss(coord);
+  }
+
+  // A model coordinate in CSS pixels: screenshot pixels, or with the coords1000 experiment a
+  // 0-1000 grid over the screenshot (the convention Holo4 answers in). Clicks and the safety
+  // checks' target lookups all convert here, so they agree on the element.
+  async #toCss(coord) {
+    if (this.experiments.coords1000) {
+      const vp = await this.#viewport();
+      return { x: Math.round((coord[0] / 1000) * vp.w), y: Math.round((coord[1] / 1000) * vp.h) };
+    }
     if (!this.cssPerPixel) {
       const vp = await this.#viewport();
       this.cssPerPixel = vp.w / Math.min(vp.w, SCREENSHOT_MAX_WIDTH);
@@ -819,7 +830,7 @@ export class Browser {
 
   // The controls in view now; also kept as the base the next change report compares with.
   async #view() {
-    const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH, !!this.experiments.pointer);
+    const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH, !!this.experiments.pointer, !!this.experiments.coords1000);
     this.views.set(this.currentId, res);
     this.#rememberRefs(res.tree);
     return res;
@@ -935,7 +946,7 @@ export class Browser {
           { type: "image", mediaType: "image/jpeg", data: shot.data },
           {
             type: "text",
-            text: `Browser screenshot ${shot.width}x${shot.height}${shot.marked ? `. A numbered label marks each of ${shot.marked} controls in view: label N is ref_N, so click it with that ref.` : ""}`,
+            text: `Browser screenshot ${shot.width}x${shot.height}${shot.marked ? `. A numbered label marks each of ${shot.marked} controls in view: label N is ref_N, so click it with that ref.` : ""}${this.experiments.coords1000 ? ". Coordinates are on a 0-1000 grid over the screenshot ([500, 500] is its center)." : ""}`,
           },
         ];
       }
@@ -1295,8 +1306,8 @@ export class Browser {
   async describeTarget(input) {
     try {
       if (input.ref) return await this.callInPage(describeTargetScript, input.ref, 0, 0);
-      if (Array.isArray(input.coordinate) && this.cssPerPixel) {
-        const [x, y] = input.coordinate.map((v) => Math.round(v * this.cssPerPixel));
+      if (Array.isArray(input.coordinate) && (this.cssPerPixel || this.experiments.coords1000)) {
+        const { x, y } = await this.#toCss(input.coordinate);
         return await this.callInPage(describeTargetScript, null, x, y);
       }
     } catch {}
@@ -1310,11 +1321,7 @@ export class Browser {
       if (input.ref) return await this.callInPage(targetFrameScript, input.ref, null, null);
       if (Array.isArray(input.coordinate)) {
         // As #point scales it, so the frame checked is the one the click lands in.
-        if (!this.cssPerPixel) {
-          const vp = await this.#viewport();
-          this.cssPerPixel = vp.w / Math.min(vp.w, SCREENSHOT_MAX_WIDTH);
-        }
-        const [x, y] = input.coordinate.map((v) => Math.round(v * this.cssPerPixel));
+        const { x, y } = await this.#toCss(input.coordinate);
         return await this.callInPage(targetFrameScript, null, x, y);
       }
       return await this.callInPage(targetFrameScript, null, null, null);

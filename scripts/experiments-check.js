@@ -329,6 +329,36 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
     else assert.match(out, /No change among the controls in view/);
   }
 }
+// coords1000: a click at [500, 250] on the 0-1000 grid lands at the viewport's center column and
+// quarter height, and the safety check's target lookup uses the same point; off, coordinates
+// are screenshot pixels. The grid also applies to the view's boxes.
+{
+  const looked = [];
+  const page = scriptedPage({ readPageScript: () => outline(""), describeTargetScript: (ref, x, y) => (looked.push([x, y]), "button \"Buy\"") });
+  const browser = new Browser(page.transport);
+  browser.experiments = { coords1000: true };
+  await browser.run("browser", { action: "left_click", coordinate: [500, 250] });
+  assert.ok(page.sent.some((s) => s.type === "mousePressed" && s.x === 640 && s.y === 200), "clicked the grid point (viewport 1280x800)");
+  assert.deepEqual(await browser.describeTarget({ coordinate: [500, 250] }), "button \"Buy\"");
+  assert.deepEqual(looked.at(-1), [640, 200], "the safety check looked where the click lands");
+  browser.experiments = {};
+  page.sent.length = 0;
+  await browser.run("browser", { action: "left_click", coordinate: [500, 250] });
+  assert.ok(page.sent.some((s) => s.type === "mousePressed" && s.x === 500 && s.y === 250), "off: screenshot pixels");
+  const view = { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1", cursor: "auto" }) };
+  const button = {
+    tagName: "BUTTON", innerText: "Buy", textContent: "Buy", children: [], labels: null, ownerDocument: { defaultView: view },
+    getAttribute: () => null, matches: (sel) => sel.split(",").includes("button"), querySelector: () => null,
+    getBoundingClientRect: () => ({ left: 640, top: 200, right: 960, bottom: 400, width: 320, height: 200 }),
+  };
+  Object.assign(globalThis, {
+    window: {}, innerWidth: 1280, innerHeight: 800, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
+    document: { title: "Shop", body: { children: [button] }, documentElement: { scrollWidth: 1280, scrollHeight: 800 } },
+  });
+  assert.equal(readPageScript(true, 1000, 1280, false, true).items[0].box, "500,250 250x250", "view boxes on the grid");
+  assert.equal(readPageScript(true, 1000, 640, false, false).items[0].box, "320,100 160x100", "off: screenshot pixels (half-width shot)");
+  for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
+}
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.
 {
