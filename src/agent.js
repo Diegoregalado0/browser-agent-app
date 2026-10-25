@@ -39,6 +39,13 @@ const RESTORED_RESULT = "[output from before this conversation was reopened is n
 // Sent once when a turn ends with neither tool calls nor text (the answer was only in the
 // model's thinking, which the user does not see).
 const FINAL_ANSWER_PROMPT = "You ended your turn without writing a reply. Give your final answer to the user now, as plain text.";
+// A reply whose last sentence announces a step the model did not take ("Let me check page 7."),
+// for the continueIntent experiment. A reply that hands the task to the user is not one.
+const ANNOUNCES_STEP = /(?:^|[.!:]\s+)(?:(?:now|next|then),?\s+)?(?:let me|i'll|i will|i'm going to)\s+(?!know\b)[^.!?]{2,160}[.!:]?$/i;
+const ASKS_USER = /\?|\b(let me know|could you|can you|would you|please)\b/i;
+const CONTINUE_PROMPT = "[Agent] Your reply says what you will do next, but it called no tool, so the task would end here. Do that next step now, or, if the task is finished or needs the user, give your final reply.";
+// How many times one task may be told to continue (continueIntent).
+const CONTINUE_MAX = 2;
 // A reply that says the task worked, for the completion check (verifyDone).
 const CLAIMS_DONE = /\b(done|complete[d]?|finished|success(ful(ly)?)?|submitted|sent|saved|added|created|placed|booked|registered|confirmed|updated|archived|redeemed|activated|requested)\b/i;
 // Text the agent adds to user messages (its prompts, the completion check's page excerpt and a
@@ -491,6 +498,7 @@ export class Agent {
       let finalAnswerAsked = false;
       // The completion check (verifyDone) runs at most once per task.
       let verifyAsked = false;
+      let continues = 0;
       for (let step = 0; step < config.maxSteps; step++) {
         this.#emit(signal, { type: "assistant_start" });
         let result;
@@ -633,6 +641,13 @@ export class Agent {
               if (signal.aborted) return;
               continue;
             }
+          }
+          const tail = replyText.slice(-300);
+          if (config.experiments?.continueIntent && continues < CONTINUE_MAX && result.stop !== "max_tokens" && ANNOUNCES_STEP.test(tail) && !ASKS_USER.test(tail)) {
+            continues++;
+            agentPrompt = { role: "user", content: [{ type: "text", text: CONTINUE_PROMPT }] };
+            this.messages.push(agentPrompt);
+            continue;
           }
           if (result.stop === "max_tokens") this.#emit(signal, { type: "notice", text: "The reply hit the output limit." });
           else if (!replyText) {

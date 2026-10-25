@@ -32,10 +32,12 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //                a pointer cursor (for example a toggle drawn as a div)
 //   refNames     a ref written as the control's outline line (link "Offices") is taken as that
 //                control's ref when exactly one control matches
+//   continueIntent  a reply that ends by announcing a step it did not take ("Let me check page
+//                7.") is told to take it (at most twice per task) instead of ending the task
 // The sampling settings that may be sent per request (config.sampling), with their bounds.
 export const SAMPLING_RANGES = { temperature: [0, 2], top_p: [0, 1], top_k: [0, 200], min_p: [0, 1], presence_penalty: [-2, 2], repeat_penalty: [0.5, 2] };
 
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames"];
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames", "continueIntent"];
 
 export const DEFAULTS = {
   provider: "openai",

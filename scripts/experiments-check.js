@@ -274,6 +274,32 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   await browser.run("read_page", { filter: "interactive" });
   assert.deepEqual(args, [false, true]);
 }
+// continueIntent: a reply that ends by announcing a step it did not take is told to take it,
+// at most twice per task; a reply that answers or hands back to the user ends the task; off,
+// the announcement ends the task as before.
+{
+  const sent = [];
+  let replies = [];
+  providers.openai = { describeError: () => null, turn: async ({ messages }) => (sent.push(structuredClone(messages)), replies.shift()) };
+  const say = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+  const agent = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  agent.browser = { startTask: async () => {}, endTask: async () => {}, currentPage: async () => ({ id: "t1", title: "T", url: "https://a.test/" }), currentUrl: async () => "https://a.test/", run: async () => "ok" };
+  const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" }, permissionMode: "auto" };
+  const run = async (texts, experiments) => {
+    sent.length = 0;
+    agent.reset();
+    replies = texts.map(say);
+    await agent.run("Find Priya in the directory", { ...config, experiments });
+    return sent.length;
+  };
+  assert.equal(await run(["Not on page 6. Let me continue to page 7."], {}), 1, "off: the announcement ends the task");
+  assert.equal(await run(["Not on page 6. Let me continue to page 7.", "Priya is in Legal, extension 4568."], { continueIntent: true }), 2);
+  assert.match(sent[1].at(-1).content[0].text, /^\[Agent\] Your reply says what you will do next, but it called no tool/);
+  assert.equal(await run(["Let me check page 2.", "Let me check page 3.", "Let me check page 4.", "unused"], { continueIntent: true }), 3, "told at most twice");
+  assert.ok(!agent.messages.some((m) => m.content.some((b) => /Your reply says what you will do next/.test(b.text ?? ""))), "the prompt left the history");
+  assert.equal(await run(["If you have another link, let me know and I'll check it."], { continueIntent: true }), 1, "a hand-back ends the task");
+  assert.equal(await run(["Priya is in Legal, extension 4568."], { continueIntent: true }), 1);
+}
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.
 {
