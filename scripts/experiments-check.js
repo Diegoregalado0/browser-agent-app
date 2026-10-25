@@ -302,6 +302,31 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   assert.equal(await run(["If you have another link, let me know and I'll check it."], { continueIntent: true }), 1, "a hand-back ends the task");
   assert.equal(await run(["Priya is in Legal, extension 4568."], { continueIntent: true }), 1);
 }
+// freshBase: a popup opens after the last action and the model looks (read_page); closing it
+// then reports the popup's controls gone instead of "No change". Off, the old base hides it.
+{
+  const page0 = 'button "Add to wishlist" [ref_1]';
+  const popup = page0 + '\nbutton "Close" [ref_4]';
+  const items = (tree) => tree.split("\n").map((line) => ({ ref: /\[(ref_\d+)\]/.exec(line)[1], line, box: "1,1 10x10" }));
+  let tree = page0;
+  const page = scriptedPage({
+    readPageScript: () => ({ ...outline(tree), items: items(tree) }),
+    refCenterScript: () => ({ x: 10, y: 10, w: 10, h: 10 }),
+    hitTestScript: () => null,
+  });
+  const browser = new Browser(page.transport);
+  for (const on of [false, true]) {
+    browser.experiments = on ? { freshBase: true } : {};
+    tree = page0;
+    await browser.run("browser", { action: "left_click", ref: "ref_1" });
+    tree = popup;
+    await browser.run("read_page", { filter: "all" });
+    tree = page0;
+    const out = await browser.run("browser", { action: "left_click", ref: "ref_4" });
+    if (on) assert.match(out, /Out of view or removed: ref_4/);
+    else assert.match(out, /No change among the controls in view/);
+  }
+}
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.
 {

@@ -632,10 +632,10 @@ export class Browser {
     // The marks experiment labels each control in view with its ref number; the controls are
     // read first so every one in view has a ref.
     let marked = 0;
-    if (this.experiments.marks) {
-      await this.#view().catch(() => {});
-      marked = await this.callInPage(markRefsScript, true).catch(() => 0);
-    }
+    // The freshBase experiment: the next change report compares with the page as this
+    // screenshot shows it, not as it was after the last action.
+    if (this.experiments.marks || this.experiments.freshBase) await this.#view().catch(() => {});
+    if (this.experiments.marks) marked = await this.callInPage(markRefsScript, true).catch(() => 0);
     let data;
     try {
       ({ data } = await this.send("Page.captureScreenshot", {
@@ -1178,6 +1178,7 @@ export class Browser {
         const whole = input.filter === "all" || input.filter === "interactive";
         const res = whole ? await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS, 0, !!this.experiments.pointer) : await this.#view();
         if (whole) this.#rememberRefs(res.tree);
+        if (whole && this.experiments.freshBase) await this.#view().catch(() => {});
         const text = `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nViewport: ${res.viewport}, scroll ${res.scroll}\n\n${res.tree}`;
         if (!res.visual) return whole ? text : `${text}\n[Controls in view only; filter "all" outlines the whole page.]`;
         // Content the outline cannot show comes with a screenshot.
