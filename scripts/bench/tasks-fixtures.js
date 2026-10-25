@@ -8,7 +8,7 @@
 // confirming a change did not overfit), and a setup() that resets the task's site so a
 // rerun starts clean. Both fixture hosts are on this computer, so both are allowPrivate.
 
-import { FIXTURES_VERSION, startFixtures, person, orderStatus } from "./fixtures/server.js";
+import { FIXTURES_VERSION, SALES, startFixtures, person, orderStatus } from "./fixtures/server.js";
 
 const fx = await startFixtures();
 // The runner exits on its own when the tasks are done; the fixtures do not hold it open.
@@ -21,7 +21,7 @@ const { origin, state } = fx;
 const allowPrivate = [new URL(origin).hostname, new URL(fx.altOrigin).hostname];
 const u = (path) => `${origin}${path}`;
 const has = (text, word) => text.toLowerCase().includes(word.toLowerCase());
-// Reply with thousands separators removed, so "40,375" and "40375" both match.
+// Reply with thousands separators removed, so "40,425" and "40425" both match.
 const plain = (text) => text.replace(/(\d),(?=\d{3}\b)/g, "$1");
 const verdict = (ok, pass, fail) => ({ ok, reason: ok ? pass : fail });
 const visited = (site, path) => state[site].visits.includes(path);
@@ -101,8 +101,9 @@ export const TASKS = [
   task("sales", "sales-sum", "tables", "dev", "sum a column for one region",
     `The sales table at ${u("/sales")} lists revenue per rep. What was the total Q3 revenue for the West region? Give me the number.`,
     ({ reply }) => {
-      const ok = /\b40375\b/.test(plain(reply));
-      return verdict(ok, "said 40375", `reply=${reply.slice(0, 120)}`);
+      const west = String(SALES.filter(([region]) => region === "West").reduce((sum, row) => sum + row[3], 0));
+      const ok = new RegExp(`\\b${west}\\b`).test(plain(reply));
+      return verdict(ok, `said ${west}`, `reply=${reply.slice(0, 120)}`);
     }),
   task("stock", "stock-below", "tables", "heldout", "compare columns row by row",
     `On the inventory page at ${u("/stock")}, how many items are in stock below their reorder level (strictly below), and which item is furthest below its level?`,
