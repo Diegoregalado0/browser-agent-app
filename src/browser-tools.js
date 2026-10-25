@@ -828,9 +828,14 @@ export class Browser {
     return now === value ? `Set value to "${value.slice(0, 80)}"` : null;
   }
 
+  // The outline experiments switched on for this task (see readPageScript).
+  #outlineOptions() {
+    return { pointer: !!this.experiments.pointer, grid: !!this.experiments.coords1000, rows: !!this.experiments.rowContext };
+  }
+
   // The controls in view now; also kept as the base the next change report compares with.
   async #view() {
-    const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH, !!this.experiments.pointer, !!this.experiments.coords1000);
+    const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH, this.#outlineOptions());
     this.views.set(this.currentId, res);
     this.#rememberRefs(res.tree);
     return res;
@@ -879,7 +884,7 @@ export class Browser {
     const old = this.refLines.get(this.currentId)?.get(ref);
     if (!old) return null;
     const key = (line) => /^(\S+)( "[^"]*")?/.exec(line.trim())?.[0];
-    const res = await this.callInPage(readPageScript, true, PAGE_OUTLINE_MAX_CHARS, 0, !!this.experiments.pointer);
+    const res = await this.callInPage(readPageScript, true, PAGE_OUTLINE_MAX_CHARS, 0, this.#outlineOptions());
     this.#rememberRefs(res.tree);
     const matches = res.tree
       .split("\n")
@@ -1191,7 +1196,7 @@ export class Browser {
       }
       case "read_page": {
         const whole = input.filter === "all" || input.filter === "interactive";
-        const res = whole ? await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS, 0, !!this.experiments.pointer) : await this.#view();
+        const res = whole ? await this.callInPage(readPageScript, input.filter === "interactive", PAGE_OUTLINE_MAX_CHARS, 0, this.#outlineOptions()) : await this.#view();
         if (whole) this.#rememberRefs(res.tree);
         if (whole && this.experiments.freshBase) await this.#view().catch(() => {});
         const text = `URL: ${shortUrl(res.url)}\nTitle: ${res.title}\nViewport: ${res.viewport}, scroll ${res.scroll}\n\n${res.tree}`;
@@ -1201,7 +1206,7 @@ export class Browser {
         return [{ type: "text", text: `${text}\n[The view has ${res.visual}; a screenshot is attached.]` }, ...shot];
       }
       case "find": {
-        const res = await this.callInPage(readPageScript, false, 200000, 0, !!this.experiments.pointer);
+        const res = await this.callInPage(readPageScript, false, 200000, 0, this.#outlineOptions());
         this.#rememberRefs(res.tree);
         const words = input.query.toLowerCase().split(/\s+/).filter(Boolean);
         const matches = res.tree

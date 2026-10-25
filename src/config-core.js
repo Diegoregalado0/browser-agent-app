@@ -39,10 +39,12 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //                between is reported instead of "No change"
 //   coords1000   coordinates (clicks, and the boxes in the view) use a 0-1000 grid over the
 //                screenshot instead of screenshot pixels, the convention Holo4 answers in
+//   rowContext   a control in a list item or table row carries that row's text in the outline
+//                (button "Archive" in "Book dentist"), so identical buttons can be told apart
 // The sampling settings that may be sent per request (config.sampling), with their bounds.
 export const SAMPLING_RANGES = { temperature: [0, 2], top_p: [0, 1], top_k: [0, 200], min_p: [0, 1], presence_penalty: [-2, 2], repeat_penalty: [0.5, 2] };
 
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames", "continueIntent", "freshBase", "coords1000"];
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames", "continueIntent", "freshBase", "coords1000", "rowContext"];
 
 export const DEFAULTS = {
   provider: "openai",

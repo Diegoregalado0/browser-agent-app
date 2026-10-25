@@ -6,7 +6,9 @@
 // iframes are walked in place; cross-origin ones are listed but their contents are not.
 // shotWidth: list only the controls in the viewport, one per line with a coarse box in
 // the pixels of a screenshot scaled to at most this width, and return them as items too.
-export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer = false, grid = false) {
+// Options (experiments): pointer lists pointer-cursor controls, grid gives boxes on a 0-1000
+// grid, rows names the list item or table row a control sits in.
+export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, { pointer = false, grid = false, rows = false } = {}) {
   const inView = shotWidth > 0;
   if (inView) interactiveOnly = true;
   const scale = inView ? Math.min(1, shotWidth / innerWidth) : 1;
@@ -58,6 +60,7 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer
     return r.width > 0 || r.height > 0 || s.display === "contents";
   };
   const clean = (t) => (t || "").replace(/\s+/g, " ").trim();
+  const ROW_TEXT_MAX = 40;
   const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
 
   const roleOf = (el) => {
@@ -105,10 +108,32 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, pointer
     size += line.length + 1;
   };
 
+  let names = null;
+  const nameCount = (name) => {
+    if (!names) {
+      names = new Map();
+      for (const c of document.querySelectorAll(INTERACTIVE_SELECTOR)) {
+        const n = clip(nameOf(c), 100);
+        if (n) names.set(n, (names.get(n) ?? 0) + 1);
+      }
+    }
+    return names.get(name) ?? 0;
+  };
   const describe = (el, role, interactive) => {
     let line = role;
     const name = clip(nameOf(el), interactive ? 100 : 200);
     if (name) line += ` "${name.replace(/"/g, "'")}"`;
+    // The rowContext experiment: a control whose name other controls share ("Archive" six
+    // times) carries the text of its list item or table cell, so each one says which task it
+    // archives.
+    // Unique names stay as they are, which keeps outlines short.
+    if (interactive && rows && name && nameCount(name) > 1) {
+      // The nearest table cell or row around it (a sort button names its column, a shop's
+      // button its product); a control in neither gets no text.
+      const box = el.parentElement?.closest("td, th, [role=cell], [role=gridcell], [role=columnheader], li, tr, [role=row], [role=listitem]");
+      const text = box ? clip(clean(box.innerText).replace(clean(el.innerText || ""), "").trim(), ROW_TEXT_MAX) : "";
+      if (text && text !== name) line += ` in "${text.replace(/"/g, "'")}"`;
+    }
     if (interactive) line += ` [${refFor(el)}]`;
     if (el.tagName === "A" && el.getAttribute("href")) line += ` href="${clip(el.getAttribute("href"), 120)}"`;
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {

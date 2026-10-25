@@ -261,17 +261,17 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
     window: {}, innerWidth: 800, innerHeight: 600, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
     document: { title: "Prefs", body, documentElement: { scrollWidth: 800, scrollHeight: 600 } },
   });
-  const on = readPageScript(true, 40000, 0, true).tree;
+  const on = readPageScript(true, 40000, 0, { pointer: true }).tree;
   assert.match(on, /div "Dark mode" \[ref_\d+\]/);
   assert.equal(on.match(/"Save changes" \[ref_/g)?.length, 1, on);
   assert.match(on, /button "Buy"/);
   assert.doesNotMatch(on, /div "Buy"/, "a pointer card holding a button is not a control");
-  const off = readPageScript(true, 40000, 0, false).tree;
+  const off = readPageScript(true, 40000, 0, {}).tree;
   assert.doesNotMatch(off, /div "/);
   assert.match(off, /button "Buy"/);
   for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
   const args = [];
-  const page = scriptedPage({ readPageScript: (...a) => (args.push(a.at(-1)), outline("")) });
+  const page = scriptedPage({ readPageScript: (...a) => (args.push(a.at(-1).pointer), outline("")) });
   const browser = new Browser(page.transport);
   await browser.run("read_page", { filter: "interactive" });
   browser.experiments = { pointer: true };
@@ -355,8 +355,36 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
     window: {}, innerWidth: 1280, innerHeight: 800, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
     document: { title: "Shop", body: { children: [button] }, documentElement: { scrollWidth: 1280, scrollHeight: 800 } },
   });
-  assert.equal(readPageScript(true, 1000, 1280, false, true).items[0].box, "500,250 250x250", "view boxes on the grid");
-  assert.equal(readPageScript(true, 1000, 640, false, false).items[0].box, "320,100 160x100", "off: screenshot pixels (half-width shot)");
+  assert.equal(readPageScript(true, 1000, 1280, { grid: true }).items[0].box, "500,250 250x250", "view boxes on the grid");
+  assert.equal(readPageScript(true, 1000, 640, {}).items[0].box, "320,100 160x100", "off: screenshot pixels (half-width shot)");
+  for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
+}
+// rowContext: a control in a list item carries the item's other text, so identical buttons can
+// be told apart; off, the line is unchanged.
+{
+  const view = { getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1", cursor: "auto" }) };
+  const node = (tag, text, kids = []) => {
+    const e = {
+      tagName: tag, innerText: text, textContent: text, children: kids, labels: null, ownerDocument: { defaultView: view },
+      getAttribute: () => null, matches: (sel) => sel.split(",").includes(tag.toLowerCase()), querySelector: () => null,
+      closest(sel) { return sel.split(",").map((x) => x.trim()).includes(tag.toLowerCase()) ? e : (e.parentElement?.closest(sel) ?? null); },
+      getBoundingClientRect: () => ({ left: 10, top: 10, right: 90, bottom: 40, width: 80, height: 30 }),
+    };
+    for (const k of kids) k.parentElement = e;
+    return e;
+  };
+  const item = (title, label = "Archive") => node("LI", `${title}\n${label}`, [node("BUTTON", label)]);
+  const items = [item("Book dentist"), item("Buy stamps"), item("Call mum", "Edit")];
+  const body = node("BODY", "", [node("UL", "", items)]);
+  Object.assign(globalThis, {
+    window: {}, innerWidth: 800, innerHeight: 600, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
+    document: { title: "Tasks", body, documentElement: { scrollWidth: 800, scrollHeight: 600 }, querySelectorAll: () => items.map((i) => i.children[0]) },
+  });
+  const on = readPageScript(true, 40000, 0, { rows: true }).tree;
+  assert.match(on, /button "Archive" in "Book dentist" \[ref_\d+\]/);
+  assert.match(on, /button "Archive" in "Buy stamps" \[ref_\d+\]/);
+  assert.match(on, /button "Edit" \[ref_\d+\]/, "a unique name gets no row text");
+  assert.doesNotMatch(readPageScript(true, 40000, 0, {}).tree, / in "/, "off: unchanged");
   for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
 }
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
