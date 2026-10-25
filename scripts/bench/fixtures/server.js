@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 
 // Bump when a page, rule or data value changes, so results from different versions are
 // never compared as if the fixtures were the same.
-export const FIXTURES_VERSION = "1";
+export const FIXTURES_VERSION = "2";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -241,7 +241,8 @@ ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
   const wizNav = (n) => `<p>Step ${n} of 4</p>`;
   route("GET", /^\/wizard(?:\/(\d))?$/, (c, m) => {
     const n = Number(m[1] ?? 1), d = wiz().draft;
-    if ((n >= 2 && !d.plan) || (n >= 3 && !d.city) || (n >= 4 && d.newsletter === undefined)) return c.redirect("/wizard/1");
+    // Step 5 is the result page; finishing clears the draft, so the step guard skips it.
+    if (n <= 4 && ((n >= 2 && !d.plan) || (n >= 3 && !d.city) || (n >= 4 && d.newsletter === undefined))) return c.redirect("/wizard/1");
     const bodies = {
       1: `<h1>Choose a plan</h1><form method="post" action="/wizard/1">${["Basic", "Pro", "Team"].map((p) => `<label><input type="radio" name="plan" value="${p}"> ${p}</label>`).join("")}<button>Next</button></form>`,
       2: `<h1>Delivery address</h1>${d.error ? `<div class="err" role="alert">${esc(d.error)}</div>` : ""}<form method="post" action="/wizard/2"><label>City <input name="city"></label><label>Postcode <input name="postcode"></label><button>Next</button></form>`,

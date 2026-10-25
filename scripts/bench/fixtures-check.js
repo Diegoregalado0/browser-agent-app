@@ -42,7 +42,10 @@ async function crawl() {
 const DONE = {
   "fx-register": async () => { await posts(["/register", { name: "Dana Reyes", email: "dana@example.com", username: "dana", password: "sunshine", confirm: "sunshine", country: "Portugal", terms: "yes" }]); await posts(["/register", { name: "Dana Reyes", email: "dana@example.com", username: "dana_r1", password: "sunshine1", confirm: "sunshine1", country: "Portugal", terms: "yes" }]); return ""; },
   "fx-support-format": async () => { await posts(["/support", { order: "1042", subject: "Refund status", message: "Where is my refund for this order?" }], ["/support", { order: "ORD-1042", subject: "Refund status", message: "Where is my refund for this order?" }]); return ""; },
-  "fx-wizard": async () => { await posts(["/wizard/1", { plan: "Team" }], ["/wizard/2", { city: "Springfield", postcode: "62704" }], ["/wizard/3", { newsletter: "yes" }], ["/wizard/finish"]); return ""; },
+  "fx-wizard": async () => { await posts(["/wizard/1", { plan: "Team" }], ["/wizard/2", { city: "Springfield", postcode: "62704" }], ["/wizard/3", { newsletter: "yes" }], ["/wizard/finish"]);
+    // After finishing, the result page says so (it once redirected back to step 1).
+    if (!/All set/.test(await (await get("/wizard/5")).text())) fail("fx-wizard: the finished wizard does not show its result page");
+    return ""; },
   "fx-rsvp-confirm": async () => { await posts(["/rsvp/submit", { name: "Dana Reyes", guests: "2", meal: "vegetarian" }], ["/rsvp/confirm"]); return "Confirmed, reference RSVP-2041."; },
   "fx-docs-deep": async () => { await get("/docs/reference/billing/invoices"); return "84 months"; },
   "fx-sitemap-phone": async () => { await get("/company/offices/lisbon"); return "+351 21 555 0142"; },
