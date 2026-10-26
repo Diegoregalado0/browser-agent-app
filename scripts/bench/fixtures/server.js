@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 
 // Bump when a page, rule or data value changes, so results from different versions are
 // never compared as if the fixtures were the same.
-export const FIXTURES_VERSION = "2";
+export const FIXTURES_VERSION = "3";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -24,6 +24,7 @@ const STYLE = `body{font:16px/1.5 system-ui,sans-serif;margin:24px;max-width:780
 label{display:block;margin:10px 0}table{border-collapse:collapse;margin:12px 0}td,th{border:1px solid #888;padding:4px 10px;text-align:left}
 button,.btn{padding:6px 14px;margin:4px 0}.card{border:1px solid #bbb;padding:12px;margin:12px 0}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10;display:flex;align-items:center;justify-content:center}
+.overlay[hidden]{display:none}
 .overlay .box{background:#fff;padding:24px;max-width:420px}`;
 
 const shell = (title, body, head = "") =>

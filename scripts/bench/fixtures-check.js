@@ -8,6 +8,11 @@ import { TASKS, fixtures as fx } from "./tasks-fixtures.js";
 import { FIXTURES_VERSION } from "./fixtures/server.js";
 
 const { origin, altOrigin, state } = fx;
+
+// The newsletter popup is shown and closed with the hidden attribute; .overlay sets display,
+// which beats the browser's own [hidden] rule, so the shell must restore it or the popup can
+// never close (fixtures v1 and v2 had this bug; no agent could pass fx-newsletter-modal).
+if (!(await (await fetch(origin + "/promo")).text()).includes(".overlay[hidden]{display:none}")) fail("fx-newsletter-modal: the popup cannot be hidden");
 const failures = [];
 const fail = (msg) => { failures.push(msg); console.error(`FAIL ${msg}`); };
 const expect = (cond, msg) => { if (!cond) fail(msg); };
