@@ -197,3 +197,8 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   cover fix): 26/28. Failures: fx-stale-list (rowContext was not in this run) and
   fx-expense-report (report correct and submitted; the loop guard stopped it after 4 tool
   errors before it read the total). Same run conditions as Holo4 + five fixes (17/28).
+- Holo3.1 + five fixes (fixtures v3): 16/28 (dev 11/18, held-out 5/10), 232 s and 59k tokens
+  per task. Same failure types as Holo4: claims about the page it never read (an invented
+  "no service" quote, "no reference number" on a page showing one, 5 PM for 17:45), telling
+  the user how instead of doing it, no retry after an error page, a missing cart item.
+  Same conditions: Zigger 26, Holo4 17, Holo3.1 16.
