@@ -131,7 +131,7 @@ const SITES = {
   report: () => ({ started: 0 }),
   catalog: () => ({ loads: 0 }),
   prefs: () => ({ saved: { dark: false, email: true, digest: false }, saves: 0 }),
-  voucher: () => ({ redeemed: [], wrong: 0 }),
+  voucher: () => ({ redeemed: [], wrong: 0, repeats: 0 }),
   hours: () => ({ callbacks: 0 }),
   rates: () => ({ quotes: [] }),
   shop: () => ({ cart: {}, coupon: null, shipping: null, orders: [] }),
@@ -369,11 +369,14 @@ document.getElementById("save").onclick=function(){var p=new URLSearchParams();d
   });
 
   route("GET", "/voucher", (c) => c.send(200, shell("Voucher", `<h1>Your gift voucher</h1><canvas id="v" width="420" height="130" style="border:1px solid #888"></canvas>
-<form method="post" action="/voucher/redeem"><label>Voucher code <input name="code"></label><button>Redeem</button></form>${state.voucher.redeemed.length ? `<p class="ok">Voucher redeemed.</p>` : ""}
+<form method="post" action="/voucher/redeem"><label>Voucher code <input name="code"></label><button>Redeem</button></form>${state.voucher.repeats ? `<p class="err" role="alert">This voucher has already been redeemed.</p>` : state.voucher.redeemed.length ? `<p class="ok">Voucher redeemed.</p>` : ""}
 <script>var x=document.getElementById("v").getContext("2d");x.fillStyle="#fff7e0";x.fillRect(0,0,420,130);x.fillStyle="#333";x.font="16px sans-serif";x.fillText("Gift voucher - present this code at checkout",14,30);x.font="bold 44px monospace";x.fillText("T7K4-92M",14,90);</script>`)));
   route("POST", "/voucher/redeem", (c) => {
     const code = (c.form.get("code") ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase();
-    if (code === "T7K492M") state.voucher.redeemed.push(code); else state.voucher.wrong++;
+    // A voucher redeems once, as on a real site; a second try is refused and shown as such.
+    if (code === "T7K492M" && state.voucher.redeemed.length) state.voucher.repeats++;
+    else if (code === "T7K492M") state.voucher.redeemed.push(code);
+    else state.voucher.wrong++;
     c.redirect("/voucher");
   });
 

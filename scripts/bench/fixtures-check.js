@@ -188,6 +188,11 @@ async function main() {
   const consent = await post("/cookie/consent", { choice: "essential", back: "/cookie/rates" });
   expect(consent.headers.get("location") === "/cookie/rates", "fx-cookie-wall: the choice does not return to the rates");
   expect((await (await get("/cookie/rates")).text()).includes("12.50"), "fx-cookie-wall: no rates after the choice");
+  // The voucher redeems once; a second redemption is refused and says so.
+  fx.reset();
+  await posts(["/voucher/redeem", { code: "T7K4-92M" }], ["/voucher/redeem", { code: "T7K4-92M" }]);
+  expect(state.voucher.redeemed.length === 1 && state.voucher.repeats === 1, `fx-canvas-code: voucher state ${JSON.stringify(state.voucher)}`);
+  expect((await (await get("/voucher")).text()).includes("already been redeemed"), "fx-canvas-code: a repeat redemption is not shown as refused");
   // The finished wizard's page shows no step counter.
   fx.reset();
   await posts(["/wizard/1", { plan: "Team" }], ["/wizard/2", { city: "Springfield", postcode: "62704" }], ["/wizard/3", { newsletter: "yes" }], ["/wizard/finish"]);
