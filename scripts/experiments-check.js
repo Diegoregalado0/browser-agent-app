@@ -248,6 +248,7 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
       tagName: tag, innerText: text, textContent: text, cursor, children: kids, labels: null, ownerDocument: { defaultView: view },
       getAttribute: () => null, matches: (sel) => sel.split(",").includes(tag.toLowerCase()), querySelector: (sel) => find(kids, sel) ?? null,
       getBoundingClientRect: () => ({ left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 }),
+      getClientRects: () => [{ left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 }],
     };
     kids.forEach((k, i) => Object.assign(k, { parentElement: e, previousElementSibling: kids[i - 1] ?? null }));
     return e;
@@ -352,6 +353,7 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
     tagName: "BUTTON", innerText: "Buy", textContent: "Buy", children: [], labels: null, ownerDocument: { defaultView: view },
     getAttribute: () => null, matches: (sel) => sel.split(",").includes("button"), querySelector: () => null,
     getBoundingClientRect: () => ({ left: 640, top: 200, right: 960, bottom: 400, width: 320, height: 200 }),
+    getClientRects: () => [{ left: 640, top: 200, right: 960, bottom: 400, width: 320, height: 200 }],
   };
   Object.assign(globalThis, {
     window: {}, innerWidth: 1280, innerHeight: 800, scrollX: 0, scrollY: 0, location: { href: "https://a.test/" },
@@ -371,6 +373,7 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
       getAttribute: () => null, matches: (sel) => sel.split(",").includes(tag.toLowerCase()), querySelector: () => null,
       closest(sel) { return sel.split(",").map((x) => x.trim()).includes(tag.toLowerCase()) ? e : (e.parentElement?.closest(sel) ?? null); },
       getBoundingClientRect: () => ({ left: 10, top: 10, right: 90, bottom: 40, width: 80, height: 30 }),
+      getClientRects: () => [{ left: 10, top: 10, right: 90, bottom: 40, width: 80, height: 30 }],
     };
     for (const k of kids) k.parentElement = e;
     return e;

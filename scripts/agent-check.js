@@ -27,7 +27,7 @@ import { TaskMetrics } from "../src/metrics.js";
 import { speedParts } from "../ui/speed.js";
 import { Browser, actionProblem, formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
-import { readPageScript, describeTargetScript, hitTestScript } from "../src/page-scripts.js";
+import { readPageScript, describeTargetScript, hitTestScript, refCenterScript } from "../src/page-scripts.js";
 import { siteGuide } from "../src/site-guides.js";
 import { OUTPUT_MAX_CHARS, stripGuard } from "../src/canvas.js";
 
@@ -1228,7 +1228,7 @@ for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY",
 // host (the document reports only the host at that point); a real overlay still is.
 {
   const rect = () => ({ left: 10, top: 10, width: 80, height: 30 });
-  const button = { tagName: "BUTTON", getBoundingClientRect: rect, contains: (n) => n === button, labels: [] };
+  const button = { tagName: "BUTTON", getBoundingClientRect: rect, getClientRects: () => [rect()], contains: (n) => n === button, labels: [] };
   const overlay = { tagName: "DIV", id: "ad", contains: () => false };
   let inner = button;
   const host = { tagName: "SUPPORT-CARD", contains: () => false, shadowRoot: { elementFromPoint: () => inner } };
@@ -1240,6 +1240,21 @@ for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY",
   assert.equal(hitTestScript("ref_1"), "div#ad", "an overlay inside the component still covers it");
   outer = overlay;
   assert.equal(hitTestScript("ref_1"), "div#ad", "a page overlay still covers it");
+  delete globalThis.window;
+}
+
+// A link that wraps onto two lines is clicked on its first line, not at the center of its
+// bounding box, which is plain paragraph text between the two pieces.
+{
+  const link = {
+    isConnected: true, scrollIntoView() {},
+    getBoundingClientRect: () => ({ left: 24, top: 143, width: 328, height: 43 }),
+    getClientRects: () => [{ left: 305, top: 143, width: 47, height: 19 }, { left: 24, top: 167, width: 47, height: 19 }],
+    ownerDocument: { defaultView: { frameElement: null } },
+  };
+  globalThis.window = { __agentRefStore: { map: new Map([["ref_1", { deref: () => link }]]) } };
+  const at = refCenterScript("ref_1");
+  assert.deepEqual([at.x, at.y], [329, 153], "clicked between the lines of a wrapped link");
   delete globalThis.window;
 }
 
@@ -1933,6 +1948,7 @@ const control = (tag, name, top, { w = 100, h = 20, interactive = true } = {}) =
     tagName: tag, innerText: name, textContent: name, children: [], labels: [], ownerDocument: viewDoc, isConnected: true,
     getAttribute: () => null, matches: () => interactive,
     getBoundingClientRect: () => ({ left: 10, top, right: 10 + w, bottom: top + h, width: w, height: h }),
+    getClientRects: () => [{ left: 10, top, right: 10 + w, bottom: top + h, width: w, height: h }],
   };
   return el;
 };

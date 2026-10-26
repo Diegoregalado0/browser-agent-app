@@ -154,7 +154,10 @@ export function readPageScript(interactiveOnly, maxChars, shotWidth = 0, { point
   // The part of an element's box inside the viewport, as "x,y wxh" in screenshot pixels,
   // or null when none of it is. (ox, oy): the offset of the element's frame.
   const boxOf = (el, ox, oy) => {
-    const r = el.getBoundingClientRect();
+    // A link that wraps onto two lines has a bounding box mostly of other text: use its first
+    // line, where a click lands on it (the same rule as refCenterScript).
+    const lines = [...el.getClientRects()].filter((q) => q.width && q.height);
+    const r = lines.length > 1 ? lines[0] : el.getBoundingClientRect();
     const left = Math.max(0, r.left + ox);
     const top = Math.max(0, r.top + oy);
     const right = Math.min(innerWidth, r.right + ox);
@@ -242,7 +245,10 @@ export function refCenterScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el || !el.isConnected) return { error: `${ref} not found; call read_page again to refresh refs` };
   el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-  const r = el.getBoundingClientRect();
+  // An inline element that wraps (a long link) is several boxes; the center of their bounding
+  // box can be plain text between them, so aim at the first line.
+  const lines = [...el.getClientRects()].filter((q) => q.width && q.height);
+  const r = lines.length > 1 ? lines[0] : el.getBoundingClientRect();
   let x = r.left + r.width / 2;
   let y = r.top + r.height / 2;
   // An element in a same-origin iframe: add each frame's content-box offset.
@@ -365,7 +371,8 @@ export function markRefsScript(on) {
   for (const [ref, weak] of store.map) {
     const el = weak.deref();
     if (!el?.isConnected || el.ownerDocument !== document) continue;
-    const r = el.getBoundingClientRect();
+    const lines = [...el.getClientRects()].filter((q) => q.width && q.height);
+    const r = lines.length > 1 ? lines[0] : el.getBoundingClientRect();
     if (!r.width || !r.height || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
     const label = document.createElement("div");
     label.textContent = ref.replace("ref_", "");
@@ -382,7 +389,9 @@ export function markRefsScript(on) {
 export function hitTestScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el) return null;
-  const r = el.getBoundingClientRect();
+  // The point refCenterScript clicks: the first line of an element that wraps.
+  const lines = [...el.getClientRects()].filter((q) => q.width && q.height);
+  const r = lines.length > 1 ? lines[0] : el.getBoundingClientRect();
   const x = r.left + r.width / 2;
   const y = r.top + r.height / 2;
   let top = el.ownerDocument.elementFromPoint(x, y);

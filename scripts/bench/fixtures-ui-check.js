@@ -87,7 +87,9 @@ const locate = (expr) => `(() => {
   const el = ${expr};
   if (!el) return null;
   el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-  const r = el.getBoundingClientRect();
+  // As Browsby aims (refCenterScript): the first line of an element that wraps.
+  const lines = [...el.getClientRects()].filter((q) => q.width && q.height);
+  const r = lines.length > 1 ? lines[0] : el.getBoundingClientRect();
   const x = r.left + r.width / 2, y = r.top + r.height / 2;
   let top = document.elementFromPoint(x, y);
   while (top && top.shadowRoot) { const i = top.shadowRoot.elementFromPoint(x, y); if (!i || i === top) break; top = i; }
