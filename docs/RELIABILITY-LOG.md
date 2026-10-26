@@ -193,3 +193,7 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   popup ("stays on screen after Close"), the wizard ("Step 1 of 4" after finishing) and the
   cookie wall ("rates readable behind the wall"). Harness fix found on the way: links that
   open a new tab leave it focused, so the walkthrough closes extra tabs before input.
+- Zigger + pointer, refNames, continueIntent, freshBase (fixtures v3, plus the shadow-root
+  cover fix): 26/28. Failures: fx-stale-list (rowContext was not in this run) and
+  fx-expense-report (report correct and submitted; the loop guard stopped it after 4 tool
+  errors before it read the total). Same run conditions as Holo4 + five fixes (17/28).
