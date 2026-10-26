@@ -7,6 +7,7 @@ import { readPageScript } from "../src/page-scripts.js";
 import { DEFAULTS, EXPERIMENTS, cleanSetting, mergeConfig } from "../src/config-core.js";
 import { Agent } from "../src/agent.js";
 import { providers } from "../src/providers/index.js";
+import { calculate } from "../src/calculate.js";
 
 assert.deepEqual(mergeConfig({}).experiments, {}, "experiments are off by default");
 assert.deepEqual(cleanSetting("experiments", { clickTarget: true }), { clickTarget: true });
@@ -430,6 +431,35 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   }
   browser.networkLogs.set("t1", docs(200));
   assert.doesNotMatch(await browser.run("navigate", { url: "https://a.test/" }), /HTTP/, "the frame's 503 was reported as the page's");
+}
+// calculator: exact arithmetic without eval; the tool is offered only with the flag on, and
+// a call answers with the result.
+{
+  assert.equal(calculate("12,400 + 8,950 + 15,200 + 3,875"), "40425");
+  assert.equal(calculate("40 * 0.85 * 1.08"), "36.72");
+  assert.equal(calculate("17*23+154"), "545");
+  assert.equal(calculate("(182.40 + 36.80 + 193.10)"), "412.3");
+  assert.equal(calculate("279.50 - 249"), "30.5");
+  assert.equal(calculate("-(2 - 5) / 4"), "0.75");
+  assert.equal(calculate("0.1 + 0.2"), "0.3");
+  for (const bad of ["process.exit(1)", "2 +", "(1 + 2", "1 / 0", "alert(1)"]) assert.throws(() => calculate(bad), /Cannot calculate/, bad);
+  const sent = [];
+  let replies = [];
+  providers.openai = { describeError: () => null, turn: async ({ messages, tools }) => (sent.push({ messages: structuredClone(messages), tools: tools.map((t) => t.name) }), replies.shift()) };
+  const agent = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  agent.browser = { startTask: async () => {}, endTask: async () => {}, currentPage: async () => ({ id: "t1", title: "T", url: "https://a.test/" }), currentUrl: async () => "https://a.test/", run: async () => "ok" };
+  const config = { ...structuredClone(DEFAULTS), keys: { ...DEFAULTS.keys, openai: "test" }, permissionMode: "auto" };
+  const say = (text) => ({ content: [{ type: "text", text }], raw: null, stop: "end", usage: { input: 1, output: 1 } });
+  replies = [say("ok")];
+  await agent.run("hi", config);
+  assert.ok(!sent[0].tools.includes("calculate"), "off: no calculate tool");
+  agent.reset();
+  sent.length = 0;
+  replies = [{ content: [{ type: "tool_call", id: "c1", name: "calculate", input: { expression: "12,400 + 8,950" } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, say("21350")];
+  await agent.run("add them", { ...config, experiments: { calculator: true } });
+  assert.ok(sent[0].tools.includes("calculate"), "on: the tool is offered");
+  const result = sent[1].messages.flatMap((m) => m.content).find((b) => b.type === "tool_result");
+  assert.equal(result.content[0].text, "12,400 + 8,950 = 21350");
 }
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.

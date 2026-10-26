@@ -10,6 +10,7 @@ import { siteGuide } from "./site-guides.js";
 import { LoopGuard } from "./loop-guard.js";
 import { TaskMetrics } from "./metrics.js";
 import { NOTES_TOOL_DEF, applyNotes } from "./notes.js";
+import { CALC_TOOL_DEF, calculate } from "./calculate.js";
 import { ASK_USER_TOOL_DEF, askUserTurn } from "./ask-user.js";
 import { TITLE_SCHEMA, TITLE_SYSTEM, cleanTitle, titleInput } from "./title.js";
 
@@ -284,7 +285,13 @@ export class Agent {
   }
 
   #tools(config) {
-    return [...BROWSER_TOOL_DEFS.filter((t) => config.canvasTool || t.name !== "canvas"), NOTES_TOOL_DEF, ASK_USER_TOOL_DEF, ...(this.mcp?.toolDefs() ?? [])];
+    return [
+      ...BROWSER_TOOL_DEFS.filter((t) => config.canvasTool || t.name !== "canvas"),
+      NOTES_TOOL_DEF,
+      ...(config.experiments?.calculator ? [CALC_TOOL_DEF] : []),
+      ASK_USER_TOOL_DEF,
+      ...(this.mcp?.toolDefs() ?? []),
+    ];
   }
 
   // The user's requests: indexes of the messages that start a task, and their text.
@@ -749,6 +756,19 @@ export class Agent {
       // password field. The next save of the history then hides it too.
       if (await this.#typesPassword(call).catch(() => false)) this.secretCalls.add(call);
       this.#emit(signal, { type: "tool_call", id: call.id, name: call.name, input: this.#shownInput(call) });
+      // The calculator (calculator experiment), like the notepad, touches nothing outside the
+      // agent, so it needs no checks.
+      if (call.name === "calculate") {
+        let result;
+        try {
+          result = { ...base, content: [{ type: "text", text: `${call.input?.expression} = ${calculate(call.input?.expression)}` }] };
+        } catch (err) {
+          result = { ...base, isError: true, content: [{ type: "text", text: err.message }] };
+        }
+        this.#emit(signal, { type: "tool_result", id: call.id, isError: result.isError, content: result.content });
+        results.push(result);
+        continue;
+      }
       // The notepad touches nothing outside the agent, so it needs no checks.
       if (call.name === "notes") {
         let result;
