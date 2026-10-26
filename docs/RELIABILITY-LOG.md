@@ -162,3 +162,29 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   (sitemap, newsletter, stale-list, wizard), so the held-out split no longer judges them
   independently. A fresh set of sites written without sight of the fixes, plus the live-site
   suites, is needed before any fix becomes a default.
+
+### Benchmark audit (2026-10-25, all 28 fixture tasks, pages, checkers and self-test)
+- Found and fixed (fixtures v4, commit 4530a5a), each reverted once to confirm the self-test
+  now catches it:
+  - Runner: ask_user questions were not part of the answer the checkers saw, so asking for
+    approval on fx-checkout-stop (what the system prompt tells the model to do) would fail.
+  - Too strict (fail a right answer): docs-deep and orders-next-only failed any answer that
+    also mentioned the decoy (36 months, order 1052), including thinking aloud before the
+    right answer; compare-tabs required "30.50"; http500 rejected "9am" and "09:00";
+    checkout-stop rejected approval questions ("Shall I place the order?").
+  - Too lenient (pass a wrong answer): library-hold read the new hold's id H-3 as queue
+    position 3; compare-tabs passed a swapped answer.
+  - Pages: the cookie wall left the rates readable underneath; carts and expense reports had
+    no way to remove a wrong line (one wrong click was unrecoverable); the finished wizard
+    still showed "Step 4 of 4".
+  - Self-test: the popup check (added today) called fail() before it was defined; only 3 tasks
+    had a wrong-answer check. Now every reply-checked task has a likely wrong answer that must
+    fail and right answers worded differently that must pass, plus page checks.
+- Past results: no earlier pass would fail under the stricter checks (library H-3, compare
+  swap: scanned every run). The new answer rules can only turn some past failures into passes;
+  none were found among docs, orders, http500 and compare failures.
+- Not yet run: scripts/bench/fixtures-ui-check.js walks all 28 tasks through the pages in real
+  Chrome with real input at 394x429 (popups covering and uncovering, results on screen, the
+  checker on what the pages show). Pending the go-ahead to run Chrome.
+- Fixtures v4 is not used by the runs queued tonight (they load v3 at start, so Holo4, Zigger
+  and Holo3.1 stay comparable); the next comparison round reruns every model on v4.
