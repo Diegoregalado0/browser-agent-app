@@ -783,7 +783,7 @@ export class Agent {
         );
         if (signal.aborted) throw new Error("Cancelled by the user.");
         // Counted by the loop guard, so a model that keeps retrying is stopped.
-        if (this.declinedCalls.has(callKey(call))) throw new Error(`The user already declined this exact action in this task. ${DECLINED}`);
+        if (this.declinedCalls.has(await this.#actionKey(call))) throw new Error(`The user already declined this exact action in this task. ${DECLINED}`);
         authorizing = true;
         const checkedOn = await this.#pageKey(call);
         await this.#authorize(call, config, signal, prechecks.get(call.id));
@@ -1040,7 +1040,7 @@ export class Agent {
     if (signal.aborted) throw new Error("Cancelled by the user.");
     let check = null;
     if (config.permissionMode !== "auto" && this.#changesState(call)) {
-      const blockedKey = `${callKey(call)} ${await this.browser.currentUrl().catch(() => "")}`;
+      const blockedKey = `${await this.#actionKey(call)} ${await this.browser.currentUrl().catch(() => "")}`;
       const earlier = this.blockedCalls.get(blockedKey);
       if (earlier !== undefined) {
         this.#emit(signal, { type: "notice", text: `Safety check blocked ${call.name} again: ${earlier}` });
@@ -1068,15 +1068,27 @@ export class Agent {
     const decision = await this.#ask(signal, { text: `${flagged ? `Safety check: ${flagged} ` : ""}Allow ${action}?`, allowAlways: false, kind: "safety" });
     if (decision === "deny") {
       // A navigation's site is where it goes; an Outlook tool acts on no site.
-      this.#decline(call, isMcp ? null : originForToolCall(call.name, call.input, check.page.url), "safety");
+      await this.#decline(call, isMcp ? null : originForToolCall(call.name, call.input, check.page.url), "safety");
       throw new Error(`The user declined this action${flagged ? ` (${flagged})` : ""}. ${DECLINED}`);
     }
   }
 
+  // What the records of blocked and declined actions match a call by: its tool and input, with
+  // a ref or coordinate replaced by the element it lands on. Refs are renumbered on every new
+  // page, so ref_1 after a reload is often another element (a block on "Add line" once refused
+  // the "All reports" link that became ref_1), and the same element can come back as another
+  // ref. Without a target description it is the exact call.
+  async #actionKey(call) {
+    const { ref, coordinate, ...rest } = call.input ?? {};
+    const aimed = ["browser", "form_input"].includes(call.name) && (ref || Array.isArray(coordinate));
+    const target = aimed ? await this.browser.describeTarget?.(call.input).catch(() => null) : null;
+    return target ? `${call.name} ${JSON.stringify(rest)} on ${target}` : callKey(call);
+  }
+
   // Records a declined action, so this task can neither retry it as is nor reach the same
   // site again by navigating there without asking. kind: the prompt that was declined.
-  #decline(call, url, kind) {
-    this.declinedCalls.add(callKey(call));
+  async #decline(call, url, kind) {
+    this.declinedCalls.add(await this.#actionKey(call));
     try {
       this.declinedHosts.set(new URL(url).hostname, kind);
     } catch {}
@@ -1096,7 +1108,7 @@ export class Agent {
       kind,
     });
     if (decision === "deny") {
-      this.#decline(call, origin, kind);
+      await this.#decline(call, origin, kind);
       throw new Error(`The user declined going back to ${host}. ${DECLINED}`);
     }
   }
@@ -1114,7 +1126,7 @@ export class Agent {
       kind: "sensitive",
     });
     if (decision === "deny") {
-      this.#decline(call, origin, "sensitive");
+      await this.#decline(call, origin, "sensitive");
       throw new Error(`The user declined opening ${host}. ${DECLINED}`);
     }
     this.allowedPrivateOrigins.add(origin);
@@ -1164,7 +1176,7 @@ export class Agent {
         kind: "sensitive",
       });
       if (decision === "deny") {
-        this.#decline(call, sensitive, "sensitive");
+        await this.#decline(call, sensitive, "sensitive");
         throw new Error(`The user declined acting on ${site}. ${DECLINED}`);
       }
       return;
@@ -1172,7 +1184,7 @@ export class Agent {
     if (await this.#typesPassword(call)) {
       const decision = await this.#ask(signal, { text: "The agent wants to type into a password field. Allow it?", allowAlways: false, kind: "password" });
       if (decision === "deny") {
-        this.#decline(call, url, "password");
+        await this.#decline(call, url, "password");
         throw new Error("The user declined entering a password. Ask them to sign in themselves.");
       }
     }
@@ -1203,7 +1215,7 @@ export class Agent {
     const decision = await this.#ask(signal, { text: `Allow the agent to use ${call.name} on ${origin}?${full}`, allowAlways: true, origin, kind: "site" });
     // The site prompt asks again on its own, so only the exact call is recorded.
     if (decision === "deny") {
-      this.declinedCalls.add(callKey(call));
+      this.declinedCalls.add(await this.#actionKey(call));
       throw new Error(`The user did not allow acting on ${origin}.`);
     }
     this.sessionOrigins.add(origin);

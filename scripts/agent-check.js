@@ -370,6 +370,28 @@ assert.ok(notices.some((t) => /blocked by the safety check 4 times/.test(t)), "t
 replies = [{ content: [click], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } }, { content: [{ type: "text", text: "ok" }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
 await looping.run("try once more", config);
 assert.equal(blockChecks, 2, "a new task reused the last task's block");
+// A block is remembered for the element, not the ref name: refs are renumbered when the page
+// reloads, so ref_1 can become another element (a block on "Add line" once refused the "All
+// reports" link that took over ref_1), and the blocked element can return as another ref.
+{
+  const targets = { ref_1: 'a "Add line" href=/expenses/r/1/add' };
+  // After the blocked click the page reloads: ref_1 is now the All reports link and the Add
+  // line link is ref_7.
+  const reload = () => Object.assign(targets, { ref_1: 'a "All reports" href=/expenses/reports', ref_7: 'a "Add line" href=/expenses/r/1/add' });
+  let checks = 0;
+  const ran = [];
+  providers.openai.classify = async ({ text }) =>
+    text.startsWith("Content from tool") ? { verdict: "allow", reason: "ok" } : (checks++, /Add line/.test(text) ? (reload(), { verdict: "block", category: "hijack", reason: "not requested" }) : { verdict: "allow", reason: "ok" });
+  const keyed = new Agent({ emit: () => {}, askPermission: async () => "allow" });
+  keyed.browser = { ...looping.browser, describeTarget: async (input) => targets[input.ref] ?? null, run: async (name, input) => (input.action === "left_click" && ran.push(input.ref), "clicked") };
+  const clickRef = (ref, n) => ({ content: [{ type: "tool_call", id: `k${n}`, name: "browser", input: { action: "left_click", ref } }], raw: null, stop: "tool_use", usage: { input: 1, output: 1 } });
+  replies = [clickRef("ref_1", 1), clickRef("ref_1", 2), clickRef("ref_7", 3), { content: [{ type: "text", text: "done" }], raw: null, stop: "end", usage: { input: 1, output: 1 } }];
+  await keyed.run("submit the report", config);
+  assert.deepEqual(ran, ["ref_1"], `clicks that ran: ${JSON.stringify(ran)} (expected only the All reports link)`);
+  assert.equal(checks, 2, `safety checks: ${checks} (expected the Add line block and a fresh check of All reports)`);
+  const results = keyed.messages.flatMap((m) => m.content).filter((b) => b.type === "tool_result");
+  assert.match(results.at(-1).content[0].text, /Blocked by the safety check earlier in this task/, "the blocked element under a new ref was not refused");
+}
 providers.openai.classify = loopClassify;
 
 // A request the server refuses as longer than its context is retried once the tool output
