@@ -1,5 +1,6 @@
 import {
   readPageScript,
+  pageLinesScript,
   refCenterScript,
   formInputScript,
   pageTextScript,
@@ -24,6 +25,8 @@ const VIEW_MAX_CHARS = 12000;
 const CHANGES_MAX_LINES = 40;
 // Controls listed with a "not a ref" error (refNames experiment).
 const REF_HELP_MAX = 15;
+// New lines of page text a change report quotes (textChanges experiment).
+const TEXT_CHANGES_MAX = 3;
 const PAGE_TEXT_MAX_CHARS = 60000;
 const NETWORK_LOG_MAX_ENTRIES = 500;
 const NETWORK_BODY_MAX_CHARS = 8000;
@@ -836,6 +839,7 @@ export class Browser {
   // The controls in view now; also kept as the base the next change report compares with.
   async #view() {
     const res = await this.callInPage(readPageScript, true, VIEW_MAX_CHARS, SCREENSHOT_MAX_WIDTH, this.#outlineOptions());
+    if (this.experiments.textChanges) res.lines = await this.callInPage(pageLinesScript).catch(() => null);
     this.views.set(this.currentId, res);
     this.#rememberRefs(res.tree);
     return res;
@@ -931,7 +935,13 @@ export class Browser {
       ...list([...changed, ...added]),
       ...(gone.length ? [`Out of view or removed: ${gone.slice(0, 60).join(", ")}${gone.length > 60 ? ", …" : ""}`] : []),
     ];
-    return `\n${lines.join("\n") || "No change among the controls in view."}`;
+    // The textChanges experiment: text that appeared without any control changing (a "Saved."
+    // message, an error) is reported, so a click that worked does not read as no change.
+    const shown = new Set(before.lines ?? []);
+    const fresh = before.lines && now.lines ? now.lines.filter((l) => !shown.has(l)).slice(0, TEXT_CHANGES_MAX) : [];
+    const text = fresh.length ? `New text on the page: ${fresh.map((l) => `"${l.length > 120 ? `${l.slice(0, 119)}…` : l}"`).join(" | ")}` : "";
+    if (!lines.length && text) return `\nNo change among the controls in view. ${text}`;
+    return `\n${[...lines, ...(text ? [text] : [])].join("\n") || "No change among the controls in view."}`;
   }
 
   async #pageAction(input) {

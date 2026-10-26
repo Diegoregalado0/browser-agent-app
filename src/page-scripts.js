@@ -312,6 +312,12 @@ export function pageTextScript(maxChars) {
   };
 }
 
+// The page's visible text as trimmed lines, for the textChanges experiment: what appeared
+// after an action ("Saved.", an error) that the controls alone do not show.
+export function pageLinesScript() {
+  return (document.body?.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 400).map((s) => s.slice(0, 200));
+}
+
 // Describes the element a ref names, or the element at a CSS-pixel point, so safety
 // checks can see what an action will actually hit.
 export function describeTargetScript(ref, x, y) {

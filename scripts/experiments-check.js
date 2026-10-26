@@ -392,6 +392,28 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   assert.doesNotMatch(readPageScript(true, 40000, 0, {}).tree, / in "/, "off: unchanged");
   for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
 }
+// textChanges: a click after which only page text changed ("Saved.") reports that text
+// instead of a bare "No change"; off, the report is unchanged.
+{
+  let text = ["Preferences", "Dark mode"];
+  const page = scriptedPage({
+    readPageScript: () => ({ ...outline('div "Save changes" [ref_4]'), items: [{ ref: "ref_4", line: 'div "Save changes" [ref_4]', box: "1,1 10x10" }] }),
+    pageLinesScript: () => text,
+    refCenterScript: () => ({ x: 10, y: 10, w: 10, h: 10 }),
+    hitTestScript: () => null,
+  });
+  const browser = new Browser(page.transport);
+  for (const on of [false, true]) {
+    browser.experiments = on ? { textChanges: true } : {};
+    text = ["Preferences", "Dark mode"];
+    await browser.run("read_page", {});
+    await browser.run("browser", { action: "left_click", ref: "ref_4" });
+    text = ["Preferences", "Dark mode", "Saved."];
+    const out = await browser.run("browser", { action: "left_click", ref: "ref_4" });
+    if (on) assert.match(out, /No change among the controls in view\. New text on the page: "Saved\."/);
+    else assert.match(out, /No change among the controls in view\.$/);
+  }
+}
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.
 {
