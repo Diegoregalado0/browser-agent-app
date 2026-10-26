@@ -230,3 +230,16 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   two extra empty expense drafts. It passed tasks Holo4 failed in every Browsby run
   (library-hold, desk-triage, stale-list). Its harness differs from Browsby's runs in screen
   size (1280x800 vs 394x429, now fixed for headless runs), thinking, and its own tools.
+- CORRECTION (2026-10-26 15:40): experiment 4's 24/28 is invalid. holo inherited the runner's
+  working directory, which the agent user cannot write, so every screenshot failed (746
+  failures in 28 tasks); Holo4 then did all 28 tasks with curl and python through holo's shell
+  tool instead of the browser. The v5 harness run had the same fault and was stopped. Fixed in
+  holo-run.js (281980f: holo starts in the agent's home; rows record screenshot failures and
+  shell use); verified with the stub (screenshots in every request, zero failures). A fixed run
+  is queued. I reported 24/28 before reading the logs; the smoke test had only checked
+  screenshots from the agent's home, not from the runner's directory.
+- Fixtures v5 with headless Chrome at 1440x900 (pages 1054x749 instead of 394x429): Zigger +
+  fixes 25/28 (held-out 10/10, 174 s, 48k); Holo4 in Browsby + fixes, image-min-tokens 1024
+  24/28 (held-out 10/10, 212 s, 77k). With a realistic window the two are within noise.
+- New experiments, queued on Zigger one at a time: textChanges (844306c), httpStatus (991a311),
+  calculator (0af5d7e).
