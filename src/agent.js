@@ -39,9 +39,10 @@ const RESTORED_RESULT = "[output from before this conversation was reopened is n
 // Sent once when a turn ends with neither tool calls nor text (the answer was only in the
 // model's thinking, which the user does not see).
 const FINAL_ANSWER_PROMPT = "You ended your turn without writing a reply. Give your final answer to the user now, as plain text.";
-// A reply whose last sentence announces a step the model did not take ("Let me check page 7."),
+// A reply whose last sentence announces a step the model did not take ("Let me check page 7.",
+// "To find the office, I need to open Offices."),
 // for the continueIntent experiment. A reply that hands the task to the user is not one.
-const ANNOUNCES_STEP = /(?:^|[.!:]\s+)(?:(?:now|next|then),?\s+)?(?:let me|i'll|i will|i'm going to)\s+(?!know\b)[^.!?]{2,160}[.!:]?$/i;
+const ANNOUNCES_STEP = /(?:^|[.!:]\s+)(?:(?:now|next|then|so|first),?\s+)?(?:to [^,.!?]{1,80},\s*)?(?:let me|i'll|i will|i'm going to|i need to|i have to|i must)\s+(?!know\b)[^.!?]{2,160}[.!:]?$/i;
 const ASKS_USER = /\?|\b(let me know|could you|can you|would you|please)\b/i;
 const CONTINUE_PROMPT = "[Agent] Your reply says what you will do next, but it called no tool, so the task would end here. Do that next step now, or, if the task is finished or needs the user, give your final reply.";
 // How many times one task may be told to continue (continueIntent).

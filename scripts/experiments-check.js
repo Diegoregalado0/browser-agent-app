@@ -302,6 +302,8 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
   assert.equal(await run(["Let me check page 2.", "Let me check page 3.", "Let me check page 4.", "unused"], { continueIntent: true }), 3, "told at most twice");
   assert.ok(!agent.messages.some((m) => m.content.some((b) => /Your reply says what you will do next/.test(b.text ?? ""))), "the prompt left the history");
   assert.equal(await run(["If you have another link, let me know and I'll check it."], { continueIntent: true }), 1, "a hand-back ends the task");
+  assert.equal(await run(["I'm on the Northwind page. To find the Lisbon phone number, I need to navigate to the Offices page.", "+351 21 555 0142"], { continueIntent: true }), 2, "\"I need to\" after a purpose clause is an announced step");
+  assert.equal(await run(["I need you to sign in first."], { continueIntent: true }), 1, "asking the user is not an announced step");
   assert.equal(await run(["Priya is in Legal, extension 4568."], { continueIntent: true }), 1);
 }
 // freshBase: a popup opens after the last action and the model looks (read_page); closing it
