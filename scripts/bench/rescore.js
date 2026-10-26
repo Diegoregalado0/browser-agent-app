@@ -6,7 +6,7 @@
 // except with --recheck: that fixture task's checker runs again on its saved final reply (for
 // a checker that reads only the reply, corrected after the run).
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { summarize, taskMetrics } from "./metrics.js";
+import { answerText, finalAnswer, summarize, taskMetrics } from "./metrics.js";
 
 const args = process.argv.slice(2);
 const at = args.indexOf("--recheck");
@@ -21,9 +21,9 @@ for (const file of args) {
     const log = `${dir}/${row.task}${run.rows.some((r) => r.run > 1) ? `.run${row.run}` : ""}.events.jsonl`;
     if (!existsSync(log)) continue;
     const events = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l).event).filter(Boolean);
-    const reply = events.filter((e) => e.type === "reply").map((e) => e.text).join("\n");
+    const reply = answerText(events);
     if (row.task === recheck && !/timed out|stalled|^agent error/.test(row.reason)) {
-      const v = recheckTask.check({ reply, events });
+      const v = recheckTask.check({ reply, finalReply: finalAnswer(events), events });
       [row.success, row.reason] = [v.ok, v.reason];
     }
     const timedOut = /timed out|stalled/.test(row.reason);

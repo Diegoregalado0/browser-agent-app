@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Checks scripts/bench/metrics.js on synthetic event streams with known answers.
 import assert from "node:assert/strict";
-import { summarize, taskMetrics } from "./metrics.js";
+import { answerText, finalAnswer, summarize, taskMetrics } from "./metrics.js";
 
 const call = (name, input) => ({ type: "tool_call", name, input });
 const result = (isError, text = "ok") => ({ type: "tool_result", isError, content: [{ type: "text", text }] });
@@ -64,4 +64,9 @@ assert.equal(s.premature, 1);
 assert.equal(s.timeouts, 1);
 assert.equal(s.recoveryRate, 0.5, "of the two tasks with tool errors, one passed");
 assert.equal(Math.round(s.avgWallS), 100);
+// The checkers see replies and ask_user questions; the final answer is the last of them.
+const told = [{ type: "reply", text: "Receipts: 36 months. Let me check invoices." }, call("navigate", {}), { type: "question", text: "Invoices: 84 months. Shall I also check receipts?" }];
+assert.equal(answerText(told), "Receipts: 36 months. Let me check invoices.\nInvoices: 84 months. Shall I also check receipts?");
+assert.equal(finalAnswer(told), "Invoices: 84 months. Shall I also check receipts?");
+assert.equal(finalAnswer([]), "");
 console.log("bench metrics checks passed");

@@ -27,6 +27,18 @@ const AGENT_TOOLS = new Set(["notes", "ask_user"]);
 // - prompts: permission prompts by kind; asked: the agent asked the user a question.
 // - premature: the agent ended the task with a reply (not a timeout, error, question or
 //   stop) and the checker failed, so it declared done when it was not.
+// What the agent told the user in a task, for the checkers: every reply and every ask_user
+// question, in order (a question that asks for approval is how a task should end when it must
+// stop, as in fx-checkout-stop). finalAnswer is the last of them: checks that something must
+// NOT be said read only that, so thinking aloud on the way ("receipts are 36 months, let me
+// check invoices") does not fail a right answer.
+export function answerText(events) {
+  return events.filter((e) => e.type === "reply" || e.type === "question").map((e) => e.text).join("\n");
+}
+export function finalAnswer(events) {
+  return events.filter((e) => e.type === "reply" || e.type === "question").at(-1)?.text ?? "";
+}
+
 export function taskMetrics(events, outcome) {
   const calls = events.filter((e) => e.type === "tool_call");
   const results = events.filter((e) => e.type === "tool_result");

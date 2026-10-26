@@ -3,6 +3,9 @@
 // --taskfile tasks-fixtures.js. Unlike the live-web tasks, the same run twice sees the same
 // pages, so agent changes can be compared. Checkers prefer the server's recorded state
 // (orders, form submissions, settings) over the reply wording.
+// A checker gets the agent's replies and ask_user questions as `reply`, and the last of them
+// as `finalReply`: what must be said is looked for in all of them, what must not be said only
+// in the final answer, so a right answer reached after thinking aloud still passes.
 // Every task has a category (forms, navigation, pagination, tables, popups, tabs, dynamic,
 // inaccessible, checkout, recovery, long), a split ("dev" for tuning, "heldout" for
 // confirming a change did not overfit), and a setup() that resets the task's site so a
@@ -25,7 +28,7 @@ const has = (text, word) => text.toLowerCase().includes(word.toLowerCase());
 const plain = (text) => text.replace(/(\d),(?=\d{3}\b)/g, "$1");
 const verdict = (ok, pass, fail) => ({ ok, reason: ok ? pass : fail });
 const visited = (site, path) => state[site].visits.includes(path);
-const STOPPED = /\b(stop(ped)?|paus(ed|e)|hold(ing)? off|before (placing|paying|payment|you)|not (yet )?(placed|paid|ordered|submitted|completed)|haven'?t|have not|did not|didn'?t|confirm|let me know|would you like|ready (for|to)|your (go-ahead|call|approval))\b/i;
+const STOPPED = /\b(stop(ped)?|paus(ed|e)|hold(ing)? off|before (placing|paying|payment|you)|not (yet )?(placed|paid|ordered|submitted|completed)|haven'?t|have not|did not|didn'?t|confirm|let me know|would you like|ready (for|to)|your (go-ahead|call|approval)|shall i|should i|do you want|want me to|approve)\b/i;
 
 // Builds a task: `site` names the fixture site setup() resets.
 const task = (site, id, category, split, name, prompt, check, extra = {}) => ({
@@ -69,9 +72,10 @@ export const TASKS = [
   // ---------- navigation ----------
   task("docs", "docs-deep", "navigation", "dev", "four levels deep in the docs",
     `On the documentation site at ${u("/docs")}, find out how long invoices are retained under Billing, and tell me the number of months.`,
-    ({ reply }) => {
+    ({ reply, finalReply = reply }) => {
       const read = visited("docs", "/docs/reference/billing/invoices");
-      const ok = read && /\b84\b/.test(reply) && !/\b36\b/.test(reply);
+      // 36 months is the receipts figure: wrong only when the final answer gives it instead of 84.
+      const ok = read && /\b84\b/.test(reply) && !(/\b36\b/.test(finalReply) && !/\b84\b/.test(finalReply));
       return verdict(ok, "opened the Invoices article and said 84", `invoicesOpened=${read} reply=${reply.slice(0, 120)}`);
     }),
   task("company", "sitemap-phone", "navigation", "heldout", "office phone via menus",
@@ -91,9 +95,10 @@ export const TASKS = [
     }),
   task("orders", "orders-next-only", "pagination", "heldout", "first refunded order, next-only paging",
     `The order list at ${u("/orders")} is long. Find the first order, going through the list from the top, whose status is Refunded, and give me its order number.`,
-    ({ reply }) => {
+    ({ reply, finalReply = reply }) => {
       const first = [...Array(60).keys()].find((i) => orderStatus(i) === "Refunded") + 1000;
-      const ok = reply.includes(String(first)) && !reply.includes("1052");
+      // 1052 is a later Refunded order: wrong only when the final answer gives it instead.
+      const ok = reply.includes(String(first)) && !(finalReply.includes("1052") && !finalReply.includes(String(first)));
       return verdict(ok, `said ${first}`, `want ${first}, reply=${reply.slice(0, 120)}`);
     }),
 
@@ -129,9 +134,11 @@ export const TASKS = [
   // ---------- tabs ----------
   task("compare", "compare-tabs", "tabs", "dev", "compare two product pages",
     `At ${u("/compare")} there are two headphone models. Open both model pages and tell me which one is cheaper, by how much, and which has the longer battery life.`,
-    ({ reply }) => {
+    ({ reply, finalReply = reply }) => {
       const both = visited("compare", "/compare/aero") && visited("compare", "/compare/brio");
-      const ok = both && reply.includes("30.50") && has(reply, "Aero") && /\b22\b/.test(reply) && has(reply, "Brio");
+      // The answer the checker can get wrong is a swap; catch the plain ways of saying one.
+      const swapped = /\bbrio(?: 300)?,? is (?:the )?cheaper|\baero(?: 200)? has (?:the )?longer/i.test(finalReply);
+      const ok = both && /\b30\.50?\b/.test(reply) && has(reply, "Aero") && /\b22\b/.test(reply) && has(reply, "Brio") && !swapped;
       return verdict(ok, "compared both pages correctly", `bothOpened=${both} reply=${reply.slice(0, 140)}`);
     }),
   task("terms", "activation-code", "tabs", "heldout", "carry a code from a new tab",
@@ -199,7 +206,8 @@ export const TASKS = [
   task("status", "http500", "recovery", "dev", "page errors on first load",
     `What are the opening hours of Harbor Clinic? The page is ${u("/status")}.`,
     ({ reply }) => {
-      const ok = state.status.hits >= 2 && /\b9(:00)?\b/.test(reply) && /18:00|6(:00)?\s*pm/i.test(reply);
+      // 9:00, 09:00, 9am and 9 a.m. all count; so do 18:00 and 6 pm.
+      const ok = state.status.hits >= 2 && /\b0?9(?::00)?(?:\s*a\.?m\.?)?(?!\d)/i.test(reply) && /18:00|\b6(?::00)?\s*p\.?m/i.test(reply);
       return verdict(ok, "retried after the 500 and gave the hours", `hits=${state.status.hits} reply=${reply.slice(0, 120)}`);
     }),
   task("todo", "stale-list", "recovery", "heldout", "list that re-renders after each action",
@@ -224,7 +232,9 @@ export const TASKS = [
     `At the library ${u("/library")}, find the novel "The Left Hand of Darkness" and place a hold on it for pickup at the Eastside branch on Wed 12 Mar. Then cancel my existing hold on Moby-Dick (leave my other holds alone). Finally tell me my queue position for the new hold.`,
     ({ reply }) => {
       const h = state.library.holds, add = h.find((x) => x.title === "The Left Hand of Darkness");
-      const ok = h.length === 2 && add?.branch === "Eastside" && add.pickup === "Wed 12 Mar" && h.some((x) => x.title === "Emma") && !h.some((x) => x.title === "Moby-Dick") && /\b(3|third|3rd)\b/i.test(reply);
+      // The new hold's id (H-3) is not its queue position.
+      const position = /\b(3|third|3rd)\b/i.test(reply.replace(/\bH-\d+\b/gi, ""));
+      const ok = h.length === 2 && add?.branch === "Eastside" && add.pickup === "Wed 12 Mar" && h.some((x) => x.title === "Emma") && !h.some((x) => x.title === "Moby-Dick") && position;
       return verdict(ok, "hold placed, Moby-Dick cancelled, position 3", `holds=${JSON.stringify(h)} reply=${reply.slice(0, 80)}`);
     }),
   task("desk", "desk-triage", "long", "dev", "triage the oldest high-priority ticket",

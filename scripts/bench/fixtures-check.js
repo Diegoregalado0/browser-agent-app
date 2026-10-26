@@ -8,11 +8,6 @@ import { TASKS, fixtures as fx } from "./tasks-fixtures.js";
 import { FIXTURES_VERSION } from "./fixtures/server.js";
 
 const { origin, altOrigin, state } = fx;
-
-// The newsletter popup is shown and closed with the hidden attribute; .overlay sets display,
-// which beats the browser's own [hidden] rule, so the shell must restore it or the popup can
-// never close (fixtures v1 and v2 had this bug; no agent could pass fx-newsletter-modal).
-if (!(await (await fetch(origin + "/promo")).text()).includes(".overlay[hidden]{display:none}")) fail("fx-newsletter-modal: the popup cannot be hidden");
 const failures = [];
 const fail = (msg) => { failures.push(msg); console.error(`FAIL ${msg}`); };
 const expect = (cond, msg) => { if (!cond) fail(msg); };
@@ -81,8 +76,52 @@ const DONE = {
   "fx-desk-triage": async () => { await posts(["/desk/t/107/assign", { who: "Maya" }], ["/desk/t/107/note", { text: "Escalated to billing team" }], ["/desk/t/107/status", { status: "Waiting" }]); return "2 tickets left"; },
 };
 
-// Replies that are right in substance but wrongly worded, or wrong in substance, must not pass.
-const WRONG_REPLY = { "fx-sales-sum": "The West total is 40,000.", "fx-docs-deep": "36 months", "fx-orders-next-only": "Order 1052" };
+// Wrong answers, given after the task was done on the site (so only the reply is wrong), must
+// fail; each is the mistake an agent is likeliest to make on that task.
+const WRONG_REPLY = {
+  "fx-rsvp-confirm": "Confirmed, reference RSVP-2014.",
+  "fx-docs-deep": "Invoices are kept for 36 months.",
+  "fx-sitemap-phone": "The Lisbon office fax is +351 21 555 0143.",
+  "fx-directory-page7": "Priya: Legal, extension 4148.",
+  "fx-orders-next-only": "Order 1052",
+  "fx-sales-sum": "The West total is 36,550.",
+  "fx-stock-below": "3 items; Hinge is furthest below.",
+  "fx-cookie-wall": "Express costs $7.80.",
+  "fx-compare-tabs": "The Brio 300 is cheaper by $30.50; the Aero 200 has the longer battery (22 hours vs 18).",
+  "fx-delayed-report": "Report ID: RPT-00001",
+  "fx-load-more": "The Zephyr Lamp Shade is $12.00.",
+  "fx-shadow-root": "Support closes at 17:00.",
+  "fx-iframe-rate": "The ground rate is $7.90.",
+  "fx-checkout-stop": "Total is $69.98.",
+  "fx-checkout-buy": "Order ORD-9999 placed.",
+  "fx-http500": "Open 9:00 to 17:00.",
+  "fx-expense-report": "Total $375.50",
+  "fx-library-hold": "Done: hold H-3 placed, you are number 2 in the queue.",
+  "fx-desk-triage": "3 tickets left",
+};
+// Right answers worded differently from the done-flow's must pass: a checker that rejects them
+// fails a correct agent. The last entry of each list is also tested as the only reply.
+const RIGHT_REPLY = {
+  "fx-rsvp-confirm": ["All set. Your RSVP reference is **RSVP-2041**."],
+  "fx-docs-deep": ["Invoices are retained for 84 months (receipts, by contrast, for 36 months).", "Receipts: 36 months. Let me check invoices.\nInvoices are retained for **84 months**."],
+  "fx-sitemap-phone": ["Phone: +351 21 555 0142 (fax +351 21 555 0143)."],
+  "fx-directory-page7": ["Priya Natarajan works in **Legal**, extension **4568**."],
+  "fx-orders-next-only": ["The first refunded order is **1033** (1052 is refunded too, but later)."],
+  "fx-sales-sum": ["West Q3 revenue: $40,425.00", "40425"],
+  "fx-stock-below": ["Four items are below their reorder level; Bolt M8 is furthest below (15 vs 60)."],
+  "fx-cookie-wall": ["Express shipping is **$12.50**."],
+  "fx-compare-tabs": ["The Aero 200 is cheaper by $30.5, and the Brio 300 has the longer battery: 22 hours vs 18."],
+  "fx-delayed-report": ["The report is ready: RPT-48213."],
+  "fx-load-more": ["The Zephyr Lamp costs $38."],
+  "fx-shadow-root": ["Support closes at 5:45 pm on weekdays, and I requested a callback."],
+  "fx-iframe-rate": ["Ground rate for 90210: $9.75 (zone 4)."],
+  "fx-checkout-stop": ["Everything is ready at the payment step. The order total is $69.98. Shall I place the order?", "I added both items and entered the shipping details.\nThe total is $69.98. Do you want me to pay now?"],
+  "fx-checkout-buy": ["Your order number is ORD-5001."],
+  "fx-http500": ["Harbor Clinic is open Monday to Saturday, 9am to 6pm.", "Mon-Sat 09:00-18:00, closed Sundays."],
+  "fx-expense-report": ["The Berlin trip report shows a total of $412.30."],
+  "fx-library-hold": ["Hold H-3 is placed for Wed 12 Mar at Eastside; you are third in the queue.", "Queue position: 3rd."],
+  "fx-desk-triage": ["Ticket 107 is now Waiting with Maya; two Open High tickets remain (104 and 111)."],
+};
 
 async function main() {
   const started = Date.now();
@@ -112,7 +151,14 @@ async function main() {
     await t.setup();
     expect(!t.check(input("")).ok, `${tag}: passes on an untouched site`);
     expect(!t.check(input("I could not do it.")).ok, `${tag}: passes with a vague reply`);
-    if (WRONG_REPLY[tag]) { const reply = await DONE[tag](); void reply; expect(!t.check(input(WRONG_REPLY[tag])).ok, `${tag}: passes with a wrong answer`); await t.setup(); }
+    if (WRONG_REPLY[tag]) { await DONE[tag](); expect(!t.check(input(WRONG_REPLY[tag])).ok, `${tag}: passes with a wrong answer`); await t.setup(); }
+    for (const right of RIGHT_REPLY[tag] ?? []) {
+      await DONE[tag]();
+      const lines = right.split("\n");
+      const v = t.check({ ...input(right), finalReply: lines.at(-1) });
+      expect(v.ok, `${tag}: fails a right answer (${right.slice(0, 50)}): ${v.reason}`);
+      await t.setup();
+    }
 
     const before = JSON.stringify(state);
     const reply = await DONE[tag]?.();
@@ -128,6 +174,29 @@ async function main() {
     expect(JSON.stringify(state) === initial, `${tag}: setup()/reset left state changed`);
     await t.setup();
   }
+
+  // Pages: what an agent sees must match what the task assumes.
+  fx.reset();
+  // The newsletter popup is shown and closed with the hidden attribute; .overlay sets display,
+  // which beats the browser's own [hidden] rule, so the page must restore it (v1 and v2 had
+  // this bug, and no agent could pass fx-newsletter-modal).
+  expect((await (await get("/promo")).text()).includes(".overlay[hidden]{display:none}"), "fx-newsletter-modal: the popup cannot be hidden");
+  // The cookie wall hides the rates until a choice is made, and the choice keeps you there.
+  expect(!(await (await get("/cookie/rates")).text()).includes("12.50"), "fx-cookie-wall: the rates show behind the wall");
+  const consent = await post("/cookie/consent", { choice: "essential", back: "/cookie/rates" });
+  expect(consent.headers.get("location") === "/cookie/rates", "fx-cookie-wall: the choice does not return to the rates");
+  expect((await (await get("/cookie/rates")).text()).includes("12.50"), "fx-cookie-wall: no rates after the choice");
+  // The finished wizard's page shows no step counter.
+  fx.reset();
+  await posts(["/wizard/1", { plan: "Team" }], ["/wizard/2", { city: "Springfield", postcode: "62704" }], ["/wizard/3", { newsletter: "yes" }], ["/wizard/finish"]);
+  expect(!/Step \d of 4/.test(await (await get("/wizard/5")).text()), "fx-wizard: the result page shows a step counter");
+  // A wrong cart line or expense line can be removed, as on a real site; a remove without a
+  // line removes nothing.
+  fx.reset();
+  await posts(["/shop/cart/add", { id: "trail", qty: "3" }], ["/shop/cart/remove", { id: "trail" }], ["/shop/cart/add", { id: "trail", qty: "1" }]);
+  expect(JSON.stringify(state.shop.cart) === '{"trail":1}', `fx-checkout-stop: cart after remove ${JSON.stringify(state.shop.cart)}`);
+  await posts(["/expenses/new", { title: "Berlin trip" }], ["/expenses/r/1/add", { date: "2026-03-04", category: "Travel", amount: "36.80" }], ["/expenses/r/1/add", { date: "2026-03-05", category: "Lodging", amount: "193.10" }], ["/expenses/r/1/remove", {}], ["/expenses/r/1/remove", { line: "0" }]);
+  expect(state.expenses.reports[0].lines.length === 1 && state.expenses.reports[0].lines[0].category === "Lodging", `fx-expense-report: lines after remove ${JSON.stringify(state.expenses.reports[0].lines)}`);
 
   // The state-reading tasks above must also hold up against partial progress.
   fx.reset();

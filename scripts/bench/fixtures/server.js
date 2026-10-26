@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 
 // Bump when a page, rule or data value changes, so results from different versions are
 // never compared as if the fixtures were the same.
-export const FIXTURES_VERSION = "3";
+export const FIXTURES_VERSION = "4";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -251,7 +251,7 @@ ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
       4: `<h1>Review</h1><ul><li>Plan: ${esc(d.plan)}</li><li>City: ${esc(d.city)}</li><li>Postcode: ${esc(d.postcode)}</li><li>Newsletter: ${d.newsletter ? "yes" : "no"}</li><li>Text messages: ${d.sms ? "yes" : "no"}</li></ul><form method="post" action="/wizard/finish"><button>Finish setup</button></form>`,
       5: wiz().completed.length ? `<h1>All set</h1><p class="ok">Your account was set up.</p>` : "<h1>Not finished</h1>",
     };
-    c.send(200, shell("Account setup", wizNav(Math.min(n, 4)) + (bodies[n] ?? bodies[1])));
+    c.send(200, shell("Account setup", (n <= 4 ? wizNav(n) : "") + (bodies[n] ?? bodies[1])));
   });
   route("POST", "/wizard/1", (c) => { const p = c.form.get("plan"); if (!p) return c.redirect("/wizard/1"); wiz().draft = { plan: p }; c.redirect("/wizard/2"); });
   route("POST", "/wizard/2", (c) => {
@@ -317,10 +317,11 @@ ${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}
 <script>document.querySelectorAll("th").forEach(function(h){h.style.cursor="pointer";h.onclick=function(){var c=+h.dataset.c,b=document.querySelector("tbody"),rows=[].slice.call(b.rows);rows.sort(function(x,y){var a=x.cells[c].textContent,z=y.cells[c].textContent;return c?a-z:a.localeCompare(z)});rows.forEach(function(r){b.appendChild(r)})}});</script>`)));
 
   // ----- popups: a cookie wall, then a delayed newsletter modal -----
-  const cookieWall = () => state.cookie.consent ? "" : `<div class="overlay"><div class="box" role="dialog"><h2>We value your privacy</h2><p>We use cookies to improve this site.</p><form method="post" action="/cookie/consent"><button name="choice" value="all">Accept all cookies</button> <button name="choice" value="essential">Only essential cookies</button></form></div></div>`;
-  route("GET", "/cookie", (c) => c.send(200, shell("Acme Freight", `${cookieWall()}<h1>Acme Freight</h1><nav><a href="/cookie">Home</a><a href="/cookie/rates">Shipping rates</a></nav><p>Reliable freight since 1998.</p>`)));
-  route("GET", "/cookie/rates", (c) => c.send(200, shell("Shipping rates", `${cookieWall()}<h1>Shipping rates</h1><nav><a href="/cookie">Home</a><a href="/cookie/rates">Shipping rates</a></nav><table><tr><th>Service</th><th>Price</th></tr><tr><td>Economy</td><td>$4.25</td></tr><tr><td>Standard</td><td>$7.80</td></tr><tr><td>Express</td><td>$12.50</td></tr></table>`)));
-  route("POST", "/cookie/consent", (c) => { state.cookie.consent = c.form.get("choice") === "essential" ? "essential" : "all"; c.redirect("/cookie"); });
+  const cookieWall = (back) => state.cookie.consent ? "" : `<div class="overlay"><div class="box" role="dialog"><h2>We value your privacy</h2><p>We use cookies to improve this site.</p><form method="post" action="/cookie/consent"><input type="hidden" name="back" value="${back}"><button name="choice" value="all">Accept all cookies</button> <button name="choice" value="essential">Only essential cookies</button></form></div></div>`;
+  route("GET", "/cookie", (c) => c.send(200, shell("Acme Freight", `${cookieWall("/cookie")}<h1>Acme Freight</h1><nav><a href="/cookie">Home</a><a href="/cookie/rates">Shipping rates</a></nav><p>Reliable freight since 1998.</p>`)));
+  // A real wall: the rates are not on the page until a cookie choice is made.
+  route("GET", "/cookie/rates", (c) => c.send(200, shell("Shipping rates", state.cookie.consent === null ? `${cookieWall("/cookie/rates")}<h1>Shipping rates</h1><p>Choose your cookie settings to see our rates.</p>` : `<h1>Shipping rates</h1><nav><a href="/cookie">Home</a><a href="/cookie/rates">Shipping rates</a></nav><table><tr><th>Service</th><th>Price</th></tr><tr><td>Economy</td><td>$4.25</td></tr><tr><td>Standard</td><td>$7.80</td></tr><tr><td>Express</td><td>$12.50</td></tr></table>`)));
+  route("POST", "/cookie/consent", (c) => { state.cookie.consent = c.form.get("choice") === "essential" ? "essential" : "all"; c.redirect(c.form.get("back") === "/cookie/rates" ? "/cookie/rates" : "/cookie"); });
 
   route("GET", "/promo", (c) => c.send(200, shell("Outfitters", `<h1>Outfitters</h1>
 ${[["trail-pack", "Trail Pack"], ["tent", "Two-person Tent"], ["stove", "Camp Stove"]].map(([id, n]) => `<div class="card"><strong>${n}</strong> <button data-id="${id}">Add to wishlist</button></div>`).join("")}
@@ -401,10 +402,11 @@ document.getElementById("save").onclick=function(){var p=new URLSearchParams();d
       if (PRODUCTS[id]) S().cart[id] = (S().cart[id] ?? 0) + q;
       c.redirect(`${b}/cart`);
     });
+    route("POST", `${b}/cart/remove`, (c) => { delete S().cart[c.form.get("id")]; c.redirect(`${b}/cart`); });
     route("POST", `${b}/cart/coupon`, (c) => { S().coupon = (c.form.get("code") ?? "").trim().toUpperCase() || null; c.redirect(`${b}/cart`); });
     route("GET", `${b}/cart`, (c) => {
       const t = totals(S()), lines = Object.entries(S().cart);
-      c.send(200, shell("Cart", `<h1>Your cart</h1>${lines.length ? `<table><tr><th>Item</th><th>Qty</th><th>Price</th></tr>${lines.map(([id, q]) => `<tr><td>${PRODUCTS[id][0]}</td><td>${q}</td><td>${money(PRODUCTS[id][1] * q)}</td></tr>`).join("")}</table>
+      c.send(200, shell("Cart", `<h1>Your cart</h1>${lines.length ? `<table><tr><th>Item</th><th>Qty</th><th>Price</th><th></th></tr>${lines.map(([id, q]) => `<tr><td>${PRODUCTS[id][0]}</td><td>${q}</td><td>${money(PRODUCTS[id][1] * q)}</td><td><form method="post" action="${b}/cart/remove"><input type="hidden" name="id" value="${id}"><button>Remove</button></form></td></tr>`).join("")}</table>
 <form method="post" action="${b}/cart/coupon"><label>Coupon code <input name="code" value="${esc(S().coupon)}"></label><button>Apply coupon</button></form>
 <p>Subtotal: ${money(t.sub)}</p>${t.discount ? `<p>Discount (${esc(S().coupon)}): -${money(t.discount)}</p>` : S().coupon ? `<p class="err">Coupon ${esc(S().coupon)} is not valid.</p>` : ""}<p>Shipping: ${money(t.shipping)}</p><p><strong>Total: ${money(t.total)}</strong></p><a class="btn" href="${b}/checkout">Proceed to checkout</a>` : "<p>Your cart is empty.</p>"}`));
     });
@@ -465,7 +467,7 @@ document.querySelectorAll("[data-id]").forEach(function(b){b.onclick=function(){
   });
   route("GET", /^\/expenses\/r\/(\d+)$/, (c, m) => {
     const r = rep(m); if (!r) return c.send(404, shell("Not found", "<h1>Not found</h1>"));
-    c.send(200, shell(r.title, `<h1>${esc(r.title)}</h1><p>Status: ${r.status}</p><table><tr><th>Date</th><th>Category</th><th>Amount</th></tr>${r.lines.map((l) => `<tr><td>${l.date}</td><td>${l.category}</td><td>${money(l.cents)}</td></tr>`).join("")}</table><p>Total: ${money(repTotal(r))}</p>
+    c.send(200, shell(r.title, `<h1>${esc(r.title)}</h1><p>Status: ${r.status}</p><table><tr><th>Date</th><th>Category</th><th>Amount</th></tr>${r.lines.map((l, i) => `<tr><td>${l.date}</td><td>${l.category}</td><td>${money(l.cents)}</td>${r.status === "Draft" ? `<td><form method="post" action="/expenses/r/${m[1]}/remove"><input type="hidden" name="line" value="${i}"><button>Remove line</button></form></td>` : ""}</tr>`).join("")}</table><p>Total: ${money(repTotal(r))}</p>
 ${r.status === "Draft" ? `<p><a href="/expenses/r/${m[1]}/add">Add line</a></p><form method="post" action="/expenses/r/${m[1]}/submit"><button>Submit for approval</button></form>` : `<p class="ok">Submitted for approval.</p>`}<p><a href="/expenses/reports">All reports</a></p>`));
   });
   const lineForm = (id, err = "") => shell("Add line", `<h1>Add expense line</h1>${err ? `<div class="err" role="alert">${esc(err)}</div>` : ""}<form method="post" action="/expenses/r/${id}/add"><label>Date (YYYY-MM-DD) <input name="date"></label><label>Category <select name="category">${["Travel", "Meals", "Lodging", "Other"].map((o) => `<option>${o}</option>`).join("")}</select></label><label>Amount <input name="amount"></label><button>Add line</button></form>`);
@@ -476,6 +478,12 @@ ${r.status === "Draft" ? `<p><a href="/expenses/r/${m[1]}/add">Add line</a></p><
     if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date ?? "")) return c.send(200, lineForm(m[1], "Date must be in YYYY-MM-DD format."));
     if (!/^\d+(\.\d{1,2})?$/.test(f.amount ?? "") || toCents(f.amount) <= 0) return c.send(200, lineForm(m[1], "Amount must be a positive number."));
     r.lines.push({ date: f.date, category: f.category, cents: toCents(f.amount) });
+    c.redirect(`/expenses/r/${m[1]}`);
+  });
+  route("POST", /^\/expenses\/r\/(\d+)\/remove$/, (c, m) => {
+    const r = rep(m);
+    const i = Number(c.form.get("line") ?? "x");
+    if (r && r.status === "Draft" && Number.isInteger(i) && i >= 0) r.lines.splice(i, 1);
     c.redirect(`/expenses/r/${m[1]}`);
   });
   route("POST", /^\/expenses\/r\/(\d+)\/submit$/, (c, m) => {

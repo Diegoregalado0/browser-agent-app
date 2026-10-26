@@ -32,7 +32,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { mergeConfig } from "../../src/config-core.js";
-import { runMeta, summarize, taskMetrics } from "./metrics.js";
+import { answerText, finalAnswer, runMeta, summarize, taskMetrics } from "./metrics.js";
 
 const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
 const RESULTS_DIR = join(PROJECT_DIR, "bench-results");
@@ -647,7 +647,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
 
   const steps = events.filter((e) => e.type === "tool_call").length;
   const usage = [...events].reverse().find((e) => e.type === "usage");
-  const reply = events.filter((e) => e.type === "reply").map((e) => e.text).join("\n");
+  const reply = answerText(events);
+  const finalReply = finalAnswer(events);
 
   const { url: finalUrl, pageText } = await readActiveTab(cdp, sessionId);
 
@@ -658,7 +659,7 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
     verdict = { ok: false, reason: stalled ? `stalled: no events for ${stallMs / 1000}s, stopped` : `timed out after ${timeoutMs / 1000}s` };
   } else {
     try {
-      verdict = task.check({ finalUrl, pageText, reply, events });
+      verdict = task.check({ finalUrl, pageText, reply, finalReply, events });
     } catch (err) {
       verdict = { ok: false, reason: `checker threw: ${err.message}` };
     }
