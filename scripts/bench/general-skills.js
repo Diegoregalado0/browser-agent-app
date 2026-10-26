@@ -32,7 +32,7 @@ export const PROMPTS = [
     const t = plain(r);
     return words(r) < 40 && /lisbon/i.test(t) && /12 june|june 12/i.test(t) && /12000|12k/i.test(t);
   }, "The team picked a Lisbon conference hall for Friday 12 June, with a $12,000 budget for catering and travel for twenty guests; Marta sends invitations next week."],
-  ["word-limit", "Describe the ocean in one sentence of at most 15 words.", (r) => words(r) <= 15 && /ocean|sea|water|wave/i.test(r) && (r.trim().match(/[.!?](\s|$)/g) ?? []).length <= 1, "The ocean is a vast, restless body of salt water covering most of Earth."],
+  ["word-limit", "Describe the ocean in one sentence of at most 15 words.", (r) => words(r) >= 5 && words(r) <= 15 && (r.trim().match(/[.!?](\s|$)/g) ?? []).length <= 1, "The ocean is a vast, restless body of salt water covering most of Earth."],
   ["translate", "Translate into Spanish, output only the translation: \"The library opens at nine in the morning.\"", (r) => /biblioteca/i.test(r) && /nueve/i.test(r), "La biblioteca abre a las nueve de la mañana."],
   ["email", "Write a reply of at most three sentences that declines a meeting on Thursday and proposes Friday at 10 am instead. Output only the reply.", (r) => /friday/i.test(r) && /\b10\b/.test(r) && (r.trim().match(/[.!?](\s|$)/g) ?? []).length <= 3, "Thanks for the invite, but I can't make Thursday. Would Friday at 10 am work for you instead?"],
 ];
@@ -41,8 +41,11 @@ const args = process.argv.slice(2);
 const opt = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 
 if (args.includes("--self-check")) {
+  // Right answers worded differently from the reference must pass too.
+  const ALSO_RIGHT = { "word-limit": "The vast, salty blue expanse covers most of Earth's surface." };
   for (const [id, , check, reference] of PROMPTS) {
     if (!check(reference)) throw new Error(`checker ${id} rejects its reference answer`);
+    if (ALSO_RIGHT[id] && !check(ALSO_RIGHT[id])) throw new Error(`checker ${id} rejects a right answer: ${ALSO_RIGHT[id]}`);
     if (check("I don't know.")) throw new Error(`checker ${id} accepts a non-answer`);
   }
   console.log(`general-skills checkers passed (${PROMPTS.length} prompts)`);
