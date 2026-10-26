@@ -139,3 +139,26 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
 - Follow-up queued with pointer, refNames, continueIntent, freshBase: Holo4 reruns wizard,
   sitemap-phone, newsletter-modal; Zigger reruns newsletter-modal. The main Holo4 / Zigger /
   Holo3.1 runs keep the same three flags, so they stay comparable.
+- Correction, benchmark bug 3 (fixtures v3): fx-newsletter-modal could never pass. .overlay set
+  display:flex, which overrides the hidden attribute, so the popup showed from the first paint
+  and Close changed nothing on screen; every Close click in every run (Zigger and Holo4)
+  correctly reported no change. My earlier reading (a delayed popup and a stale change-report
+  base) was wrong: I had checked the attribute in Chrome, not what was displayed. freshBase
+  stays an unproven experiment; this task was not evidence for it. Fixed and asserted in
+  fixtures-check; Holo4 reruns the task on v3.
+- rowContext (fx-stale-list, both models): identical "Archive" buttons gain their list item's
+  text when their name repeats. A first version that added row text to every control grew
+  Hacker News's outline 80% and truncated Wikipedia sooner; the kept version (repeated names
+  only, list item or table cell text) changes 3 of 6 public pages (+9% books.toscrape, +21% HN,
+  Wikipedia sort buttons name their column) and the others not at all.
+- Holo4 + pointer, refNames, continueIntent (no coordinate fix, fixtures v1/v2): 14/28
+  (dev 11/18, held-out 3/10) vs Zigger's baseline 22-24/28. Model errors seen: answers from a
+  screenshot of the wrong tab or page (directory decoy twice, previous task's page once),
+  invented refs (link_2, req_N, oCVj5a), stops before "Load more".
+- llama-server hit "CUDA error: an illegal memory access" once (17:53, Holo4, the request right
+  after a page load); the router restarted the model in 18 s. First in more than a day of runs;
+  fx-delayed-report, in flight, is rerun.
+- Generality: each fix targets a mechanism, not a task, but four came from held-out failures
+  (sitemap, newsletter, stale-list, wizard), so the held-out split no longer judges them
+  independently. A fresh set of sites written without sight of the fixes, plus the live-site
+  suites, is needed before any fix becomes a default.
