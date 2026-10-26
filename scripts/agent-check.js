@@ -27,7 +27,7 @@ import { TaskMetrics } from "../src/metrics.js";
 import { speedParts } from "../ui/speed.js";
 import { Browser, actionProblem, formatHeaders } from "../src/browser-tools.js";
 import { transcriptOf } from "../src/session-format.js";
-import { readPageScript, describeTargetScript } from "../src/page-scripts.js";
+import { readPageScript, describeTargetScript, hitTestScript } from "../src/page-scripts.js";
 import { siteGuide } from "../src/site-guides.js";
 import { OUTPUT_MAX_CHARS, stripGuard } from "../src/canvas.js";
 
@@ -1223,6 +1223,25 @@ assert.match(outline, /type=password value=\[hidden\]/);
 assert.doesNotMatch(outline, /hunter2/, "read_page showed a password");
 assert.doesNotMatch(describeTargetScript("ref_2", 0, 0) ?? "", /hunter2/, "a target description showed a password");
 for (const name of ["window", "innerWidth", "innerHeight", "scrollX", "scrollY", "location", "document"]) delete globalThis[name];
+
+// A button inside a web component's open shadow root is not "covered" by the component's
+// host (the document reports only the host at that point); a real overlay still is.
+{
+  const rect = () => ({ left: 10, top: 10, width: 80, height: 30 });
+  const button = { tagName: "BUTTON", getBoundingClientRect: rect, contains: (n) => n === button, labels: [] };
+  const overlay = { tagName: "DIV", id: "ad", contains: () => false };
+  let inner = button;
+  const host = { tagName: "SUPPORT-CARD", contains: () => false, shadowRoot: { elementFromPoint: () => inner } };
+  let outer = host;
+  button.ownerDocument = { elementFromPoint: () => outer };
+  globalThis.window = { __agentRefStore: { map: new Map([["ref_1", { deref: () => button }]]) } };
+  assert.equal(hitTestScript("ref_1"), null, "a control in a shadow root counted as covered by its host");
+  inner = overlay;
+  assert.equal(hitTestScript("ref_1"), "div#ad", "an overlay inside the component still covers it");
+  outer = overlay;
+  assert.equal(hitTestScript("ref_1"), "div#ad", "a page overlay still covers it");
+  delete globalThis.window;
+}
 
 // Network recording hides passwords and tokens in addresses and bodies too, and a filter
 // cannot probe a hidden value.

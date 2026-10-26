@@ -383,7 +383,16 @@ export function hitTestScript(ref) {
   const el = window.__agentRefStore?.map.get(ref)?.deref();
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  const top = el.ownerDocument.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  let top = el.ownerDocument.elementFromPoint(x, y);
+  // The document reports only the host of an open shadow root; look inside for the element
+  // really at the point, or a control in a web component counts as covered by its own host.
+  while (top?.shadowRoot) {
+    const inner = top.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === top) break;
+    top = inner;
+  }
   if (!top || el === top || el.contains(top) || top.contains(el)) return null;
   if (el.labels && [...el.labels].some((l) => l === top || l.contains(top))) return null;
   const desc = top.tagName.toLowerCase() + (top.id ? `#${top.id}` : "") + (top.src ? ` src=${String(top.src).slice(0, 80)}` : "");
