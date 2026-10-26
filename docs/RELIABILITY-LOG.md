@@ -218,3 +218,15 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   on Load more ...") instead of acting.
 - Bugs fixed during the night: safety-check memory keyed on ref names (551381c), wrapped links
   clicked between their lines (26cbe75), fixture root index (v5, 6364f65).
+- Exp 3 (Holo4, temperature 0.3, presence 0): 20/28, no change. General skills (15 prompts x
+  3, word-limit checker corrected): Zigger 39/45, Holo4 39/45, both missing only mental
+  arithmetic (17x23+154 answered 549 / 405; a discounted price wrong) -> a calculator for the
+  agent is worth considering.
+- Exp 4: Holo4-35B-A3B in H Company's own harness (holo-desktop-cli 1.0.4, self-hosted through
+  a relay, thinking on and temperature 0.8 as holo requests, image-min-tokens 1024, a 1280x800
+  virtual screen, unprivileged user): 24/28 (dev 16/18, held-out 8/10), 256 s per task;
+  23/28 if fx-stale-list (951 s, over Browsby's 900 s) is not counted. Failures: support message
+  sent twice, newsletter popup, voucher redeemed three times (the site allowed it; fixed in v5),
+  two extra empty expense drafts. It passed tasks Holo4 failed in every Browsby run
+  (library-hold, desk-triage, stale-list). Its harness differs from Browsby's runs in screen
+  size (1280x800 vs 394x429, now fixed for headless runs), thinking, and its own tools.
