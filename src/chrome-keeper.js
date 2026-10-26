@@ -52,7 +52,10 @@ const chrome = spawn(
     // (navigator.webdriver), which the shipped extension in a person's own Chrome does not;
     // without this, search engines answer every query with a CAPTCHA.
     "--disable-blink-features=AutomationControlled",
-    ...(HEADLESS ? ["--headless=new"] : []),
+    // Headless Chrome's default window is 800x600, which with the side panel open leaves the
+    // page 394x429 (every benchmark run on the server saw that): far narrower than a real
+    // screen. Use a common laptop size instead (BROWSBY_WINDOW_SIZE=w,h to change it).
+    ...(HEADLESS ? ["--headless=new", `--window-size=${process.env.BROWSBY_WINDOW_SIZE || "1440,900"}`] : []),
   ],
   { stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
 );
