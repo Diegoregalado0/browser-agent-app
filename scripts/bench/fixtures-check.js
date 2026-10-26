@@ -19,7 +19,7 @@ const posts = async (...calls) => { for (const [p, b] of calls) await post(p, b)
 
 // ---------- crawl ----------
 async function crawl() {
-  const seen = new Set(), queue = [origin + "/"];
+  const seen = new Set(), queue = [origin + "/__sitemap"];
   let count = 0;
   while (queue.length) {
     const url = queue.shift();
@@ -177,6 +177,8 @@ async function main() {
 
   // Pages: what an agent sees must match what the task assumes.
   fx.reset();
+  // No page lists the other test sites: an agent looking for a home page finds nothing.
+  expect((await get("/")).status === 404, "the site root lists the test sites");
   // The newsletter popup is shown and closed with the hidden attribute; .overlay sets display,
   // which beats the browser's own [hidden] rule, so the page must restore it (v1 and v2 had
   // this bug, and no agent could pass fx-newsletter-modal).

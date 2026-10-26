@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 
 // Bump when a page, rule or data value changes, so results from different versions are
 // never compared as if the fixtures were the same.
-export const FIXTURES_VERSION = "4";
+export const FIXTURES_VERSION = "5";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const money = (cents) => `$${(cents / 100).toFixed(2)}`;
@@ -180,8 +180,10 @@ export async function startFixtures({ port = 0 } = {}) {
     });
   };
 
-  // A sitemap of the fixture sites, for the self-test crawl; prompts link straight to sites.
-  route("GET", "/", (c) => c.send(200, shell("Fixtures", `<h1>Fixtures v${FIXTURES_VERSION}</h1><ul>${[
+  // A sitemap of the fixture sites, for the self-test crawl only: at "/" it was an index of
+  // every test site, where an agent that looked for a home page (as on a real site) wandered
+  // off (Zigger on fx-http500). "/" is now not found, like any unknown page.
+  route("GET", "/__sitemap", (c) => c.send(200, shell("Fixtures", `<h1>Fixtures v${FIXTURES_VERSION}</h1><ul>${[
     "register", "support", "wizard", "rsvp", "docs", "company", "people", "orders", "sales", "stock", "cookie", "promo", "compare", "terms", "report",
     "catalog", "prefs", "voucher", "hours", "rates", "shop", "store", "profile", "status", "todo", "expenses", "library", "desk",
   ].map((s) => `<li><a href="/${s}">${s}</a></li>`).join("")}</ul>`)));
