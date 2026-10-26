@@ -202,3 +202,19 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   "no service" quote, "no reference number" on a page showing one, 5 PM for 17:45), telling
   the user how instead of doing it, no retry after an error page, a missing cart item.
   Same conditions: Zigger 26, Holo4 17, Holo3.1 16.
+
+### Fixtures v4 comparison (2026-10-25/26 overnight, all 28 tasks, one run each, ai-linux)
+| Run | Passed | Dev | Held-out | s/task | tokens/task |
+|---|---|---|---|---|---|
+| Zigger + pointer, refNames, continueIntent, freshBase, rowContext | 27 | 17/18 | 10/10 | 241 | 71k |
+| Holo4 + the same + coords1000 (baseline) | 20 | 13/18 | 7/10 | 225 | 53k |
+| Exp 1: Holo4 baseline + thinking | 16 | 10/18 | 6/10 | 211 | 42k |
+| Exp 2: Holo4 baseline, image-min-tokens 1024 | 23 | 14/18 | 9/10 | 290 | 76k |
+- Zigger's only miss, fx-http500, was partly a benchmark flaw (the fixture root indexed every
+  test site; fixed in v5) and partly Zigger not retrying the error page.
+- Resolution was Holo4's largest handicap (+3): with more image tokens it read the directory
+  correctly (no more Priya Abbott decoy) and passed the iframe calculator.
+- Thinking hurt Holo4 in Browsby (-4): it often answered with instructions to the user ("Click
+  on Load more ...") instead of acting.
+- Bugs fixed during the night: safety-check memory keyed on ref names (551381c), wrapped links
+  clicked between their lines (26cbe75), fixture root index (v5, 6364f65).
