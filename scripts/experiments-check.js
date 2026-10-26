@@ -414,6 +414,23 @@ const outline = (tree) => ({ url: "https://a.test/", title: "T", viewport: "1280
     else assert.match(out, /No change among the controls in view\.$/);
   }
 }
+// httpStatus: a page that loaded with a 500 says so (with the hint to load it again); a frame's
+// error does not count as the page's; off, the result is unchanged.
+{
+  const page = scriptedPage({ readPageScript: () => outline("") });
+  Object.assign(page.transport, { navigate: async () => null, openTab: async () => "t1" });
+  const browser = new Browser(page.transport);
+  const docs = (status) => ({ entries: [{ type: "Document", url: "https://a.test/", status, statusText: "Internal Server Error" }, { type: "Document", url: "https://ads.test/frame", status: 503 }], byRequestId: new Map(), seq: 2 });
+  for (const on of [false, true]) {
+    browser.experiments = on ? { httpStatus: true } : {};
+    browser.networkLogs.set("t1", docs(500));
+    const out = await browser.run("navigate", { url: "https://a.test/" });
+    if (on) assert.match(out, /The server answered HTTP 500 Internal Server Error: a server error, often temporary; loading the page again once may help\./);
+    else assert.doesNotMatch(out, /HTTP 500/);
+  }
+  browser.networkLogs.set("t1", docs(200));
+  assert.doesNotMatch(await browser.run("navigate", { url: "https://a.test/" }), /HTTP/, "the frame's 503 was reported as the page's");
+}
 // sampling: per-request settings reach a Local server's request body, and only a Local one;
 // bad values are refused.
 {

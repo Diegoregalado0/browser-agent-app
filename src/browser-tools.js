@@ -949,6 +949,17 @@ export class Browser {
     return input.action === "screenshot" ? result : result + this.#takeNotes() + (await this.#changes());
   }
 
+  // The httpStatus experiment: a page that loaded with an error status says so ("Loaded:
+  // Error" alone does not tell a 500, often temporary, from a page that is gone). The status
+  // is the page document's own, matched by address so an embedded frame's does not count.
+  #statusNote(url) {
+    if (!this.experiments.httpStatus) return "";
+    const doc = this.networkLogs.get(this.currentId)?.entries.findLast((e) => e.type === "Document" && e.url === url);
+    if (!(doc?.status >= 400)) return "";
+    const what = `\nThe server answered HTTP ${doc.status}${doc.statusText ? ` ${doc.statusText}` : ""}`;
+    return doc.status >= 500 ? `${what}: a server error, often temporary; loading the page again once may help.` : `${what}.`;
+  }
+
   #takeNotes() {
     return this.stepNotes.length ? `\n${this.stepNotes.splice(0).join("\n")}` : "";
   }
@@ -1196,7 +1207,7 @@ export class Browser {
         this.cssPerPixel = null;
         await this.waitForLoad();
         const page = await this.currentPage();
-        const loaded = `Loaded: ${shortUrl(page.title)} | ${shortUrl(page.url)}${note}`;
+        const loaded = `Loaded: ${shortUrl(page.title)} | ${shortUrl(page.url)}${note}${this.#statusNote(page.url)}`;
         const text = await this.evaluate("document.body?.innerText.slice(0, 3000) ?? ''").catch(() => "");
         if (!isBotCheck(page.url, page.title, text)) {
           this.views.delete(this.currentId);

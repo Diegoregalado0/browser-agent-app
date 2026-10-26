@@ -37,6 +37,8 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 //   freshBase    the change report after an action compares with the page as the model last
 //                saw it (a screenshot or read_page), so a popup that opened and closed in
 //                between is reported instead of "No change"
+//   httpStatus   a page that loads with an HTTP error status says so in the navigate result
+//                (with a note that a 5xx is often temporary)
 //   textChanges  a change report also quotes new page text (up to 3 lines) that appeared after
 //                the action, such as "Saved." or an error message
 //   coords1000   coordinates (clicks, and the boxes in the view) use a 0-1000 grid over the
@@ -46,7 +48,7 @@ export const LOCAL_KINDS = ["gpu", "server", "ollama"];
 // The sampling settings that may be sent per request (config.sampling), with their bounds.
 export const SAMPLING_RANGES = { temperature: [0, 2], top_p: [0, 1], top_k: [0, 200], min_p: [0, 1], presence_penalty: [-2, 2], repeat_penalty: [0.5, 2] };
 
-export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames", "continueIntent", "freshBase", "coords1000", "rowContext", "textChanges"];
+export const EXPERIMENTS = ["clickTarget", "staleRefs", "verifyDone", "progress", "settle", "marks", "pointer", "refNames", "continueIntent", "freshBase", "coords1000", "rowContext", "textChanges", "httpStatus"];
 
 export const DEFAULTS = {
   provider: "openai",
