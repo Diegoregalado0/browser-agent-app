@@ -5,7 +5,8 @@
 // which is how two impassable pages went unnoticed (a popup that could not close, and a wizard
 // that sent a finished user back to step 1). A click on a covered control fails here as it
 // would for an agent, so overlays are checked the way they behave on screen.
-//   node scripts/bench/fixtures-ui-check.js [fx-task ...]      (CHROME=<path> picks the browser)
+//   node scripts/bench/fixtures-ui-check.js [--headed] [fx-task ...]   (CHROME=<path> picks the browser)
+// --headed shows the Chrome window, to watch the walkthrough.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +22,8 @@ const { origin, altOrigin, state } = fx;
 const chromePath = CHROMES.find((p) => p && existsSync(p));
 if (!chromePath) throw new Error("No Chrome found; set CHROME to its path.");
 const profile = mkdtempSync(join(tmpdir(), "fx-ui-"));
-const chrome = spawn(chromePath, ["--headless=new", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", `--window-size=${VIEW.width},${VIEW.height}`, "about:blank"], { stdio: "ignore" });
+const headed = process.argv.includes("--headed");
+const chrome = spawn(chromePath, [...(headed ? [] : ["--headless=new"]), `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", `--window-size=${VIEW.width},${VIEW.height}`, "about:blank"], { stdio: "ignore" });
 let port;
 for (let i = 0; i < 100 && !port; i++) {
   try { port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]; } catch { await sleep(100); }
@@ -52,6 +54,14 @@ const link = (label) => byText("a", label);
 // A control inside the element of `within` (a card, a row) whose text contains `text`.
 const inside = (within, text, sel) => `[...document.querySelectorAll(${JSON.stringify(within)})].find((e) => e.textContent.includes(${JSON.stringify(text)}))?.querySelector(${JSON.stringify(sel)})`;
 
+// A link with target=_blank leaves its new tab in front, and input goes to the focused tab:
+// close the other tabs and bring this one back.
+async function front() {
+  for (const t of await (await fetch(`http://127.0.0.1:${port}/json`)).json()) {
+    if (t.type === "page" && t.id !== page.id) await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`);
+  }
+  await send("Page.bringToFront");
+}
 async function settled() {
   for (let i = 0; i < 50; i++) {
     if ((await ev("document.readyState").catch(() => "")) === "complete") return;
@@ -233,6 +243,7 @@ const FLOWS = {
     await open("/terms");
     await click(link("Setup Guide"));
     await sleep(500);
+    await front();
     await open("/terms/guide");
     const code = /[A-Z]+-\d{4}/.exec(await text())[0];
     await open("/terms");
@@ -409,12 +420,13 @@ const FLOWS = {
 };
 
 // ---------- run ----------
-const only = process.argv.slice(2);
+const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const failures = [];
 for (const task of TASKS.filter((t) => !only.length || only.includes(t.id))) {
   const flow = FLOWS[task.id];
   if (!flow) { failures.push(`${task.id}: no walkthrough`); console.log(`FAIL ${task.id}: no walkthrough`); continue; }
   await task.setup();
+  await front();
   try {
     const reply = await flow();
     const v = task.check({ finalUrl: await ev("location.href"), pageText: "", reply, finalReply: reply, events: [] });

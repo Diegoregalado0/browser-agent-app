@@ -188,3 +188,8 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   checker on what the pages show). Pending the go-ahead to run Chrome.
 - Fixtures v4 is not used by the runs queued tonight (they load v3 at start, so Holo4, Zigger
   and Holo3.1 stay comparable); the next comparison round reruns every model on v4.
+- fixtures-ui-check.js run on the Mac (approved), headed and headless: all 28 tasks pass
+  through the pages with real input on fixtures v4. With the old bugs put back it fails the
+  popup ("stays on screen after Close"), the wizard ("Step 1 of 4" after finishing) and the
+  cookie wall ("rates readable behind the wall"). Harness fix found on the way: links that
+  open a new tab leave it focused, so the walkthrough closes extra tabs before input.
