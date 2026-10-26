@@ -26,7 +26,9 @@ mkdirSync(dir, { recursive: true });
 // Runs a command as the agent's user with its desktop environment; resolves with its output.
 const asAgent = (cmd, cmdArgs, { timeoutMs } = {}) => new Promise((resolve) => {
   const env = ["DISPLAY=127.0.0.1:99", `XAUTHORITY=/home/${user}/.xauth-holo`, "XDG_SESSION_TYPE=x11"];
-  const child = spawn("sudo", ["-n", "-u", user, "-H", "env", ...env, cmd, ...cmdArgs], { stdio: ["ignore", "pipe", "pipe"] });
+  // In the agent's home: its screenshot tool (scrot) saves into the working directory, and the
+  // caller's directory is closed to that user (a first run saw nothing and fell back to curl).
+  const child = spawn("sudo", ["-n", "-u", user, "-H", "env", "-C", `/home/${user}`, ...env, cmd, ...cmdArgs], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
@@ -60,12 +62,16 @@ for (const task of tasks) {
   const wallMs = Date.now() - started;
   writeFileSync(`${dir}/${task.id}.log`, out);
   const reply = answerFrom(out);
+  // How the run worked, so a blind or shell-driven run cannot pass as a browser run.
+  const screenshotFailures = (out.match(/Saving to file .* failed|Failed to capture observation/g) ?? []).length;
+  const shellCommands = (out.match(/run_command_desktop\(command=/g) ?? []).length;
+  const shellHttp = (out.match(/run_command_desktop\(command=.{0,3}(curl|wget|python)/g) ?? []).length;
   let verdict;
   try { verdict = task.check({ finalUrl: "", pageText: "", reply, finalReply: reply, events: [] }); } catch (err) { verdict = { ok: false, reason: `checker threw: ${err.message}` }; }
   const timedOut = wallMs >= maxTime * 1000;
-  rows.push({ task: task.id, split: task.split, category: task.category, success: verdict.ok, reason: timedOut && !verdict.ok ? `timed out after ${maxTime}s` : verdict.reason, reply, exit: code, wallMs });
+  rows.push({ task: task.id, split: task.split, category: task.category, success: verdict.ok, reason: timedOut && !verdict.ok ? `timed out after ${maxTime}s` : verdict.reason, reply, exit: code, wallMs, screenshotFailures, shellCommands, shellHttp });
   save();
-  console.log(`${verdict.ok ? "PASS" : "FAIL"} ${task.id} ${Math.round(wallMs / 1000)}s ${verdict.ok ? "" : verdict.reason.slice(0, 160)}`);
+  console.log(`${verdict.ok ? "PASS" : "FAIL"} ${task.id} ${Math.round(wallMs / 1000)}s shell=${shellCommands} http=${shellHttp} blind=${screenshotFailures} ${verdict.ok ? "" : verdict.reason.slice(0, 160)}`);
 }
 const passed = rows.filter((r) => r.success).length;
 console.log(`${passed}/${rows.length} passed; results ${dir}.json`);
