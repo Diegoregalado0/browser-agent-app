@@ -248,3 +248,6 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   clicked by eyeballed coordinates ~25 px off at the realistic window size, never reached Save)
   and http500 (no retry; httpStatus runs next). Queued: Zigger + httpStatus, + calculator, fixed
   harness run, Zigger + marks.
+- Zigger + fixes + httpStatus (fixtures v5): 27/28 (dev 17/18, held-out 10/10), 212 s, 57k.
+  One navigation named an HTTP error (fx-http500's 500); Zigger loaded the page again and
+  passed, the first v5 pass of that task. Only failure: div-controls (eyeballed coordinates).
