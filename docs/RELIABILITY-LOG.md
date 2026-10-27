@@ -243,3 +243,8 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   24/28 (held-out 10/10, 212 s, 77k). With a realistic window the two are within noise.
 - New experiments, queued on Zigger one at a time: textChanges (844306c), httpStatus (991a311),
   calculator (0af5d7e).
+- Zigger + fixes + textChanges (fixtures v5): 26/28 (dev 16/18, held-out 10/10), 213 s, 58k; 11
+  change reports quoted new page text; flaky-save now passes. Failures: div-controls (Zigger
+  clicked by eyeballed coordinates ~25 px off at the realistic window size, never reached Save)
+  and http500 (no retry; httpStatus runs next). Queued: Zigger + httpStatus, + calculator, fixed
+  harness run, Zigger + marks.
