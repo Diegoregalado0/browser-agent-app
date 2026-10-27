@@ -251,3 +251,14 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
 - Zigger + fixes + httpStatus (fixtures v5): 27/28 (dev 17/18, held-out 10/10), 212 s, 57k.
   One navigation named an HTTP error (fx-http500's 500); Zigger loaded the page again and
   passed, the first v5 pass of that task. Only failure: div-controls (eyeballed coordinates).
+- Zigger + fixes + calculator (v5): 25/28; calculate was called once (sales-sum) in the run, so
+  the tool is barely used as described; failures div-controls, http500 (no httpStatus), and
+  desk-triage (also changed a ticket it was told to leave alone).
+- Zigger + fixes + marks (v5): 25/28 (held-out 9/10). div-controls passed (labels on the
+  screenshot tied clicks to refs); failed flaky-save, http500, library-hold. Within noise.
+- Holo4 in H Company's harness, fixed (v5, screenshots working, verified from its logs: 96 GUI
+  clicks, 32 type-at actions, 28 answers, no shell commands, no screenshot failures): 28/28,
+  192 s per task, none over 900 s. The best result of any setup. What differs from Holo4 in
+  Browsby (24/28 on v5): thinking on, H Company's prompts and tools (click, type-at, an explicit
+  answer tool; a reply without a tool call is told to call one, so a turn cannot end the task
+  by announcing a step), and full 1280x800 desktop screenshots. Single run.
