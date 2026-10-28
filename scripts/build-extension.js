@@ -89,7 +89,7 @@ const result = await build({
   logLevel: "warning",
 });
 
-if (!INTERNAL && Object.keys(result.metafile.inputs).some((f) => /human-input|internal-settings|debug-log|ghost-cursor|bezier-js/.test(f))) {
+if (!INTERNAL && Object.keys(result.metafile.inputs).some((f) => /human-input|internal-settings|debug-log|trajectory|ghost-cursor|bezier-js/.test(f))) {
   throw new Error("Internal-build code reached the store build");
 }
 

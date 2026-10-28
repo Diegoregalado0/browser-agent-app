@@ -262,3 +262,19 @@ All checked in scripts/experiments-check.js (off: unchanged behavior; on: the be
   Browsby (24/28 on v5): thinking on, H Company's prompts and tools (click, type-at, an explicit
   answer tool; a reply without a tool call is told to call one, so a turn cannot end the task
   by announcing a step), and full 1280x800 desktop screenshots. Single run.
+
+### Trajectory recording (preparation for fine-tuning data; branch reliability-trajectory)
+Nothing is collected or sent: recording is off by default (recordTrajectories), never in Ghost
+mode, only in internal builds, and writes local sinks only.
+- src/trajectory.js: per task, the exact messages, system prompt and tools each request sent,
+  each reply (content, stop, usage, latency, first token), tool results with error flag and
+  duration, and the end (reason, final page, outcome label "unlabeled"). Redaction before
+  storage: typed passwords (secretCalls) everywhere, secret query values and fragments, emails,
+  phones, Luhn-valid cards, mod-97-valid IBANs, bearer and API-key-like tokens, one-time codes.
+  Steps from the first sensitive site on are dropped; screenshots are placeholders unless
+  recordScreenshots; retention 30 days / 1000 records on every write.
+- Sinks: extension/trajectory-store.js (IndexedDB), scripts/trajectory-file.js (JSONL, used by
+  scripts/bench/run.js --record <dir>, labeled with the checker's verdict).
+- scripts/export-trajectories.js: success-only by default; OpenAI chat JSONL for the Qwen3.6
+  template, optional ChatML text (--chatml), review.md and a redaction report after a re-check.
+  Checked by scripts/trajectory-check.js (in npm run check).

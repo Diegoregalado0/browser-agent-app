@@ -216,9 +216,9 @@ export function formatHeaders(headers = {}) {
 // Fields that carry passwords, tokens and card details. Their values are hidden in the
 // addresses, request bodies and response bodies the model sees, in JSON
 // ("password": "...") and in query strings and form bodies (password=...).
-const SECRET_FIELD = /pass|pwd|token|secret|api[-_]?key|auth|session|csrf|xsrf|cookie|otp|cvv|cvc|card/i;
+export const SECRET_FIELD = /pass|pwd|token|secret|api[-_]?key|auth|session|csrf|xsrf|cookie|otp|cvv|cvc|card/i;
 
-function redactSecrets(text) {
+export function redactSecrets(text) {
   return text
     .replace(/("([^"\\]{1,100})"\s*:\s*)("(?:[^"\\]|\\.)*(?:"|$)|-?\d[\d.]*)/g, (m, head, key) => (SECRET_FIELD.test(key) ? `${head}"[hidden]"` : m))
     .replace(/(^|[?&#;\s])([^=&?#;\s]{1,100})=([^&#;\s]+)/g, (m, sep, key) => (SECRET_FIELD.test(key) ? `${sep}${key}=[hidden]` : m));

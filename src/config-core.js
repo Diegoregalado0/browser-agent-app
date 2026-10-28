@@ -100,6 +100,12 @@ export const DEFAULTS = {
   sensitiveSites: [],
   // Extra detail in the chat (tokens and timing per request) and in Settings.
   debugMode: false,
+  // Internal builds: record each task (what the model was sent and answered, redacted) on this
+  // computer, as material for fine-tuning data (src/trajectory.js). Off unless switched on, and
+  // never in Ghost mode; set by the benchmark (--record) and not shown in Settings.
+  // recordScreenshots keeps the screenshots in those records instead of a placeholder.
+  recordTrajectories: false,
+  recordScreenshots: false,
   // Set when the first-run setup has been finished or skipped.
   setupDone: false,
   // Remote control over the owner's Discord bot. The token never leaves settings storage;

@@ -142,7 +142,7 @@ function describeInput(name, input, secret = false) {
 
 // A call's input as it leaves the agent (the panel, the saved session) when it types into a
 // password field: the text is hidden, the rest is kept.
-function withoutSecret(input) {
+export function withoutSecret(input) {
   return { ...input, ...(input.text !== undefined && { text: "[hidden]" }), ...(input.value !== undefined && { value: "[hidden]" }) };
 }
 
@@ -424,6 +424,7 @@ export class Agent {
   // saved and the status shown. The next task waits for the release (see run).
   #finish(task) {
     if (task.metrics.input || task.metrics.output) this.emit({ type: "task_stats", text: task.metrics.summary() });
+    this.recorder?.end(this, task);
     this.ending = this.browser.endTask().catch(() => {});
     this.onHistory();
     this.emit({ type: "status", running: false });
@@ -483,6 +484,8 @@ export class Agent {
     }
 
     const tools = this.#tools(config);
+    // An optional trajectory recorder (src/trajectory.js); nothing changes without one.
+    this.recorder?.begin(this, task, { config, model, system: systemPrompt(config), tools });
     this.taskTokens = 0;
     this.loopGuard = new LoopGuard();
     this.taskMetrics = metrics;
@@ -510,6 +513,8 @@ export class Agent {
       for (let step = 0; step < config.maxSteps; step++) {
         this.#emit(signal, { type: "assistant_start" });
         let result;
+        // The history exactly as the provider is sent it, for the trajectory recorder.
+        let sent;
         let waits = 0;
         let overflows = 0;
         try {
@@ -531,7 +536,7 @@ export class Agent {
                 config,
                 system: systemPrompt(config),
                 tools,
-                messages: config.experiments?.progress ? this.#withTaskState(this.#forModel(), task, step, config) : this.#forModel(),
+                messages: (sent = config.experiments?.progress ? this.#withTaskState(this.#forModel(), task, step, config) : this.#forModel()),
                 signal,
                 onText: (delta) => (firstToken(), this.#emit(signal, { type: "text", delta })),
                 onThinking: (delta) => (firstToken(), this.#emit(signal, { type: "thinking", delta })),
@@ -571,6 +576,7 @@ export class Agent {
           throw new Error(provider.describeError(err) || err.message);
         }
         const requestMs = Date.now() - requestStarted;
+        this.recorder?.step({ messages: sent, result, ms: requestMs, firstTokenMs });
 
         let promptDropped = false;
         if (agentPrompt) {
@@ -696,6 +702,7 @@ export class Agent {
 
         const results = (task.results = []);
         await this.#runTools(calls, config, signal, results);
+        this.recorder?.toolsDone();
         await this.#addSiteGuide(results, config, signal);
         if (signal.aborted) return;
         task.results = null;
@@ -710,6 +717,7 @@ export class Agent {
     } catch (err) {
       // A stopped task has ended already (see stop); what it was waiting on is moot.
       if (signal.aborted) return;
+      this.recorder?.fail(err);
       throw err;
     } finally {
       if (this.task === task) {
@@ -746,6 +754,7 @@ export class Agent {
       }
     }
     for (const call of calls) {
+      this.recorder?.toolStart(call);
       const base = { type: "tool_result", id: call.id, nativeId: call.nativeId, name: call.name };
       if (signal.aborted || this.loopGuard.stopReason) {
         const text = signal.aborted ? "Cancelled by the user." : "Not run: the task was stopped after repeated failures.";

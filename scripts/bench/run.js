@@ -19,6 +19,9 @@
 //        --experiments a,b (agent experiments to switch on, see EXPERIMENTS in src/config-core.js)
 //        --split dev|heldout (tasks whose split matches; held-out tasks are kept for judging
 //        changes, not for tuning them)
+//        --record <dir> (record each task's trajectory, redacted, to <dir>/trajectories.jsonl,
+//        labeled with the checker's verdict; needs an internal build, BROWSBY_INTERNAL=1; see
+//        src/trajectory.js) --record-screenshots on (keep screenshots as files in <dir>)
 // The mistral provider's key comes from the BENCH_KEY environment variable, never a flag
 // (command-line args are visible to every user via `ps`), and is never logged.
 // --thinking defaults to off for ollama and openai (local/self-hosted servers, where
@@ -26,12 +29,13 @@
 // behavior, unaffected by local GPU load). Pass --thinking on to compare explicitly.
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { mergeConfig } from "../../src/config-core.js";
+import { appendTrajectories } from "../trajectory-file.js";
 import { answerText, finalAnswer, runMeta, summarize, taskMetrics } from "./metrics.js";
 
 const PROJECT_DIR = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -101,6 +105,7 @@ const REACH_WAIT_MS = 5 * 60000;
 // instead of hand-rolling a config shape.
 function buildConfig() {
   const overrides = { provider: args.provider, models: {}, keys: {}, guardModels: {}, permissionMode: "guarded", maxSteps: 60, thinking, canvasTool: canvasToolArg === "on" };
+  if (args.record) Object.assign(overrides, { recordTrajectories: true, recordScreenshots: args["record-screenshots"] === "on" });
   if (args.experiments) overrides.experiments = Object.fromEntries(args.experiments.split(",").map((name) => [name.trim(), true]));
   // --sampling presence_penalty=1.0,temperature=0.6: per-request sampling for a Local server.
   if (args.sampling) overrides.sampling = Object.fromEntries(args.sampling.split(",").map((kv) => kv.split("=")).map(([k, v]) => [k.trim(), Number(v)]));
@@ -200,6 +205,10 @@ async function runBenchmark() {
   const snapshot = join(home, "extension");
   cpSync(EXTENSION_DIR, snapshot, { recursive: true });
   process.env.BROWSBY_EXTENSION_DIR = snapshot;
+  // Only internal builds carry the recorder (the store build has none).
+  if (args.record && !existsSync(join(snapshot, "internal-build"))) {
+    throw new Error("--record needs an internal build: BROWSBY_INTERNAL=1 npm run build:extension");
+  }
 
   const { cdp, sessionId } = await startBrowser(connectChrome, browserProcesses);
 
@@ -256,6 +265,7 @@ async function runBenchmark() {
         console.error(`  -> harness error: ${err.message}`);
         result = { ok: false, reason: `harness error: ${err.message}`, steps: 0, tokensIn: 0, tokensOut: 0, wallMs: 0, metrics: null };
       }
+      if (args.record) await recordTrajectories(cdp, sessionId, { task, run, result, meta });
       const cost = costFor(args.provider, args.model, result.tokensIn, result.tokensOut);
       rows.push({
         run,
@@ -387,6 +397,30 @@ async function installBridge(cdp, sessionId) {
     })()
   `;
   return cdp.send("Runtime.evaluate", { expression: expr, returnByValue: true }, sessionId);
+}
+
+// The trajectories the panel recorded since the last drain (removed from it).
+async function drainTrajectories(cdp, sessionId) {
+  const expression = "globalThis.agentHost.trajectories ? globalThis.agentHost.trajectories.drain().then(JSON.stringify) : '[]'";
+  const { result } = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, sessionId);
+  return JSON.parse(result.value ?? "[]");
+}
+
+// Writes a finished task's trajectories (one per prompt) to --record, labeled with the
+// checker's verdict. A recording failure is reported and never fails the task.
+async function recordTrajectories(cdp, sessionId, { task, run, result, meta }) {
+  try {
+    const records = (await drainTrajectories(cdp, sessionId)).map((t) => ({
+      ...t,
+      runId,
+      outcome: { label: result.ok ? "success" : "failure", reason: result.reason },
+      bench: { task: task.id, run, split: task.split ?? null, category: task.category ?? null, commit: meta.commit, dirty: meta.dirty, serverArgs: meta.serverArgs },
+    }));
+    const kept = appendTrajectories(args.record, records);
+    console.log(`  -> recorded ${records.length} trajectory(ies) to ${args.record} (${kept} kept)`);
+  } catch (err) {
+    console.error(`  -> could not record trajectories: ${err.message}`);
+  }
 }
 
 async function setConfig(cdp, sessionId, config) {
@@ -545,6 +579,8 @@ async function runTask(cdp, sessionId, task, timeoutMs) {
   await task.setup?.();
   await cdp.send("Runtime.evaluate", { expression: 'window.__bench.send({type:"reset"})', returnByValue: true }, sessionId);
   await drainEvents(cdp, sessionId);
+  // A retried attempt's trajectories are not this run's; they are dropped unlabeled.
+  if (args.record) await drainTrajectories(cdp, sessionId);
 
   // task.prompts (an array) chains several user turns in one conversation, with no reset
   // between them, before the checker runs; task.prompt (a single string) is still the
