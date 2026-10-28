@@ -51,3 +51,8 @@ Everything left before Browsby goes to the Chrome Web Store. Not published on Gi
 ## Open product questions
 
 - [ ] Plain http for the OpenAI base URL and Ollama host: keep allowing it for non-local addresses, or only for localhost (the store frowns on unencrypted personal data).
+
+## Terms and privacy update (2026-10-25)
+
+- [ ] Review docs/TERMS-DRAFT.md (its "Review notes" list the open decisions: liability cap, publisher entity, age, arbitration) and move it to legal/TERMS.md.
+- [ ] Update legal/PRIVACY.md and legal/IN-APP.md for the Browsby GPU server: what it receives and logs, Cloudflare as a processor, and log retention (set a journald retention on ai-linux first).
